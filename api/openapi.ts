@@ -206,6 +206,18 @@ const HomeAttentionSummary = registerSchema(
         updated_at: z.string(),
       }).strict()).max(3),
     }).strict(),
+    my_retro_actions: z.object({
+      available: z.boolean(),
+      total: z.number().int().nonnegative(),
+      tasks: z.array(z.object({
+        id: z.number().int().positive(),
+        retro_id: z.number().int().positive(),
+        title: z.string(),
+        retro_title: z.string(),
+        due_date: z.string().nullable(),
+        status: z.enum(['todo', 'doing']),
+      }).strict()).max(3),
+    }).strict(),
     topics: z.array(z.object({
       id: z.number().int().positive(),
       title: z.string(),
@@ -517,6 +529,26 @@ const LegacyMessageClearRequestStatusResponse = registerSchema('LegacyMessageCle
   z.object({ state: z.literal('not_found') }).strict(),
 ]));
 const LegacyIdParams = registerSchema('LegacyIdParams', z.object({ id: idSchema }).strict());
+const WorkflowSourceSnapshotQuery = registerSchema('WorkflowSourceSnapshotQuery', z.object({
+  version: z.string().min(1).max(64),
+  source_topic_id: idSchema.optional(),
+}).strict());
+const WorkflowSourceSnapshotResponse = registerSchema('WorkflowSourceSnapshotResponse', z.object({
+  production_id: z.number().int().positive(),
+  source_topic_id: z.number().int().positive(),
+  source_topic_title: z.string(),
+  version: z.string(),
+  content: z.string(),
+  content_markdown: z.string().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+  version_timestamp: z.string().nullable(),
+  operator_name: z.string().nullable(),
+}).strict());
+const WorkflowSourceSnapshotError = registerSchema('WorkflowSourceSnapshotError', z.object({
+  message: z.string(),
+  required: z.array(z.string()).optional(),
+}).passthrough());
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
@@ -839,6 +871,24 @@ registry.registerPath({
   responses: {
     200: { description: '当前操作者和目标资料的最小化更新状态', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: ResourceUpdateRequestStatusResponse } } },
     ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/workflow/production/{id}/source-snapshot',
+  tags: ['Workflow (Legacy)'],
+  summary: '读取精确创作来源快照',
+  description: '需要 production:view，且访问范围需覆盖服务端从精确创作版本记录推导出的来源选题。客户端只指定创作记录与版本；可选 source_topic_id 仅作为一致性约束，不能选择或扩大读取范围。历史 source_topic_id 缺失、版本无唯一匹配或来源选题已无效时返回不可用，不回退当前稿。所有响应禁止缓存。',
+  security: [{ bearerAuth: [] }],
+  request: { params: LegacyIdParams, query: WorkflowSourceSnapshotQuery },
+  responses: {
+    200: { description: '精确来源选题与历史版本正文', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotResponse } } },
+    400: { description: '来源版本参数无效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotError } } },
+    401: { description: '未登录或登录已失效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotError } } },
+    403: { description: '缺少创作查看权限或来源选题访问范围', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotError } } },
+    404: { description: '来源记录缺失、历史归属未知或版本不唯一', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotError } } },
+    500: { description: '读取来源快照失败', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: WorkflowSourceSnapshotError } } },
   },
 });
 
@@ -1201,7 +1251,7 @@ export function generateOpenApiDocument() {
     info: {
       title: 'XMT API',
       version: '1.0.0',
-      description: 'XMT v1 API 契约，以及已完成 schema 化的首页关注事项/最近变化、模板、专注计时和消息状态 legacy 接口。未列出的 legacy /api/* 不在此契约内。',
+    description: 'XMT v1 API 契约，以及已登记的 legacy 接口，包括首页关注事项、模板、专注计时、消息状态与精确创作来源快照。未列出的 legacy /api/* 不在此契约内。',
     },
     servers: [{ url: '/' }],
   });

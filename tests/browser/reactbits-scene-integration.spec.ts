@@ -127,6 +127,30 @@ async function getThemeMode(page: Page) {
   return value;
 }
 
+async function assertThemeButtonState(page: Page, selectedTheme: 'light' | 'dark') {
+  const selectedButton = themeButton(page, selectedTheme);
+  const unselectedButton = themeButton(page, selectedTheme === 'light' ? 'dark' : 'light');
+  assert.equal(await selectedButton.count(), 1, `${selectedTheme} theme action is unique`);
+  assert.equal(await unselectedButton.count(), 1, `${selectedTheme === 'light' ? 'dark' : 'light'} theme action is unique`);
+  assert.equal(await selectedButton.getAttribute('aria-pressed'), 'true', `${selectedTheme} theme action exposes its selected state`);
+  assert.equal(await unselectedButton.getAttribute('aria-pressed'), 'false', 'only one theme action is pressed');
+
+  // Inspect the selected state without hover styles masking its token border.
+  await page.mouse.move(0, 0);
+  const selectedStyle = await selectedButton.evaluate((element) => {
+    const probe = document.createElement('span');
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--xmt-primary').trim();
+    document.body.append(probe);
+    const primaryColor = getComputedStyle(probe).color;
+    probe.remove();
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderTopColor, backgroundColor: style.backgroundColor, primaryColor };
+  });
+  const unselectedBackground = await unselectedButton.evaluate((element) => getComputedStyle(element).backgroundColor);
+  assert.equal(selectedStyle.borderColor, selectedStyle.primaryColor, `${selectedTheme} selection uses the Studio primary border token`);
+  assert.notEqual(selectedStyle.backgroundColor, unselectedBackground, `${selectedTheme} selection has a visible token-based background state`);
+}
+
 async function logComboboxDiagnostics(page: Page) {
   const diagnostics = await page.getByRole('combobox').evaluateAll((nodes) => nodes.map((node) => {
     const control = node as HTMLSelectElement;
@@ -138,10 +162,13 @@ async function logComboboxDiagnostics(page: Page) {
 }
 
 async function setThemeMode(page: Page, theme: 'light' | 'dark') {
+  const currentTheme = await getThemeMode(page);
+  await assertThemeButtonState(page, currentTheme);
   const button = themeButton(page, theme);
   assert(await button.count() === 1, `Theme action is not uniquely available: ${theme}`);
   await button.click();
   assert(await getThemeMode(page) === theme, `Theme draft was not selected: ${theme}`);
+  await assertThemeButtonState(page, theme);
   await savePersonalPreferences(page);
   await page.waitForFunction((expected) => document.documentElement.classList.contains(expected), theme, { timeout: 10_000 });
 }

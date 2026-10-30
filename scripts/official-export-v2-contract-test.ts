@@ -135,6 +135,8 @@ async function verifyConcurrentBatchIdempotency() {
 }
 
 const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number}; data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,228);
+assert.equal((await queryOne<{count:number}>(`SELECT COUNT(*) count FROM creator_official_daily_metric_observations
+  WHERE batch_id=(SELECT id FROM creator_ingest_batches WHERE batch_id=?)`, [batch]))?.count, 228, 'every accepted daily metric is appended with its internal import batch provenance');
 assert.deepEqual(first.data_quality,{source_rows:40,accepted_rows:40,duplicate_rows:0,rejected_rows:0,warnings:[]},'clean batches expose the collector-reported quality summary without altering metric calculations');
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,100,'官方导出应校准完全匹配作品的播放量');
 assert.deepEqual(
@@ -149,6 +151,8 @@ assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM creato
 assert.deepEqual(await queryOne<{fans_count:number;fans_count_available:number;play_count:number}>('SELECT fans_count,fans_count_available,play_count FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]), {fans_count:0,fans_count_available:0,play_count:100,}, '仅官方作品导出不能把旧粉丝总量伪装为当天实测值');
 await execute('UPDATE douyin_daily_snapshots SET fans_count=2163,fans_count_available=1 WHERE account_id=?',[douyinAccountId]);
 const second=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number} }; assert.equal(second.duplicate_batch,true); assert.equal(second.result.inserted,3);
+assert.equal((await queryOne<{count:number}>(`SELECT COUNT(*) count FROM creator_official_daily_metric_observations
+  WHERE batch_id=(SELECT id FROM creator_ingest_batches WHERE batch_id=?)`, [batch]))?.count, 228, 'replaying an accepted batch does not duplicate its historical observations');
 const unchangedPayload={...payload,batch_id:crypto.randomUUID()}; const unchanged=await acceptCreatorDataSync(envelope(unchangedPayload),`Bearer ${token}`) as { result:{unchanged:number;daily_unchanged:number} }; assert.equal(unchanged.result.unchanged,3); assert.equal(unchanged.result.daily_unchanged,228);
 assert.equal((await queryOne<{fans_count:number;fans_count_available:number}>('SELECT fans_count,fans_count_available FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]))?.fans_count,2163,'同一天已有真实粉丝观测时，后续官方导出必须保留该值');
 const refreshedSha='e'.repeat(64); const refreshedPayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map((file,index)=>index===0?{...file,sha256:refreshedSha}:file)}; const refreshed=await acceptCreatorDataSync(envelope(refreshedPayload),`Bearer ${token}`) as { result:{unchanged:number} }; assert.equal(refreshed.result.unchanged,3);
@@ -213,6 +217,11 @@ await acceptCreatorDataSync(envelope(newestPayload,'2026-08-30T00:00:00.000Z'),`
 const stalePayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map(file=>file.dataset_type==='account_daily'&&file.period==='30d'?{...file,sha256:'f'.repeat(64)}:file),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{views:50,likes:2}}],account_daily_metrics:[...periodRows('yesterday',1,'2026-08-29'),...periodRows('7d',7,'2026-08-29'),...periodRows('30d',30,'2026-08-29')]}};
 const stale=await acceptCreatorDataSync(envelope(stalePayload,'2026-08-29T00:00:00.000Z'),`Bearer ${token}`) as {result:{stale_ignored:number}};
 assert(stale.result.stale_ignored > 0);
+assert.deepEqual(await queryOne<{value_number:number;collected_at:string;source_file_sha256:string}>(`SELECT observation.value_number,observation.collected_at,observation.source_file_sha256
+  FROM creator_official_daily_metric_observations observation
+  JOIN creator_ingest_batches batch ON batch.id=observation.batch_id
+  WHERE batch.batch_id=? AND observation.metric_date='2026-08-29' AND observation.source_period='30d' AND observation.metric_code='views'`, [stalePayload.batch_id]),
+{value_number:129,collected_at:'2026-08-29T00:00:00.000Z',source_file_sha256:'f'.repeat(64)}, 'a late older batch remains auditable even though it cannot replace the current projection');
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,200,'较旧官方批次不得回写当前作品指标');
 assert.deepEqual(await queryOne<{value_text:string;collected_at:string;source_file_sha256:string}>('SELECT value_text,collected_at,source_file_sha256 FROM creator_official_daily_metrics WHERE account_id=? AND metric_date=? AND source_period=? AND metric_code=?',[creatorAccountId,'2026-08-29','30d','views']),{value_text:'128',collected_at:'2026-08-30T00:00:00.000Z',source_file_sha256:'e'.repeat(64)},'较旧的重叠窗口重放不得覆盖官方日指标数值、采集时间或来源文件');
 await verifyConcurrentBatchIdempotency();

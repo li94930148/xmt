@@ -8,9 +8,18 @@ import { readFileSync } from 'node:fs';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version as string;
 const admin = { id: 972, username: 'calendar-qa', role: 'admin', name: '日历隔离验收', enabled: true, force_change_password: false };
-const today = new Date();
-const currentYear = today.getFullYear();
-const currentMonth = today.getMonth() + 1;
+const calendarFixtureTimeZone = 'Asia/Shanghai';
+const today = new Date('2026-10-15T12:00:00+08:00');
+const todayParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: calendarFixtureTimeZone,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).formatToParts(today);
+const currentYear = Number(todayParts.find((part) => part.type === 'year')?.value);
+const currentMonth = Number(todayParts.find((part) => part.type === 'month')?.value);
+const currentDay = Number(todayParts.find((part) => part.type === 'day')?.value);
+const todayKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`;
 const formatCalendarMonth = (date: Date) => `${date.getFullYear()}年${date.getMonth() + 1}月`;
 const previousDate = new Date(currentYear, currentMonth - 1, 0);
 const previousMonthKey = `${previousDate.getFullYear()}-${previousDate.getMonth() + 1}`;
@@ -117,17 +126,26 @@ async function assertCalendarReady(page: Page, viewportWidth: number) {
   assert.ok(widths.document <= viewportWidth && widths.body <= viewportWidth, `calendar must not overflow horizontally: ${JSON.stringify(widths)}`);
 }
 
+async function assertCurrentDateMarker(page: Page, expected: boolean) {
+  const currentDateButtons = page.locator('button[aria-label*="日程"][aria-current="date"]');
+  assert.equal(await currentDateButtons.count(), expected ? 1 : 0, expected
+    ? 'the visible calendar month marks exactly one current date'
+    : 'a month that does not contain today has no current-date marker');
+  if (expected) {
+    const label = await currentDateButtons.first().getAttribute('aria-label');
+    assert.ok(label?.startsWith(`${todayKey}，`), `the current-date marker names today (${todayKey}): ${label}`);
+  }
+}
+
 async function assertCalendarCellsFitPanel(page: Page, viewportWidth: number) {
   const geometry = await page.evaluate(() => {
     const panel = [...document.querySelectorAll('.studio-sheen')].find((element) =>
       element.classList.contains('overflow-hidden') && element.querySelector('button[aria-label*="日程"]'),
     );
-    const dayGrid = panel && [...panel.querySelectorAll('.grid-cols-7')].find((element) =>
-      element.querySelectorAll(':scope > button[aria-label*="日程"]').length >= 35,
-    );
+    const dayGrid = panel?.querySelector('[role="grid"]');
     if (!panel || !dayGrid) return null;
     const panelBounds = panel.getBoundingClientRect();
-    const cells = [...dayGrid.querySelectorAll(':scope > button[aria-label*="日程"]')];
+    const cells = [...dayGrid.querySelectorAll('[role="gridcell"] > button[aria-label*="日程"]')];
     const cellBounds = cells.map((cell) => cell.getBoundingClientRect());
     return {
       panelWidth: panelBounds.width,
@@ -141,6 +159,67 @@ async function assertCalendarCellsFitPanel(page: Page, viewportWidth: number) {
   assert.equal(geometry?.cellCount, 42, `all 42 calendar date cells render at ${viewportWidth}px`);
   assert.equal(geometry?.columnCount, 7, `all seven calendar columns render at ${viewportWidth}px`);
   assert.equal(geometry?.clippedCells, 0, `calendar cells are not clipped by the glass panel at ${viewportWidth}px: ${JSON.stringify(geometry)}`);
+}
+
+async function assertCalendarGridKeyboardNavigation(page: Page) {
+  const gridName = `${formatCalendarMonth(today)}日历`;
+  const grid = page.getByRole('grid', { name: gridName });
+  assert.equal(await grid.getByRole('row').count(), 7, 'the calendar exposes a weekday header and six week rows');
+  assert.equal(await grid.getByRole('columnheader').count(), 7, 'the calendar names its seven weekday columns');
+  assert.equal(await grid.getByRole('gridcell').count(), 42, 'all 42 dates are exposed as grid cells');
+
+  const dateButton = (date: string) => grid.locator(`[role="gridcell"] > button[aria-label^="${date}，"]`);
+  const assertFocusedDate = async (date: string) => {
+    await page.waitForFunction((expectedDate) => {
+      const currentGrid = document.querySelector('[role="grid"]');
+      const tabStops = [...(currentGrid?.querySelectorAll('[role="gridcell"] > button[tabindex="0"]') || [])];
+      return tabStops.length === 1
+        && tabStops[0].getAttribute('aria-label')?.startsWith(`${expectedDate}，`)
+        && document.activeElement === tabStops[0];
+    }, date);
+  };
+
+  await dateButton(todayKey).focus();
+  await assertFocusedDate(todayKey);
+  await page.keyboard.press('ArrowRight');
+  await assertFocusedDate('2026-10-16');
+  await page.keyboard.press('ArrowLeft');
+  await assertFocusedDate(todayKey);
+  await page.keyboard.press('ArrowDown');
+  await assertFocusedDate('2026-10-22');
+  await page.keyboard.press('ArrowUp');
+  await assertFocusedDate(todayKey);
+  await page.keyboard.press('Home');
+  await assertFocusedDate('2026-10-12');
+  await page.keyboard.press('End');
+  await assertFocusedDate('2026-10-18');
+
+  await dateButton('2026-10-31').focus();
+  await assertFocusedDate('2026-10-31');
+  const novemberResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/calendar'
+      && url.searchParams.get('year') === '2026'
+      && url.searchParams.get('month') === '11'
+      && response.status() === 200;
+  });
+  await page.keyboard.press('ArrowRight');
+  await novemberResponse;
+  await assertFocusedDate('2026-11-01');
+  assert.equal(await page.getByRole('grid', { name: '2026年11月日历' }).count(), 1, 'crossing into a new month updates the grid label');
+
+  const octoberResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/calendar'
+      && url.searchParams.get('year') === '2026'
+      && url.searchParams.get('month') === '10'
+      && response.status() === 200;
+  });
+  await page.getByRole('button', { name: '上月' }).click();
+  await octoberResponse;
+  const activeDate = await page.locator('[role="grid"] [role="gridcell"] > button[tabindex="0"]').getAttribute('aria-label');
+  assert.ok(activeDate?.startsWith('2026-10-01，'), `toolbar month navigation leaves one date tab stop in the displayed month: ${activeDate}`);
+  assert.deepEqual(businessWrites, [], 'calendar keyboard navigation and month loading issue no business mutation requests');
 }
 
 async function measureContrast(locator: Locator, foregroundMode: 'text' | 'background' = 'text') {
@@ -220,7 +299,7 @@ async function assertCalendarEventAccessibleDescriptions(page: Page, viewportWid
   await assertCalendarReady(page, viewportWidth);
   assert.equal(await page.locator('html').getAttribute('data-theme'), theme, `calendar is using the ${theme} theme at ${viewportWidth}px`);
 
-  const dayCells = page.locator('.grid-cols-7 > button[aria-label*="日程"]');
+  const dayCells = page.locator('[role="gridcell"] > button[aria-label*="日程"]');
   const references = await dayCells.evaluateAll((buttons) => buttons.map((button) => ({
     label: button.getAttribute('aria-label') || '',
     descriptionId: button.getAttribute('aria-describedby'),
@@ -278,9 +357,31 @@ let browser: Browser | undefined;
 const errors: string[] = [];
 const businessWrites: string[] = [];
 const businessReads: string[] = [];
+
+async function dropSessionStorageWrite(page: Page, key: string) {
+  await page.evaluate((markerKey) => {
+    const storage = window.sessionStorage;
+    const originalSetItem = Storage.prototype.setItem.bind(storage);
+    Object.defineProperty(storage, 'setItem', {
+      configurable: true,
+      value: (candidateKey: string, value: string) => {
+        if (candidateKey === markerKey) return;
+        originalSetItem(candidateKey, value);
+      },
+    });
+  }, key);
+}
+
+async function restoreSessionStorageWrite(page: Page) {
+  await page.evaluate(() => {
+    Reflect.deleteProperty(window.sessionStorage, 'setItem');
+  });
+}
+
 try {
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', timezoneId: calendarFixtureTimeZone });
+  await page.clock.install({ time: today });
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.pathname.startsWith('/api/')) {
@@ -297,12 +398,14 @@ try {
   await page.goto(`${base}/__qa`);
   await assertCalendarReady(page, 1440);
   await page.getByText('当月排期事项', { exact: true }).waitFor();
+  await assertCurrentDateMarker(page, true);
   await assertCalendarEventBadgeContrast(page);
   await assertCalendarEventAccessibleDescriptions(page, 1440, 'dark');
   const monthAnnouncement = page.locator('[role="status"][aria-live="polite"][aria-atomic="true"]')
     .filter({ hasText: /^\d{4}年\d{1,2}月$/ });
   assert.equal(await monthAnnouncement.count(), 1, 'the visible month uses one polite, atomic status region');
   assert.equal(await monthAnnouncement.textContent(), formatCalendarMonth(today), 'the status region announces the initial month');
+  await assertCalendarGridKeyboardNavigation(page);
   await assertCalendarTextContrast(page, true);
   await page.screenshot({ path: '/tmp/xmt-calendar-month-race-1440.png', fullPage: false });
 
@@ -322,6 +425,7 @@ try {
   });
   await page.getByRole('button', { name: '上月' }).click();
   await previousMonthRequest;
+  await assertCurrentDateMarker(page, false);
   assert.equal(await monthAnnouncement.textContent(), formatCalendarMonth(previousDate), 'the same month status region announces the previous month');
   await page.waitForFunction(async (monthKey) => {
     const status = await fetch('/__qa/status').then((response) => response.json());
@@ -336,6 +440,7 @@ try {
   await currentMonthResponse;
   assert.equal(await monthAnnouncement.count(), 1, 'month changes do not create duplicate announcement regions');
   assert.equal(await monthAnnouncement.textContent(), formatCalendarMonth(today), 'the status region announces the current month after returning');
+  await assertCurrentDateMarker(page, true);
   await page.getByText('当月排期事项', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.querySelectorAll('button').length > 0), true, 'calendar day controls remain available while current month data is visible');
 
@@ -429,7 +534,20 @@ try {
   for (const label of ['标题 *', '描述', '类型', '关联选题']) {
     assert.equal(await page.getByLabel(label).count(), 1, `calendar event field "${label}" has an associated accessible label`);
   }
+  const eventDialog = page.getByRole('dialog', { name: '创建事件' });
+  const titleField = eventDialog.getByLabel('标题 *');
+  assert.equal(await titleField.getAttribute('required'), '', 'the accessible event title field exposes native required semantics');
   await page.getByRole('heading', { name: '创建事件' }).waitFor();
+  await eventDialog.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByText('请输入事件标题', { exact: true }).waitFor();
+  assert.deepEqual(businessWrites, [], 'an empty event title is rejected before any event-creation request');
+  await titleField.fill('恢复编号静默丢写不得创建');
+  await dropSessionStorageWrite(page, 'xmt:calendar-create-pending:v1:user:972');
+  await eventDialog.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByText('浏览器无法保存本次恢复信息，请检查会话存储后重试。', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:calendar-create-pending:v1:user:972')), null, 'a silently dropped calendar recovery marker is not treated as persisted');
+  assert.deepEqual(businessWrites, [], 'a silently dropped calendar recovery marker prevents the event-creation request');
+  await restoreSessionStorageWrite(page);
   await page.screenshot({ path: '/tmp/xmt-calendar-month-race-390.png', fullPage: false });
   await page.setViewportSize({ width: 320, height: 800 });
   await page.reload();

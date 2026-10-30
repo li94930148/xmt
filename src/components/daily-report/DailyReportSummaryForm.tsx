@@ -11,6 +11,7 @@ import {
   type YearlyRecord,
 } from '../../api/dailyReports';
 import { ActionButton, GlassPanel } from '../studio';
+import { getUserFacingErrorMessage } from '../../lib/userFacingError';
 import { useAuthStore, useAppStore } from '../../store';
 import {
   markReportSummaryRecoveryRejected,
@@ -85,8 +86,8 @@ function mutationTitle(kind: ReportSummaryKind) {
   return kind === 'monthly' ? '月报' : '年报';
 }
 
-function SummaryField({ label, value, onChange, placeholder, disabled }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; disabled: boolean }) {
-  return <label className="block"><span className="mb-2 block text-sm font-semibold text-studio-text-primary">{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} rows={5} placeholder={placeholder} className="xmt-field w-full resize-y" /></label>;
+function SummaryField({ name, label, value, onChange, placeholder, disabled }: { name: string; label: string; value: string; onChange: (value: string) => void; placeholder: string; disabled: boolean }) {
+  return <label className="block"><span className="mb-2 block text-sm font-semibold text-studio-text-primary">{label}</span><textarea id={name} name={name} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} rows={5} placeholder={placeholder} className="xmt-field w-full resize-y" /></label>;
 }
 
 export default function DailyReportSummaryForm({ kind }: Props) {
@@ -257,7 +258,7 @@ export default function DailyReportSummaryForm({ kind }: Props) {
     } catch (error) {
       if (!isCurrentRecovery(recovery, isActive)) return null;
       setRecoveryState('unavailable');
-      setRecoveryError(error instanceof Error ? error.message : '暂时无法核实总结保存结果');
+      setRecoveryError(getUserFacingErrorMessage(error, '暂时无法核实总结保存结果'));
       setNotice('');
       return 'unavailable';
     }
@@ -298,10 +299,10 @@ export default function DailyReportSummaryForm({ kind }: Props) {
         releaseRejectedRecovery(recovery, '服务器总结已被其他操作更新，本次内容未写入。你的完整草稿已保留。', current);
       } else if (apiError?.status === 409) {
         setRecoveryState('conflict');
-        setRecoveryError(apiError.message || '总结请求编号发生冲突。所有总结写入继续锁定，只能只读核实。');
+        setRecoveryError(getUserFacingErrorMessage(apiError, '总结请求编号发生冲突。所有总结写入继续锁定，只能只读核实。'));
         setNotice('');
       } else if (apiError?.status && [400, 401, 403, 404, 422].includes(apiError.status)) {
-        releaseRejectedRecovery(recovery, apiError.message || `${mutationTitle(recovery.kind)}更新被服务器拒绝，草稿内容已保留。`);
+        releaseRejectedRecovery(recovery, getUserFacingErrorMessage(apiError, `${mutationTitle(recovery.kind)}更新被服务器拒绝，草稿内容已保留。`));
       } else {
         await verifyRecovery(recovery);
       }
@@ -383,7 +384,7 @@ export default function DailyReportSummaryForm({ kind }: Props) {
       else if (typeof record.baseline_fingerprint === 'string') setBaselineFingerprint(record.baseline_fingerprint);
     } catch (error) {
       if (sequence !== listRequestSequenceRef.current || Number(useAuthStore.getState().user?.id) !== requestActorId) return;
-      setLoadError(error instanceof Error ? error.message : '加载总结失败');
+      setLoadError(getUserFacingErrorMessage(error, '加载总结失败，请检查连接后重试。'));
     } finally {
       if (sequence === listRequestSequenceRef.current && Number(useAuthStore.getState().user?.id) === requestActorId) setLoading(false);
     }
@@ -456,7 +457,7 @@ export default function DailyReportSummaryForm({ kind }: Props) {
       setRecovery(recovery, 'submitting');
       await executeMutation(recovery, false, true);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '无法安全准备总结更新，请检查表单后重试。');
+      setNotice(getUserFacingErrorMessage(error, '无法安全准备总结更新，请检查表单后重试。'));
     } finally {
       if (generation === mutationGenerationRef.current) {
         submitInFlight.current = false;
@@ -559,11 +560,11 @@ export default function DailyReportSummaryForm({ kind }: Props) {
     </div> : null}
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div className="flex flex-wrap gap-3">
-        <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">年份</span><input type="number" value={year} disabled={fieldDisabled} onChange={(event) => setYear(Number(event.target.value))} className="xmt-field w-28" /></label>
-        {formKind === 'monthly' ? <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">月份</span><select value={month} disabled={fieldDisabled} onChange={(event) => setMonth(Number(event.target.value))} className="xmt-field">{Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 月</option>)}</select></label> : null}
+        <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">年份</span><input id="daily-report-summary-year" name="summary_year" type="number" value={year} disabled={fieldDisabled} onChange={(event) => setYear(Number(event.target.value))} className="xmt-field w-28" /></label>
+        {formKind === 'monthly' ? <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">月份</span><select id="daily-report-summary-month" name="summary_month" value={month} disabled={fieldDisabled} onChange={(event) => setMonth(Number(event.target.value))} className="xmt-field">{Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 月</option>)}</select></label> : null}
       </div>
       <ActionButton onClick={() => void submit()} variant="primary" disabled={isLocked || recoveryState !== null}><Send className="h-4 w-4" />{submitting ? '提交中' : submitLabel}</ActionButton>
     </div>
-    {formKind === 'monthly' ? <div className="grid gap-5 md:grid-cols-2"><SummaryField label="工作总结" value={monthly.work_summary_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, work_summary_md: value }))} placeholder="记录本月工作总结" disabled={fieldDisabled} /><SummaryField label="重点项目" value={monthly.key_projects_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, key_projects_md: value }))} placeholder="记录本月重点项目" disabled={fieldDisabled} /><SummaryField label="问题与计划" value={monthly.issues_plan_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, issues_plan_md: value }))} placeholder="记录问题和下一步计划" disabled={fieldDisabled} /></div> : <div className="grid gap-5 md:grid-cols-2"><SummaryField label="年度总结" value={yearly.annual_summary_md || ''} onChange={(value) => setYearly((current) => ({ ...current, annual_summary_md: value }))} placeholder="记录年度总结" disabled={fieldDisabled} /><SummaryField label="主要成果" value={yearly.achievements_md || ''} onChange={(value) => setYearly((current) => ({ ...current, achievements_md: value }))} placeholder="记录主要成果" disabled={fieldDisabled} /><SummaryField label="经验不足" value={yearly.shortcomings_md || ''} onChange={(value) => setYearly((current) => ({ ...current, shortcomings_md: value }))} placeholder="记录经验和不足" disabled={fieldDisabled} /><SummaryField label="下一年度计划" value={yearly.next_year_plan_md || ''} onChange={(value) => setYearly((current) => ({ ...current, next_year_plan_md: value }))} placeholder="记录下一年度计划" disabled={fieldDisabled} /></div>}
+    {formKind === 'monthly' ? <div className="grid gap-5 md:grid-cols-2"><SummaryField name="work_summary_md" label="工作总结" value={monthly.work_summary_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, work_summary_md: value }))} placeholder="记录本月工作总结" disabled={fieldDisabled} /><SummaryField name="key_projects_md" label="重点项目" value={monthly.key_projects_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, key_projects_md: value }))} placeholder="记录本月重点项目" disabled={fieldDisabled} /><SummaryField name="issues_plan_md" label="问题与计划" value={monthly.issues_plan_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, issues_plan_md: value }))} placeholder="记录问题和下一步计划" disabled={fieldDisabled} /></div> : <div className="grid gap-5 md:grid-cols-2"><SummaryField name="annual_summary_md" label="年度总结" value={yearly.annual_summary_md || ''} onChange={(value) => setYearly((current) => ({ ...current, annual_summary_md: value }))} placeholder="记录年度总结" disabled={fieldDisabled} /><SummaryField name="achievements_md" label="主要成果" value={yearly.achievements_md || ''} onChange={(value) => setYearly((current) => ({ ...current, achievements_md: value }))} placeholder="记录主要成果" disabled={fieldDisabled} /><SummaryField name="shortcomings_md" label="经验不足" value={yearly.shortcomings_md || ''} onChange={(value) => setYearly((current) => ({ ...current, shortcomings_md: value }))} placeholder="记录经验和不足" disabled={fieldDisabled} /><SummaryField name="next_year_plan_md" label="下一年度计划" value={yearly.next_year_plan_md || ''} onChange={(value) => setYearly((current) => ({ ...current, next_year_plan_md: value }))} placeholder="记录下一年度计划" disabled={fieldDisabled} /></div>}
   </GlassPanel>;
 }

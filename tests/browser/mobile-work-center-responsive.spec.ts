@@ -14,11 +14,39 @@ const mcpTopicLoadingFixtureMode = process.argv.includes('--mcp-topic-loading-fi
 const mcpTouchTargetFixtureMode = process.argv.includes('--mcp-touch-targets-fixture');
 const mcpContentLabFixtureMode = process.argv.includes('--mcp-content-lab-fixture');
 const mcpTopicCreateRecoveryFixtureMode = process.argv.includes('--mcp-topic-create-recovery-fixture');
-const mcpFixtureMode = process.argv.includes('--mcp-fixture') || mcpMessageReadAllFixtureMode || mcpMessageLoadingFixtureMode || mcpMobileLoadingStatusesFixtureMode || mcpTopicLoadingFixtureMode || mcpTouchTargetFixtureMode || mcpContentLabFixtureMode || mcpTopicCreateRecoveryFixtureMode;
+const mcpMobileDailyErrorFixtureMode = process.argv.includes('--mcp-mobile-daily-error-fixture');
+const mcpProfileRecoveryFixtureMode = process.argv.includes('--mcp-profile-recovery-fixture');
+const mcpMobileTopicStatusRecoveryFixtureMode = process.argv.includes('--mcp-mobile-topic-status-recovery-fixture');
+const mcpFixtureMode = process.argv.includes('--mcp-fixture') || mcpMessageReadAllFixtureMode || mcpMessageLoadingFixtureMode || mcpMobileLoadingStatusesFixtureMode || mcpTopicLoadingFixtureMode || mcpTouchTargetFixtureMode || mcpContentLabFixtureMode || mcpTopicCreateRecoveryFixtureMode || mcpMobileDailyErrorFixtureMode || mcpProfileRecoveryFixtureMode || mcpMobileTopicStatusRecoveryFixtureMode;
 const mobileViewportFilter = process.env.XMT_MOBILE_WORK_CENTER_WIDTH;
 const mobileResponsiveWidths = mobileViewportFilter ? [Number(mobileViewportFilter)] : [320, 390];
 assert(mobileResponsiveWidths.every((width) => width === 320 || width === 390), 'XMT_MOBILE_WORK_CENTER_WIDTH must be 320 or 390');
 const appVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version as string;
+
+async function suppressSessionStorageWrite(page: Page, targetKey: string) {
+  await page.evaluate((key) => {
+    const original = Storage.prototype.setItem;
+    Object.defineProperty(window, '__xmtOriginalSessionSetItem', { configurable: true, value: original });
+    Object.defineProperty(Storage.prototype, 'setItem', {
+      configurable: true,
+      value(this: Storage, itemKey: string, value: string) {
+        if (itemKey === key) return;
+        return original.call(this, itemKey, value);
+      },
+    });
+  }, targetKey);
+}
+
+async function restoreSessionStorageWrite(page: Page) {
+  await page.evaluate(() => {
+    const target = window as Window & { __xmtOriginalSessionSetItem?: typeof Storage.prototype.setItem };
+    const original = target.__xmtOriginalSessionSetItem;
+    if (original) {
+      Object.defineProperty(Storage.prototype, 'setItem', { configurable: true, writable: true, value: original });
+      delete target.__xmtOriginalSessionSetItem;
+    }
+  });
+}
 const user = {
   id: 1,
   username: 'mobile-browser-qa',
@@ -101,9 +129,22 @@ const resourceRecoveryTopic = {
   id: 915,
   title: '移动关联资料读取恢复验收',
 };
+let mobileTopicStatusRecoveryTopic = {
+  ...linkedTopic,
+  id: 916,
+  title: '移动看板状态恢复验收',
+  status: 'approved',
+};
+let mobileTopicStatusRecoveryWrites = 0;
+let mobileTopicStatusRecoveryReads = 0;
+let failNextMobileTopicStatusRecoveryRead = false;
+let loseNextMobileTopicStatusRecoveryResponse = false;
 let stageRepairWrites = 0;
 let failNextStageRepairRefresh = false;
 let failNextAuditRefresh = false;
+let mobileBoardAuditAttempts = 0;
+let loseNextMobileBoardAuditResponse = false;
+let failNextMobileBoardAuditRead = false;
 let failNextTopicResourcesRead = false;
 let topicResourcesReadAttempts = 0;
 const unknownStatusTopic = {
@@ -207,6 +248,7 @@ let profileUpdateAttempts = 0;
 let profileUpdateFailures = 0;
 let profileUpdateFailureCommit = false;
 let profileUpdateFailureStatus = 503;
+let profileUpdateFailureMessage: string | null = null;
 let profileReadFailures = 0;
 let profileReadAttempts = 0;
 let profileChangeOnNextRead: Partial<typeof user> | null = null;
@@ -226,6 +268,8 @@ function createDailyReport() {
   };
 }
 let dailyReport = createDailyReport();
+let failNextMobileDailyDraftSave = false;
+let failNextMobileDailyReadback = false;
 let holdNextDailyReportRead = false;
 let dailyReportReadStarted: (() => void) | null = null;
 let releaseDailyReportRead: (() => void) | null = null;
@@ -324,6 +368,17 @@ const publishingStatusFixture = {
 const fixtureApi = express();
 fixtureApi.use(express.json());
 fixtureApi.use('/api', async (request, response) => {
+  if (request.path === '/__qa/profile-prepare-unresolved' && request.method === 'POST') {
+    profileUpdateFailures = 1;
+    profileUpdateFailureCommit = false;
+    profileUpdateFailureStatus = 503;
+    profileUpdateFailureMessage = '模拟个人资料服务暂不可用';
+    profileReadFailures = 1;
+    return response.json({ ok: true });
+  }
+  if (request.path === '/__qa/profile-state' && request.method === 'GET') {
+    return response.json({ profileUpdateAttempts, profileReadAttempts, user: fixtureUser });
+  }
   if (request.path === '/__qa/profile/change-next-read' && request.method === 'POST') {
     profileChangeOnNextRead = request.body as Partial<typeof user>;
     return response.json({ ok: true });
@@ -341,6 +396,9 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json(fixtureUser);
   }
   if (request.path === '/permissions/my') return response.json(fixturePermissions);
+  if (request.path === '/__qa/mobile-topic-status-recovery-state' && request.method === 'GET') {
+    return response.json({ writes: mobileTopicStatusRecoveryWrites, reads: mobileTopicStatusRecoveryReads, audits: mobileBoardAuditAttempts, topic: mobileTopicStatusRecoveryTopic, auditedTopic: auditableTopic });
+  }
   if (request.path === '/__qa/mobile-production-state' && request.method === 'GET') {
     return response.json({
       createAttempts: mobileProductionCreateAttempts,
@@ -402,11 +460,13 @@ fixtureApi.use('/api', async (request, response) => {
       profileUpdateFailures -= 1;
       const status = profileUpdateFailureStatus;
       profileUpdateFailureStatus = 503;
+      const message = profileUpdateFailureMessage ?? (status === 400 ? '模拟个人资料校验失败' : '模拟个人资料服务暂不可用');
+      profileUpdateFailureMessage = null;
       if (profileUpdateFailureCommit) {
         fixtureUser = { ...fixtureUser, name: String(request.body?.name ?? fixtureUser.name), email: String(request.body?.email ?? fixtureUser.email) };
         profileUpdateFailureCommit = false;
       }
-      return response.status(status).json({ message: status === 400 ? '模拟个人资料校验失败' : '模拟个人资料服务暂不可用' });
+      return response.status(status).json({ message });
     }
     fixtureUser = { ...fixtureUser, name: String(request.body?.name ?? fixtureUser.name), email: String(request.body?.email ?? fixtureUser.email) };
     return response.json(fixtureUser);
@@ -495,11 +555,22 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json({ message: '选题更新成功' });
   }
   if (request.path === `/topics/${auditableTopic.id}/audit` && request.method === 'POST') {
+    mobileBoardAuditAttempts += 1;
     topicAuditAttempts += 1;
     topicAuditComments.push(String(request.body?.comment ?? ''));
+    if (loseNextMobileBoardAuditResponse) {
+      loseNextMobileBoardAuditResponse = false;
+      auditableTopic = { ...auditableTopic, status: request.body?.status };
+      failNextMobileBoardAuditRead = true;
+      return response.status(503).json({ message: '模拟审核已提交但响应丢失' });
+    }
     if (topicAuditAttempts === 1) return response.status(503).json({ message: '审核服务暂不可用，请稍后重试' });
     auditableTopic = { ...auditableTopic, status: request.body?.status };
     return response.json({ message: '选题审核成功' });
+  }
+  if (request.path === `/topics/${auditableTopic.id}` && request.method === 'GET' && failNextMobileBoardAuditRead) {
+    failNextMobileBoardAuditRead = false;
+    return response.status(503).json({ message: '模拟审核详情首次读取失败' });
   }
   if (request.path === `/topics/${auditableTopic.id}` && request.method === 'GET' && failNextAuditRefresh) {
     failNextAuditRefresh = false;
@@ -510,6 +581,24 @@ fixtureApi.use('/api', async (request, response) => {
     stageRepairTopic.stage_record_presence.production = true;
     stageRepairTopic.history = [{ id: 1, action: 'stage_record_repaired', comment: '已补齐当前阶段记录；选题阶段未变更', operator_name: fixtureUser.name, created_at: '2026-10-09 12:00:00' }];
     return response.json({ success: true, data: { stage: 'production', created: true } });
+  }
+  if (request.path === `/topics/${mobileTopicStatusRecoveryTopic.id}` && request.method === 'GET') {
+    mobileTopicStatusRecoveryReads += 1;
+    if (failNextMobileTopicStatusRecoveryRead) {
+      failNextMobileTopicStatusRecoveryRead = false;
+      return response.status(503).json({ message: '模拟状态详情首次读取失败' });
+    }
+    return response.json({ data: mobileTopicStatusRecoveryTopic });
+  }
+  if (request.path === `/topics/${mobileTopicStatusRecoveryTopic.id}/status` && request.method === 'POST') {
+    mobileTopicStatusRecoveryWrites += 1;
+    mobileTopicStatusRecoveryTopic = { ...mobileTopicStatusRecoveryTopic, status: request.body?.status };
+    if (loseNextMobileTopicStatusRecoveryResponse) {
+      loseNextMobileTopicStatusRecoveryResponse = false;
+      failNextMobileTopicStatusRecoveryRead = true;
+      return response.status(503).json({ message: '模拟阶段更新已提交但响应丢失' });
+    }
+    return response.json({ message: '选题阶段已更新' });
   }
   if (request.path === `/topics/${stageRepairTopic.id}` && request.method === 'GET' && failNextStageRepairRefresh) {
     failNextStageRepairRefresh = false;
@@ -551,7 +640,7 @@ fixtureApi.use('/api', async (request, response) => {
     const candidates = search === '移动' ? [mobileSimilarTopic]
       : search === '桌面' ? [desktopSimilarTopic]
         : search === '周末' ? [inspirationSimilarTopic] : [];
-    const data = [unknownStatusTopic, linkedTopic, editableTopic, auditableTopic, ...(request.query.limit === '100' ? [approvedMobileTopic] : []), ...candidates];
+    const data = [unknownStatusTopic, linkedTopic, editableTopic, auditableTopic, ...(request.query.limit === '100' ? [approvedMobileTopic] : []), ...(request.query.limit === '200' ? [mobileTopicStatusRecoveryTopic] : []), ...candidates];
     return response.json({ data, total: data.length, page: 1, limit: 20 });
   }
   if (request.path === `/topics/${linkedTopic.id}`) return response.json({ data: linkedTopic });
@@ -574,7 +663,7 @@ fixtureApi.use('/api', async (request, response) => {
     mobileProductionCreateStatusAttempts += 1;
     if (failNextMobileProductionCreateStatusRead) {
       failNextMobileProductionCreateStatusRead = false;
-      return response.status(503).json({ message: '模拟创作状态读取失败' });
+      return response.status(503).json({ message: 'Internal Server Error' });
     }
     const requestId = decodeURIComponent(request.path.split('/').at(-1) || '').toLowerCase();
     if (requestId === mobileProductionCreateRequestId && mobileCreatedProduction) {
@@ -671,7 +760,7 @@ fixtureApi.use('/api', async (request, response) => {
     mobileProductionDetailReads += 1;
     if (failNextMobileProductionDetailRead) {
       failNextMobileProductionDetailRead = false;
-      return response.status(503).json({ message: '模拟稿件详情读取失败' });
+      return response.status(503).json({ message: 'Internal Server Error' });
     }
     return response.json({ ...mobileExistingProduction, can_edit: fixtureUser.role === 'editor' });
   }
@@ -730,6 +819,7 @@ fixtureApi.use('/api', async (request, response) => {
       sync_anomalies: { available: false, total: 0, tasks: [] },
       production_reviews: { available: false, total: 0, tasks: [] },
       retrospectives: { available: true, total: 0, tasks: [] },
+      my_retro_actions: { available: true, total: 0, tasks: [] },
       topics: [{
         id: unknownStatusTopic.id,
         title: unknownStatusTopic.title,
@@ -798,6 +888,10 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json({ data: [linkedCalendarEvent, ...createdCalendarEvents] });
   }
   if (request.path === '/daily-reports/me' && request.method === 'GET') {
+    if (failNextMobileDailyReadback) {
+      failNextMobileDailyReadback = false;
+      return response.status(503).json({ success: false, message: 'Failed to fetch' });
+    }
     const reportSnapshot = { ...dailyReport, items: dailyReport.items.map((item) => ({ ...item })) };
     if (holdNextDailyReportRead) {
       holdNextDailyReportRead = false;
@@ -813,6 +907,11 @@ fixtureApi.use('/api', async (request, response) => {
   }
   if (request.path === '/daily-reports/draft' && request.method === 'POST') {
     dailyDraftWriteAttempts += 1;
+    if (failNextMobileDailyDraftSave) {
+      failNextMobileDailyDraftSave = false;
+      failNextMobileDailyReadback = true;
+      return response.status(503).json({ success: false, message: 'Failed to fetch' });
+    }
     if (dailyDraftDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, dailyDraftDelayMs));
     const version = request.body?.version as number | undefined;
     dailyDraftVersions.push(version);
@@ -1064,9 +1163,23 @@ fixtureApi.get('/__qa/topic-create-recovery', (request, response) => {
   }
   return response.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','topic-create-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/topics/add');</script>`);
 });
-fixtureApi.get('/__qa/mobile-message-loading', (_request, response) => {
-  messageListReadHold = true;
-  messageListReadStarted = () => console.log('Initial /api/messages GET is held for status inspection.');
+fixtureApi.get('/__qa/mobile-profile-recovery', (_request, response) => {
+  return response.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-profile-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/me');</script>`);
+});
+fixtureApi.get('/__qa/mobile-message-loading', (request, response) => {
+  if (request.query.readError === '1') {
+    messageListReadHold = false;
+    messageListReadStarted = null;
+    messageReadFailureIds.clear();
+    messageReadFailureIds.add(993);
+  } else if (request.query.fail === '1') {
+    messageListReadHold = false;
+    messageListReadStarted = null;
+    messageLoadFailures = 1;
+  } else {
+    messageListReadHold = true;
+    messageListReadStarted = () => console.log('Initial /api/messages GET is held for status inspection.');
+  }
   return response.type('html').send(
     `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-message-loading-fixture');localStorage.setItem('xmt_theme','dark');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/messages');</script>`,
   );
@@ -1097,6 +1210,20 @@ fixtureApi.post('/__qa/release-topic-list-read', (_request, response) => {
   releaseTopicListRead?.();
   releaseTopicListRead = null;
   return response.json({ released: true });
+});
+fixtureApi.get('/__qa/mobile-daily-error', (request, response) => {
+  fixturePermissions = request.query.archive === '1'
+    ? ['report:daily:submit', 'report:daily:archive']
+    : ['report:daily:submit'];
+  const theme = request.query.theme === 'dark' ? 'dark' : 'light';
+  const destination = request.query.view === 'summary' ? '/daily-report/summary' : '/daily-report';
+  return response.type('html').send(
+    `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-daily-error-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace(${JSON.stringify(destination)});</script>`,
+  );
+});
+fixtureApi.post('/__qa/enable-mobile-daily-error', (_request, response) => {
+  failNextMobileDailyDraftSave = true;
+  return response.json({ enabled: true });
 });
 const inspectionPort = Number(process.env.XMT_BROWSER_MCP_PORT) || 0;
 await new Promise<void>((resolve, reject) => {
@@ -1167,6 +1294,41 @@ if (mcpFixtureMode) {
     topicStatusReadFailures = 1;
     topicCommitAfterFailureTitles.add('MCP选题创建恢复验收');
     console.log(`Topic create recovery MCP fixture ready: ${baseUrl}/__qa/topic-create-recovery (in-memory API; committed response loss and one status-read failure are injected)`);
+  } else if (mcpMobileDailyErrorFixtureMode) {
+    fixtureUser = { ...user, id: 87, username: 'mobile-daily-error', name: '移动日报错误提示验收', role: 'member' };
+    fixturePermissions = ['report:daily:submit'];
+    dailyReport = { ...createDailyReport(), userId: fixtureUser.id, reportDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) };
+    failNextMobileDailyDraftSave = false;
+    failNextMobileDailyReadback = false;
+    dailyDraftDelayMs = 1400;
+    console.log(`Mobile daily error MCP fixture ready: ${baseUrl}/__qa/mobile-daily-error (in-memory API; draft saves are delayed 1400 ms for busy-state inspection; enable one failed draft POST and one failed readback through /__qa/enable-mobile-daily-error)`);
+  } else if (mcpProfileRecoveryFixtureMode) {
+    fixtureUser = { ...user, id: 112, username: 'mobile-profile-recovery-fixture', name: '资料恢复隔离验收', email: 'profile-recovery@example.invalid', role: 'member' };
+    fixturePermissions = [];
+    profileUpdateAttempts = 0;
+    profileUpdateFailures = 0;
+    profileUpdateFailureCommit = false;
+    profileUpdateFailureStatus = 503;
+    profileUpdateFailureMessage = null;
+    profileReadFailures = 0;
+    profileReadAttempts = 0;
+    profileChangeOnNextRead = null;
+    console.log(`Mobile profile recovery MCP fixture ready: ${baseUrl}/__qa/mobile-profile-recovery (in-memory API; no business database)`);
+  } else if (mcpMobileTopicStatusRecoveryFixtureMode) {
+    fixtureUser = { ...user, id: 116, username: 'mobile-topic-status-recovery', name: '移动看板恢复验收', role: 'editor' };
+    fixturePermissions = ['topic:update', 'topic:audit', 'topic:view'];
+    mobileTopicStatusRecoveryTopic = { ...mobileTopicStatusRecoveryTopic, status: 'approved' };
+    mobileTopicStatusRecoveryWrites = 0;
+    mobileTopicStatusRecoveryReads = 0;
+    failNextMobileTopicStatusRecoveryRead = false;
+    loseNextMobileTopicStatusRecoveryResponse = true;
+    auditableTopic = { ...auditableTopic, status: 'pending' };
+    topicAuditAttempts = 0;
+    topicAuditComments.length = 0;
+    mobileBoardAuditAttempts = 0;
+    failNextMobileBoardAuditRead = false;
+    loseNextMobileBoardAuditResponse = true;
+    console.log(`Mobile topic status recovery MCP fixture ready: ${baseUrl}/topics?view=board (in-memory API; first status and audit POSTs commit then return 503; first detail GET for each also returns 503)`);
   } else {
     fixtureUser = { ...user, id: 32, username: 'mobile-production-author', name: '移动创作隔离验收', role: 'editor' };
     fixturePermissions = ['production:update', 'production:view'];
@@ -1229,7 +1391,7 @@ async function openMobilePage(width: number, authUser = user, theme?: 'light' | 
   let expectedConsoleFailures = 0;
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (expectedConsoleFailures > 0 && message.text().includes('503')) {
+    if (expectedConsoleFailures > 0 && (message.text().includes('503') || /ERR_FAILED|Failed to load resource/i.test(message.text()))) {
       expectedConsoleFailures -= 1;
       return;
     }
@@ -1243,7 +1405,7 @@ async function openMobilePage(width: number, authUser = user, theme?: 'light' | 
     const expectedNotFound = status === 404 && /\/api\/(?:calendar|workflow\/(?:production|shooting|publishing))\/create-request\//.test(url);
     const expectedUnavailable = status === 503 && ['/api/calendar', '/api/daily-reports', '/api/topics', '/api/messages', '/api/auth/change-password', '/api/auth/profile', '/api/auth/me', '/api/resource-center/content-topics', '/api/workflow/production', '/api/workflow/shooting', '/api/users', '/api/backup/inventory'].some((path) => url.includes(path));
     const expectedProfileRejection = status === 400 && url.includes('/api/auth/profile');
-    const expectedPasswordRejection = status === 401 && url.includes('/api/auth/change-password');
+    const expectedPasswordRejection = [400, 401].includes(status) && url.includes('/api/auth/change-password');
     if (status >= 400 && !expectedNotFound && !expectedUnavailable && !expectedProfileRejection && !expectedPasswordRejection) errors.push(`HTTP ${status} ${url}`);
   });
   return { context, page, errors, expectConsoleFailure: () => { expectedConsoleFailures += 1; } };
@@ -1400,6 +1562,50 @@ try {
       assert.equal(createAttempts.get(refreshRecoveryTitle), 1, 'refresh recovery reads the original request and never repeats POST');
       assert.equal(createdCalendarEvents.filter((event) => event.title === refreshRecoveryTitle).length, 1, 'refresh recovery keeps a single event');
       assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:calendar-create-pending:v1:user:1')), null, 'refresh recovery clears the marker after server confirmation');
+
+      const calendarCleanupFailureTitle = `日历创建记录清理失败 ${width}`;
+      await page.getByRole('button', { name: '新增' }).click();
+      await page.getByPlaceholder('事件标题').fill(calendarCleanupFailureTitle);
+      await page.evaluate((key) => {
+        const originalRemoveItem = Storage.prototype.removeItem;
+        Object.defineProperty(window, '__calendarOriginalRemoveItem', { configurable: true, value: originalRemoveItem });
+        Object.defineProperty(Storage.prototype, 'removeItem', {
+          configurable: true,
+          value(this: Storage, itemKey: string) {
+            if (this === sessionStorage && itemKey === key) return;
+            return originalRemoveItem.call(this, itemKey);
+          },
+        });
+      }, 'xmt:calendar-create-pending:v1:user:1');
+      const initialCleanupTestPostFailure = page.waitForResponse((response) => response.request().method() === 'POST'
+        && response.url().endsWith('/api/calendar') && response.status() === 503);
+      await page.getByRole('button', { name: '创建', exact: true }).click();
+      await initialCleanupTestPostFailure;
+      await page.getByRole('button', { name: '确认重试创建', exact: true }).waitFor();
+      const calendarCreatedDespiteCleanupFailure = page.waitForResponse((response) => response.request().method() === 'POST'
+        && response.url().endsWith('/api/calendar') && response.status() === 200);
+      await page.getByRole('button', { name: '确认重试创建', exact: true }).click();
+      await calendarCreatedDespiteCleanupFailure;
+      await page.getByRole('button', { name: '重新核实', exact: true }).waitFor();
+      assert.deepEqual(await page.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:calendar-create-pending:v1:user:1') || 'null'))?.phase,
+        'cleanup-created', 'failed marker deletion is retained as a locked, confirmed-created recovery state');
+      assert.equal(createAttempts.get(calendarCleanupFailureTitle), 2, 'only the same-ID explicit retry follows the fixture’s first failed create');
+      assert.equal(new Set(submittedCalendarRequestIdsByTitle.get(calendarCleanupFailureTitle)).size, 1, 'calendar retry reuses the original idempotency key');
+      assert.equal(createdCalendarEvents.filter((event) => event.title === calendarCleanupFailureTitle).length, 1, 'the explicit retry leaves one created event');
+      await page.evaluate(() => {
+        const target = window as Window & { __calendarOriginalRemoveItem?: typeof Storage.prototype.removeItem };
+        if (target.__calendarOriginalRemoveItem) {
+          Object.defineProperty(Storage.prototype, 'removeItem', { configurable: true, writable: true, value: target.__calendarOriginalRemoveItem });
+          delete target.__calendarOriginalRemoveItem;
+        }
+      });
+      const cleanupReadback = page.waitForResponse((response) => response.request().method() === 'GET'
+        && /\/api\/calendar\/create-request\/[0-9a-f-]+$/i.test(response.url()) && response.status() === 200);
+      await page.getByRole('button', { name: '重新核实', exact: true }).click();
+      await cleanupReadback;
+      await page.waitForFunction(() => sessionStorage.getItem('xmt:calendar-create-pending:v1:user:1') === null);
+      assert.equal(createAttempts.get(calendarCleanupFailureTitle), 1, 'read-only cleanup recovery clears the exact marker without repeating POST');
+
       await page.getByRole('button', { name: '查看关联选题' }).click();
       await page.waitForURL(`**/topics/${linkedTopic.id}`);
       await page.getByRole('button', { name: '返回日历' }).click();
@@ -1482,16 +1688,25 @@ try {
       failNextDailySubmit = true;
       dailyDraftVersions.length = 0;
       dailyDraftWriteAttempts = 0;
-      dailyDraftDelayMs = 120;
+      dailyDraftDelayMs = 600;
       await page.getByRole('button', { name: '写日报' }).click();
       await page.waitForURL('**/daily-report');
       await page.getByText(/· 我的日报/).waitFor();
+      for (const field of [page.getByPlaceholder('记录今天完成或推进的工作'), page.getByPlaceholder('记录明天准备开展的工作'), page.getByPlaceholder('记录需要他人或团队协助的事项')]) {
+        const identity = await field.evaluate((element) => ({ id: element.id, name: element.getAttribute('name') }));
+        assert.ok(identity.id && identity.name, 'mobile daily fields expose stable ids and names for browser autofill');
+      }
       await page.getByPlaceholder('记录今天完成或推进的工作').fill('完成日报保存与提交恢复验收');
       expectConsoleFailure();
       const failedDailySubmit = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes(`/api/daily-reports/${dailyReport.id}/submit`) && response.status() === 503);
-      await page.getByRole('button', { name: '提交日报' }).dblclick();
-      await failedDailySubmit;
+      const pendingDailySubmit = page.getByRole('button', { name: '提交日报', exact: true }).dblclick();
+      await page.getByRole('status').filter({ hasText: '正在保存并提交日报…' }).waitFor();
+      const busyDailySubmit = page.getByRole('button', { name: '正在保存并提交…', exact: true });
+      assert.equal(await busyDailySubmit.getAttribute('aria-busy'), 'true', 'in-progress mobile daily submission exposes its busy state');
+      assert.equal(await busyDailySubmit.isDisabled(), true, 'mobile daily submission prevents another action while pending');
+      await Promise.all([pendingDailySubmit, failedDailySubmit]);
       await page.getByText('模拟提交失败').waitFor();
+      assert.equal(await page.getByRole('status').filter({ hasText: '正在保存并提交日报…' }).count(), 0, 'mobile daily busy announcement clears after the pending request finishes');
       assert.deepEqual(dailyDraftVersions, [5], 'first daily save uses the loaded version');
       assert.equal(dailyDraftWriteAttempts, 1, 'a rapid double-click saves the daily draft only once');
       dailyDraftDelayMs = 0;
@@ -1527,6 +1742,59 @@ try {
         await page.screenshot({ path: '/tmp/xmt-mobile-daily-partial-success-320.png', fullPage: true });
       }
 
+      if (width === 390) {
+        dailyReport = { ...createDailyReport(), reportDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) };
+        let failDailyVerificationReads = false;
+        let dailyVerificationReadAttempts = 0;
+        let dailyDraftFailureAttempts = 0;
+        await page.route('**/api/daily-reports/me?*', async (route) => {
+          if (!failDailyVerificationReads) return route.continue();
+          dailyVerificationReadAttempts += 1;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, message: 'Failed to fetch' }) });
+        });
+        await page.route('**/api/daily-reports/draft', async (route) => {
+          dailyDraftFailureAttempts += 1;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, message: 'Failed to fetch' }) });
+        });
+        const initialDailyRead = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/daily-reports/me?') && response.status() === 200);
+        await page.reload();
+        await initialDailyRead;
+        const dailyWorkInput = page.getByPlaceholder('记录今天完成或推进的工作');
+        await dailyWorkInput.waitFor();
+        const mobileRecoveryKey = `xmt:mobile-daily-report-draft-recovery:v1:${fixtureUser.id}:${dailyReport.reportDate}`;
+        await page.evaluate((key) => {
+          const storage = window.sessionStorage;
+          const nativeSetItem = storage.setItem.bind(storage);
+          Object.defineProperty(storage, 'setItem', {
+            configurable: true,
+            value: (name: string, value: string) => {
+              if (name !== key) nativeSetItem(name, value);
+            },
+          });
+        }, mobileRecoveryKey);
+        await dailyWorkInput.fill('移动端浏览器静默丢弃恢复凭证时保留输入');
+        await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+        await page.getByText('无法在当前浏览器保存本次恢复信息，因此尚未发送草稿保存请求。请检查浏览器存储后重试。', { exact: true }).waitFor();
+        assert.equal(await dailyWorkInput.inputValue(), '移动端浏览器静默丢弃恢复凭证时保留输入', 'mobile retains the report text when session storage silently drops the recovery marker');
+        assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), mobileRecoveryKey), null, 'the injected mobile session-storage drop leaves no recovery marker');
+        assert.equal(dailyDraftFailureAttempts, 0, 'mobile does not send a draft write when the recovery marker cannot be read back');
+        await page.evaluate(() => { delete (window.sessionStorage as Storage & { setItem?: unknown }).setItem; });
+        failDailyVerificationReads = true;
+        await dailyWorkInput.fill('网络异常时仍保留日报内容');
+        await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+        await page.getByText(/草稿保存结果仍无法确认/).waitFor();
+        await page.getByText(/日报草稿保存失败，请检查连接后重试/).waitFor();
+        await page.getByText(/当前日报状态暂时无法读取，请稍后重新核实/).waitFor();
+        assert.equal(await page.getByText(/Failed to fetch/i).count(), 0, 'mobile daily recovery does not expose browser transport errors');
+        assert.equal(await dailyWorkInput.isDisabled(), true, 'an unknown draft-save outcome keeps editing locked');
+        assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).isDisabled(), true, 'an unknown draft-save outcome prevents duplicate writes');
+        assert.equal(await page.getByRole('button', { name: '重新核实草稿状态', exact: true }).isVisible(), true, 'read-only verification remains available');
+        assert.equal(dailyDraftFailureAttempts, 1, 'one explicit save produces one draft write');
+        assert.equal(dailyVerificationReadAttempts, 1, 'the failed write triggers one read-only verification');
+        await page.unroute('**/api/daily-reports/me?*');
+        await page.unroute('**/api/daily-reports/draft');
+      }
+
       assert.deepEqual(errors, [], `viewport ${width}: ${errors.join('\n')}`);
       console.log(`Mobile work-center browser checks passed at ${width}px`, { hub, calendar, ideas, kanban, daily });
     } finally {
@@ -1551,7 +1819,7 @@ try {
       const shootingList = await assertMobileLayout(page, width, 'shooting-status-list');
       await page.getByRole('button', { name: '查看', exact: true }).click();
       await page.waitForURL(`**/shooting/${shootingStatusFixture.id}`);
-      await page.getByRole('heading', { level: 1, name: shootingStatusFixture.topic_title, exact: true }).waitFor();
+      await page.getByRole('heading', { level: 2, name: shootingStatusFixture.topic_title, exact: true }).waitFor();
       await page.getByText('状态待确认', { exact: true }).waitFor();
       assert.equal(await page.getByText('legacy_transcoding', { exact: true }).count(), 0, 'shooting detail must not expose an unknown raw status');
       const shootingDetail = await assertMobileLayout(page, width, 'shooting-status-detail');
@@ -2005,6 +2273,93 @@ try {
     } finally {
       fixtureUser = previousUser;
       fixturePermissions = previousPermissions;
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
+    const listReader = { ...user, id: 19, username: 'mobile-production-network-error', name: '创作列表网络提示验收', role: 'member' };
+    fixtureUser = listReader;
+    fixturePermissions = ['production:view'];
+    const { context, page, errors, expectConsoleFailure } = await openMobilePage(390, listReader);
+    let listReads = 0;
+    try {
+      await page.route('**/api/workflow/production*', async (route) => {
+        if (route.request().method() !== 'GET' || new URL(route.request().url()).pathname !== '/api/workflow/production') {
+          await route.continue();
+          return;
+        }
+        listReads += 1;
+        if (listReads === 1) await route.abort('failed');
+        else await route.continue();
+      });
+      expectConsoleFailure();
+      await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
+      const listError = page.getByRole('alert').getByText('创作列表暂时无法加载，请检查连接后重试。', { exact: true });
+      await listError.waitFor();
+      assert.equal(await page.getByText('Failed to fetch', { exact: true }).count(), 0, 'mobile production list does not expose the browser network exception');
+      assert.equal(listReads, 1, 'the initial network failure is one read request');
+      assert.equal(await page.getByText('还没有创作稿件', { exact: true }).count(), 0, 'a failed first read is not shown as an empty production list');
+      const retry = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && response.status() === 200);
+      await page.getByRole('button', { name: '重新加载创作列表', exact: true }).click();
+      await retry;
+      await page.getByText(unknownStatusProductionFixture.topic_title, { exact: true }).waitFor();
+      assert.equal(listReads, 2, 'the user-triggered retry performs exactly one more GET');
+      await assertMobileLayout(page, 390, 'production-list-network-error-recovery');
+      assert.deepEqual(errors, [], errors.join('\n'));
+    } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+      await context.close();
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
+    const mobileProductionAuthor = { ...user, id: 20, username: 'mobile-production-detail-error', name: '移动稿件读取提示验收', role: 'editor' };
+    fixtureUser = mobileProductionAuthor;
+    fixturePermissions = ['production:view', 'production:update'];
+    const { context, page, errors } = await openMobilePage(390, mobileProductionAuthor);
+    let detailReads = 0;
+    let productionWrites = 0;
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith('/api/workflow/production/') && request.method() !== 'GET') productionWrites += 1;
+    });
+    try {
+      await page.route(`**/api/workflow/production/${mobileProductionFixture.id}*`, async (route) => {
+        if (route.request().method() !== 'GET'
+          || new URL(route.request().url()).pathname !== `/api/workflow/production/${mobileProductionFixture.id}`) return route.continue();
+        detailReads += 1;
+        if (detailReads === 1) {
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Internal Server Error' }) });
+          return;
+        }
+        await route.continue();
+      });
+      await page.goto(`${baseUrl}/production/content/${mobileProductionFixture.id}`, { waitUntil: 'domcontentloaded' });
+      const detailError = page.getByRole('alert').getByText('稿件加载失败，请检查连接后重试。', { exact: true });
+      await detailError.waitFor();
+      assert.equal(await page.getByText('Internal Server Error', { exact: true }).count(), 0, 'mobile production editor does not expose a raw server error');
+      assert.equal(await page.locator('.ProseMirror').count(), 0, 'the editor stays unavailable until its manuscript is read successfully');
+      const retry = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === `/api/workflow/production/${mobileProductionFixture.id}`
+        && response.status() === 200);
+      await page.getByRole('button', { name: '重试加载', exact: true }).click();
+      await retry;
+      await page.locator('.ProseMirror').waitFor();
+      assert.equal(detailReads, 2, 'the explicit detail retry makes one successful GET after the failed read');
+      assert.equal(productionWrites, 0, 'loading and retrying a manuscript does not write production data');
+      await assertMobileLayout(page, 390, 'production-editor-detail-error-recovery');
+      assert.deepEqual(errors, [], errors.join('\n'));
+    } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+      await context.close();
     }
   }
 
@@ -2522,6 +2877,7 @@ try {
     await doubleClickSave;
     await failedCreate;
     await productionAuthorPage.getByRole('alert').filter({ hasText: '创作结果仍无法确认' }).waitFor();
+    assert.equal(await productionAuthorPage.getByText('Internal Server Error', { exact: true }).count(), 0, 'mobile create-status recovery does not expose a raw server error');
     assert.equal(mobileProductionCreateAttempts, 1, 'a rapid double-click during a delayed mobile production create sends one POST');
     assert.equal(mobileProductionCreateWrites, 0, 'the failed first create did not create a server record');
     assert.equal(await productionAuthorPage.locator('.ProseMirror').getAttribute('contenteditable'), 'false', 'an unknown create result keeps the draft editor read-only');
@@ -2632,6 +2988,7 @@ try {
     await editor.fill('移动端待核实保存正文');
     await failedWrite;
     await pendingWritePage.getByRole('alert').filter({ hasText: '稿件写入结果仍无法确认' }).waitFor();
+    assert.equal(await pendingWritePage.getByText('Internal Server Error', { exact: true }).count(), 0, 'mobile write-status recovery does not expose a raw server error');
     assert.equal(await editor.getAttribute('contenteditable'), 'false', 'an unknown existing-manuscript result locks further edits');
     let writeState = await readMobileProductionWriteState();
     assert.equal(writeState.updateAttempts, 1);
@@ -2699,13 +3056,20 @@ try {
   const productionStarter = { ...user, id: 3, username: 'mobile-production-starter', name: '移动创作验收', role: 'editor' };
   fixtureUser = productionStarter;
   fixturePermissions = ['topic:update', 'production:update'];
-  const { context: starterContext, page: starterPage, errors: starterErrors } = await openMobilePage(390, productionStarter);
+  const { context: starterContext, page: starterPage, errors: starterErrors, expectConsoleFailure: expectStarterFailure } = await openMobilePage(390, productionStarter);
   try {
     const topicDimensions: Array<{ id: number; type: 'city' | 'person' | 'project'; value: string }> = [];
     let nextTopicDimensionId = 950;
+    let failNextTopicDimensionRead = false;
+    let failNextTopicDimensionDelete = false;
     await starterPage.route(`**/api/topics/${linkedTopic.id}/asset-dimensions**`, async (route) => {
       const request = route.request();
       if (request.method() === 'GET') {
+        if (failNextTopicDimensionRead) {
+          failNextTopicDimensionRead = false;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '内容维度服务暂不可用' }) });
+          return;
+        }
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: topicDimensions }) });
         return;
       }
@@ -2714,6 +3078,11 @@ try {
         const dimension = { id: nextTopicDimensionId++, ...input };
         topicDimensions.push(dimension);
         await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ message: '维度已登记', id: dimension.id, data: dimension }) });
+        return;
+      }
+      if (failNextTopicDimensionDelete) {
+        failNextTopicDimensionDelete = false;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '删除结果暂时无法确认' }) });
         return;
       }
       const dimensionId = Number(new URL(request.url()).pathname.split('/').at(-1));
@@ -2739,8 +3108,24 @@ try {
     await starterPage.getByRole('status').getByText('项目“老街早餐计划”已登记。', { exact: true }).waitFor();
     await assertMobileLayout(starterPage, 390, 'topic-dimensions');
     await starterPage.screenshot({ path: '/tmp/xmt-topic-dimensions-mobile-390.png', fullPage: true });
+    const removeCityButton = starterPage.getByRole('button', { name: '移除城市：宁波' });
+    const removeCityBounds = await removeCityButton.boundingBox();
+    assert.ok(removeCityBounds && removeCityBounds.width >= 40 && removeCityBounds.height >= 40, `mobile topic dimension remove action is at least 40×40px: ${JSON.stringify(removeCityBounds)}`);
+    failNextTopicDimensionDelete = true;
+    failNextTopicDimensionRead = true;
+    expectStarterFailure();
+    expectStarterFailure();
+    const uncertainRemoveResponse = starterPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(`/api/topics/${linkedTopic.id}/asset-dimensions/`) && response.status() === 503);
+    await removeCityButton.click();
+    await uncertainRemoveResponse;
+    await starterPage.getByRole('alert').getByText(/操作结果暂不明确；只读核实失败：/).waitFor();
+    const verifyDimensionButton = starterPage.getByRole('button', { name: '只读核实当前状态', exact: true });
+    const verifyDimensionBounds = await verifyDimensionButton.boundingBox();
+    assert.ok(verifyDimensionBounds && verifyDimensionBounds.width >= 40 && verifyDimensionBounds.height >= 40, `mobile topic dimension recovery action is at least 40×40px: ${JSON.stringify(verifyDimensionBounds)}`);
+    await verifyDimensionButton.click();
+    await starterPage.getByRole('status').getByText('只读核实发现该维度仍存在；未自动重试，请再次点击“移除”后重试。', { exact: true }).waitFor();
     const removeCityResponse = starterPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(`/api/topics/${linkedTopic.id}/asset-dimensions/`) && response.status() === 200);
-    await starterPage.getByRole('button', { name: '移除城市：宁波' }).click();
+    await removeCityButton.click();
     await removeCityResponse;
     assert.equal(await starterPage.getByText('宁波', { exact: true }).count(), 0, 'removing an explicit dimension updates the topic detail immediately');
     await starterPage.getByRole('status').getByText('内容维度已移除。', { exact: true }).waitFor();
@@ -2777,6 +3162,68 @@ try {
     await reopenExistingDraft;
     await starterPage.waitForURL('**/production/content/912');
     assert.equal(mobileProductionCreateAttempts, 0, 'starting again reuses the linked draft rather than duplicating it');
+    approvedMobileTopic = { ...approvedMobileTopic, status: 'production' };
+    mobileCreatedProduction = null;
+    mobileProductionCreateAttempts = 0;
+    mobileProductionCreateWrites = 0;
+    mobileProductionCreateStatusAttempts = 0;
+    mobileProductionCreateRequestId = null;
+    mobileProductionCreateRequestIds.length = 0;
+    failAfterCommitNextMobileProductionCreate = true;
+    failNextMobileProductionCreateStatusRead = true;
+    await starterPage.goto(`${baseUrl}/topics/${approvedMobileTopic.id}`, { waitUntil: 'domcontentloaded' });
+    await starterPage.getByRole('button', { name: '进入创作' }).waitFor();
+    const committedDraftLoss = starterPage.waitForResponse((response) => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 503);
+    const firstReceiptRead = starterPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname.includes('/api/workflow/production/create-request/') && response.status() === 503);
+    await starterPage.getByRole('button', { name: '进入创作' }).click();
+    await Promise.all([committedDraftLoss, firstReceiptRead]);
+    const handoffRecovery = starterPage.getByTestId('topic-production-handoff-recovery');
+    await handoffRecovery.getByText('创作结果仍无法确认。再次创建已锁定；请先只读核实。', { exact: true }).waitFor();
+    assert.equal(await starterPage.getByRole('button', { name: '进入创作' }).isDisabled(), true, 'unknown mobile handoff result locks the main create action');
+    assert.equal(await starterPage.getByRole('button', { name: '只读核实创作结果', exact: true }).isVisible(), true);
+    assert.equal(mobileProductionCreateAttempts, 1, 'a committed response loss sends one create POST');
+    assert.equal(mobileProductionCreateWrites, 1, 'the unknown result represents one committed draft');
+    assert.equal(mobileProductionCreateStatusAttempts, 1, 'the unknown result performs one status GET');
+    const recoveredDraft = starterPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname === '/api/workflow/production/912' && response.status() === 200);
+    await starterPage.getByRole('button', { name: '只读核实创作结果', exact: true }).click();
+    await recoveredDraft;
+    await starterPage.waitForURL('**/production/content/912');
+    assert.equal(mobileProductionCreateAttempts, 1, 'read-only recovery never resends a committed create');
+    assert.equal(mobileProductionCreateStatusAttempts, 2, 'manual recovery checks the same request status');
+
+    mobileCreatedProduction = null;
+    mobileProductionCreateAttempts = 0;
+    mobileProductionCreateWrites = 0;
+    mobileProductionCreateStatusAttempts = 0;
+    mobileProductionCreateRequestId = null;
+    mobileProductionCreateRequestIds.length = 0;
+    failNextMobileProductionCreate = true;
+    failAfterCommitNextMobileProductionCreate = false;
+    failNextMobileProductionCreateStatusRead = false;
+    await starterPage.goto(`${baseUrl}/topics/${approvedMobileTopic.id}`, { waitUntil: 'domcontentloaded' });
+    await starterPage.getByRole('button', { name: '进入创作' }).waitFor();
+    const absentDraftFailure = starterPage.waitForResponse((response) => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 503);
+    const absentReceipt = starterPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname.includes('/api/workflow/production/create-request/') && response.status() === 404);
+    await starterPage.getByRole('button', { name: '进入创作' }).click();
+    await Promise.all([absentDraftFailure, absentReceipt]);
+    await handoffRecovery.getByText('服务器暂未找到这条创作稿。原请求编号已保留；只有明确确认后才会用同一编号重试。', { exact: true }).waitFor();
+    assert.equal(await starterPage.getByRole('button', { name: '进入创作' }).isDisabled(), true, 'retryable mobile outcome still locks the main create action');
+    assert.equal(await starterPage.getByRole('button', { name: '使用同一请求编号明确重试', exact: true }).isVisible(), true);
+    assert.equal(mobileProductionCreateAttempts, 1);
+    assert.equal(mobileProductionCreateWrites, 0);
+    const explicitDraftRetry = starterPage.waitForResponse((response) => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 200);
+    await starterPage.getByRole('button', { name: '使用同一请求编号明确重试', exact: true }).click();
+    await explicitDraftRetry;
+    await starterPage.waitForURL('**/production/content/912');
+    assert.equal(mobileProductionCreateAttempts, 2, 'the separate explicit action is the only second create POST');
+    assert.equal(mobileProductionCreateWrites, 1, 'explicit same-key retry creates exactly one draft');
+    assert.equal(new Set(mobileProductionCreateRequestIds).size, 1, 'the explicit retry reuses the first request ID');
     assert.equal(mobileStageTransitionAttempts, 1, 'reopening an existing production does not advance the stage twice');
     assert.equal(await starterPage.getByText('继续创作', { exact: true }).count(), 0, 'resuming an existing draft does not stack a duplicate success toast');
     assert.deepEqual(starterErrors, [], starterErrors.join('\n'));
@@ -2819,9 +3266,24 @@ try {
   fixturePermissions = ['topic:update'];
   const { context: narrowTopicDimensionContext, page: narrowTopicDimensionPage, errors: narrowTopicDimensionErrors } = await openMobilePage(320, narrowTopicDimensionUser);
   try {
+    let failInitialDimensionRead = true;
+    await narrowTopicDimensionPage.route(`**/api/topics/${linkedTopic.id}/asset-dimensions`, async (route) => {
+      if (route.request().method() === 'GET' && failInitialDimensionRead) {
+        failInitialDimensionRead = false;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '内容维度暂不可用' }) });
+        return;
+      }
+      await route.continue();
+    });
     await narrowTopicDimensionPage.goto(`${baseUrl}/topics/${linkedTopic.id}`, { waitUntil: 'domcontentloaded' });
     await narrowTopicDimensionPage.getByRole('heading', { name: '城市、人物与项目' }).waitFor();
     await narrowTopicDimensionPage.getByLabel(`维度名称-${linkedTopic.id}`).waitFor();
+    const dimensionRetry = narrowTopicDimensionPage.getByRole('button', { name: '重试' });
+    await dimensionRetry.waitFor();
+    const dimensionRetryBounds = await dimensionRetry.boundingBox();
+    assert.ok(dimensionRetryBounds && dimensionRetryBounds.height >= 40, `dimension load retry meets the 40px touch target: ${JSON.stringify(dimensionRetryBounds)}`);
+    await dimensionRetry.click();
+    await narrowTopicDimensionPage.getByLabel('已登记内容维度').waitFor();
     await assertMobileLayout(narrowTopicDimensionPage, 320, 'topic-dimensions');
     assert.deepEqual(narrowTopicDimensionErrors, [], narrowTopicDimensionErrors.join('\n'));
   } finally {
@@ -2896,6 +3358,103 @@ try {
     } finally {
       await topicResourcesContext.close();
     }
+  }
+
+  const topicStatusRecoveryUser = { ...user, id: 116, username: 'mobile-topic-status-recovery', name: '移动看板恢复验收', role: 'editor' };
+  fixtureUser = topicStatusRecoveryUser;
+  fixturePermissions = ['topic:update', 'topic:audit', 'topic:view'];
+  mobileTopicStatusRecoveryTopic = { ...mobileTopicStatusRecoveryTopic, status: 'approved' };
+  mobileTopicStatusRecoveryWrites = 0;
+  mobileTopicStatusRecoveryReads = 0;
+  failNextMobileTopicStatusRecoveryRead = false;
+  loseNextMobileTopicStatusRecoveryResponse = true;
+  auditableTopic = { ...auditableTopic, status: 'pending' };
+  topicAuditAttempts = 0;
+  topicAuditComments.length = 0;
+  mobileBoardAuditAttempts = 0;
+  failNextMobileBoardAuditRead = false;
+  loseNextMobileBoardAuditResponse = true;
+  const { context: topicStatusRecoveryContext, page: topicStatusRecoveryPage, errors: topicStatusRecoveryErrors } = await openMobilePage(390, topicStatusRecoveryUser);
+  try {
+    await topicStatusRecoveryPage.goto(`${baseUrl}/topics?view=board`, { waitUntil: 'domcontentloaded' });
+    const startCreation = topicStatusRecoveryPage.getByRole('button', { name: '开始创作', exact: true });
+    await startCreation.waitFor();
+    const lostStatusResponse = topicStatusRecoveryPage.waitForResponse((response) => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === `/api/topics/${mobileTopicStatusRecoveryTopic.id}/status`
+      && response.status() === 503);
+    const failedStatusRead = topicStatusRecoveryPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/topics/${mobileTopicStatusRecoveryTopic.id}`
+      && response.status() === 503);
+    let releaseStatusWrite = () => {};
+    let markStatusWriteStarted = () => {};
+    const statusWriteStarted = new Promise<void>((resolve) => { markStatusWriteStarted = resolve; });
+    const statusWriteGate = new Promise<void>((resolve) => { releaseStatusWrite = resolve; });
+    await topicStatusRecoveryPage.route(`**/api/topics/${mobileTopicStatusRecoveryTopic.id}/status`, async (route) => {
+      if (route.request().method() === 'POST') {
+        markStatusWriteStarted();
+        await statusWriteGate;
+      }
+      await route.continue();
+    });
+    await startCreation.click();
+    await statusWriteStarted;
+    const prematureVerify = topicStatusRecoveryPage.getByRole('button', { name: '等待状态请求结束…', exact: true });
+    await prematureVerify.waitFor();
+    assert.equal(await prematureVerify.isDisabled(), true, 'read-only verification cannot race a status POST that is still in flight');
+    assert.equal(mobileTopicStatusRecoveryReads, 0, 'no status GET is sent while the original stage request remains unresolved');
+    releaseStatusWrite();
+    await Promise.all([lostStatusResponse, failedStatusRead]);
+    await topicStatusRecoveryPage.unroute(`**/api/topics/${mobileTopicStatusRecoveryTopic.id}/status`);
+    await topicStatusRecoveryPage.getByRole('button', { name: '只读核实并刷新列表' }).waitFor();
+    assert.equal(await startCreation.isDisabled(), true, 'uncertain mobile board transitions remain locked after the first detail read fails');
+    assert.deepEqual(await topicStatusRecoveryPage.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:mobile-topic-status-pending:v1:user:116') || '[]')),
+      [{ userId: 116, topicId: 916, operation: 'status', before: 'approved', target: 'production', title: '移动看板状态恢复验收', comment: '' }],
+      'the exact account, topic, operation, status pair and payload are persisted before the status request');
+    assert.equal(mobileTopicStatusRecoveryWrites, 1);
+
+    await topicStatusRecoveryPage.reload({ waitUntil: 'domcontentloaded' });
+    await topicStatusRecoveryPage.getByRole('button', { name: '进入成片制作', exact: true }).waitFor();
+    await topicStatusRecoveryPage.waitForFunction(() => sessionStorage.getItem('xmt:mobile-topic-status-pending:v1:user:116') === null);
+    assert.equal(mobileTopicStatusRecoveryTopic.status, 'production', 'reload recovery accepts the server status without another transition');
+    assert.equal(mobileTopicStatusRecoveryWrites, 1, 'reload recovery never resends the status write');
+    assert.ok(mobileTopicStatusRecoveryReads >= 2, 'the initial and reload recovery attempts are read-only detail requests');
+
+    const approveTopic = topicStatusRecoveryPage.getByRole('button', { name: '通过', exact: true });
+    await approveTopic.waitFor();
+    const lostAuditResponse = topicStatusRecoveryPage.waitForResponse((response) => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === `/api/topics/${auditableTopic.id}/audit`
+      && response.status() === 503);
+    const failedAuditRead = topicStatusRecoveryPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/topics/${auditableTopic.id}`
+      && response.status() === 503);
+    await approveTopic.click();
+    await Promise.all([lostAuditResponse, failedAuditRead]);
+    await topicStatusRecoveryPage.getByRole('button', { name: '只读核实并刷新列表' }).waitFor();
+    assert.deepEqual(await topicStatusRecoveryPage.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:mobile-topic-status-pending:v1:user:116') || '[]')),
+      [{ userId: 116, topicId: 905, operation: 'audit', before: 'pending', target: 'approved', title: '待审核的移动选题', comment: '' }],
+      'a board review persists its audit endpoint and exact decision separately from a stage transition');
+    assert.equal(mobileBoardAuditAttempts, 1);
+    assert.equal(auditableTopic.status, 'approved', 'the review was committed before its response and readback were lost');
+
+    await topicStatusRecoveryPage.reload({ waitUntil: 'domcontentloaded' });
+    await topicStatusRecoveryPage.getByRole('button', { name: '开始创作', exact: true }).waitFor();
+    await topicStatusRecoveryPage.waitForFunction(() => sessionStorage.getItem('xmt:mobile-topic-status-pending:v1:user:116') === null);
+    assert.equal(mobileBoardAuditAttempts, 1, 'reload recovery verifies the committed review without a second audit POST');
+    assert.equal(auditableTopic.status, 'approved');
+    assert.deepEqual(topicStatusRecoveryErrors, [], topicStatusRecoveryErrors.join('\n'));
+  } finally {
+    await topicStatusRecoveryContext.close();
+    mobileTopicStatusRecoveryTopic = { ...mobileTopicStatusRecoveryTopic, status: 'approved' };
+    mobileTopicStatusRecoveryWrites = 0;
+    mobileTopicStatusRecoveryReads = 0;
+    failNextMobileTopicStatusRecoveryRead = false;
+    loseNextMobileTopicStatusRecoveryResponse = false;
+    auditableTopic = { ...auditableTopic, status: 'pending' };
+    topicAuditAttempts = 0;
+    topicAuditComments.length = 0;
+    mobileBoardAuditAttempts = 0;
+    failNextMobileBoardAuditRead = false;
+    loseNextMobileBoardAuditResponse = false;
   }
 
   const topicAuditor = { ...user, id: 6, username: 'mobile-topic-auditor', name: '独立审核验收', role: 'director' };
@@ -3071,20 +3630,36 @@ try {
   fixtureUser = messageUser;
   fixturePermissions = [];
   mobileMessagesFixture = [];
-  messageLoadFailures = 1;
-  const { context: messageErrorContext, page: messageErrorPage, errors: messageErrorErrors, expectConsoleFailure: expectMessageLoadFailure } = await openMobilePage(390, messageUser);
+  messageLoadFailures = 0;
+  const { context: messageErrorContext, page: messageErrorPage, errors: messageErrorErrors } = await openMobilePage(390, messageUser);
   try {
-    expectMessageLoadFailure();
-    const failedMessageLoad = messageErrorPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+    await messageErrorPage.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      let failed = false;
+      window.fetch = (async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (!failed && url.includes('/api/messages?')) {
+          failed = true;
+          throw new TypeError('Failed to fetch');
+        }
+        return originalFetch(input, init);
+      }) as typeof window.fetch;
+    });
     await messageErrorPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
-    await failedMessageLoad;
-    await messageErrorPage.getByRole('heading', { name: '消息加载失败' }).waitFor();
+    const messageLoadAlert = messageErrorPage.getByRole('alert');
+    await messageLoadAlert.getByRole('heading', { name: '消息加载失败' }).waitFor();
+    await messageLoadAlert.getByText('加载消息失败，请检查连接后重试。', { exact: true }).waitFor();
+    assert.equal(await messageLoadAlert.getByRole('button').count(), 0, 'the retry action remains separately reachable from the announced load error');
+    assert.equal(await messageErrorPage.getByText(/Failed to fetch/i).count(), 0, 'mobile message loading hides browser transport errors');
+    await messageErrorPage.getByText('未读数暂不可用', { exact: true }).waitFor();
+    assert.equal(await messageErrorPage.getByText('正在读取未读数…', { exact: true }).count(), 0, '请求结束后不可用状态应替代加载文案');
     assert.equal(await messageErrorPage.getByText('暂无消息', { exact: true }).count(), 0, 'a failed request without cache must not look like an empty inbox');
     await messageErrorPage.screenshot({ path: '/tmp/xmt-mobile-message-load-error-390.png', fullPage: true });
     await messageErrorPage.getByRole('button', { name: '重试加载' }).click();
     await messageErrorPage.getByText('暂无消息', { exact: true }).waitFor();
     assert.deepEqual(messageErrorErrors, [], messageErrorErrors.join('\n'));
   } finally {
+    messageLoadFailures = 0;
     await messageErrorContext.close();
   }
 
@@ -3104,10 +3679,13 @@ try {
     await loadingStatus.waitFor();
     assert.equal(await loadingStatus.innerText(), '正在同步消息…', '首屏消息读取中应显示明确状态');
     assert.equal(await loadingStatus.getAttribute('aria-live'), 'polite', '首屏消息读取状态应礼貌播报');
+    await messageLoadingPage.getByText('正在读取未读数…', { exact: true }).waitFor();
+    assert.equal(await messageLoadingPage.getByText('未读数暂不可用', { exact: true }).count(), 0, '未读摘要首读期间不能被误报为不可用');
     assert.equal(typeof releaseMessageListRead, 'function', '消息夹具已暂停 GET，确保读取状态可见');
     releaseMessageListRead?.();
     await messageListResponse;
     await messageLoadingPage.getByText('延迟返回的消息', { exact: true }).waitFor();
+    await messageLoadingPage.getByText('未读 1 条', { exact: true }).waitFor();
     await loadingStatus.waitFor({ state: 'detached' });
     assert.deepEqual(messageLoadingErrors, [], messageLoadingErrors.join('\n'));
   } finally {
@@ -3116,6 +3694,64 @@ try {
     messageListReadStarted = null;
     releaseMessageListRead = null;
     await messageLoadingContext.close();
+  }
+
+  const desktopUnreadLoadingUser = { ...user, id: 81, username: 'desktop-message-summary-loading', name: '桌面消息统计加载验收', role: 'member' };
+  fixtureUser = desktopUnreadLoadingUser;
+  fixturePermissions = [];
+  mobileMessagesFixture = [{ id: 994, title: '桌面统计延迟消息', content: '首读统计应显示读取状态。', read: false, type: 'info', created_at: '2026-10-09T08:00:00.000Z' }];
+  messageListReadHold = true;
+  messageListReadStarted = null;
+  releaseMessageListRead = null;
+  let markDesktopMessageReadStarted!: () => void;
+  const desktopMessageReadStartedSignal = new Promise<void>((resolve) => { markDesktopMessageReadStarted = resolve; });
+  messageListReadStarted = markDesktopMessageReadStarted;
+  const { context: desktopUnreadLoadingContext, page: desktopUnreadLoadingPage, errors: desktopUnreadLoadingErrors } = await openMobilePage(1440, desktopUnreadLoadingUser, 'dark');
+  try {
+    await desktopUnreadLoadingPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    await desktopMessageReadStartedSignal;
+    const unreadMetric = desktopUnreadLoadingPage.getByText('未读消息', { exact: true }).locator('..').locator('.xmt-data-number');
+    assert.equal(await unreadMetric.innerText(), '正在读取…', 'desktop unread metric must describe its initial pending state instead of showing zero');
+    assert.equal(await desktopUnreadLoadingPage.getByText('暂不可用', { exact: true }).count(), 0, 'a pending desktop summary must not be reported as unavailable');
+    assert.equal(typeof releaseMessageListRead, 'function', 'desktop fixture GET is held while its summary state is inspected');
+    releaseMessageListRead?.();
+    await desktopUnreadLoadingPage.waitForFunction(() => {
+      const title = Array.from(document.querySelectorAll('p')).find((item) => item.textContent?.trim() === '未读消息');
+      return title?.parentElement?.querySelector('.xmt-data-number')?.textContent?.trim() === '1';
+    });
+    assert.equal(await unreadMetric.innerText(), '1', 'the confirmed desktop unread total replaces the loading label');
+    assert.deepEqual(desktopUnreadLoadingErrors, [], desktopUnreadLoadingErrors.join('\n'));
+  } finally {
+    releaseMessageListRead?.();
+    messageListReadHold = false;
+    messageListReadStarted = null;
+    releaseMessageListRead = null;
+    await desktopUnreadLoadingContext.close();
+  }
+
+  const desktopUnreadFailureUser = { ...user, id: 82, username: 'desktop-message-summary-failure', name: '桌面消息统计失败验收', role: 'member' };
+  fixtureUser = desktopUnreadFailureUser;
+  fixturePermissions = [];
+  mobileMessagesFixture = [{ id: 995, title: '桌面统计失败后恢复消息', content: '首读失败后仍可安全重试。', read: false, type: 'info', created_at: '2026-10-09T08:00:00.000Z' }];
+  messageLoadFailures = 1;
+  const { context: desktopUnreadFailureContext, page: desktopUnreadFailurePage, errors: desktopUnreadFailureErrors, expectConsoleFailure: expectDesktopUnreadFailure } = await openMobilePage(1440, desktopUnreadFailureUser);
+  try {
+    expectDesktopUnreadFailure();
+    await desktopUnreadFailurePage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    await desktopUnreadFailurePage.getByRole('heading', { name: '消息加载失败' }).waitFor();
+    const unreadMetric = desktopUnreadFailurePage.getByText('未读消息', { exact: true }).locator('..').locator('.xmt-data-number');
+    assert.equal(await unreadMetric.innerText(), '暂不可用', 'a failed first desktop summary read must not be shown as zero');
+    assert.equal(await desktopUnreadFailurePage.getByText('正在读取…', { exact: true }).count(), 0, 'the loading label clears after the failed request');
+    await desktopUnreadFailurePage.getByRole('button', { name: '重试加载' }).click();
+    await desktopUnreadFailurePage.getByRole('button', { name: /桌面统计失败后恢复消息/ }).waitFor();
+    await desktopUnreadFailurePage.waitForFunction(() => {
+      const title = Array.from(document.querySelectorAll('p')).find((item) => item.textContent?.trim() === '未读消息');
+      return title?.parentElement?.querySelector('.xmt-data-number')?.textContent?.trim() === '1';
+    });
+    assert.deepEqual(desktopUnreadFailureErrors, [], desktopUnreadFailureErrors.join('\n'));
+  } finally {
+    messageLoadFailures = 0;
+    await desktopUnreadFailureContext.close();
   }
 
   mobileMessagesFixture = [{ id: 992, title: '需重试的工作提醒', content: '标记失败时应保留在消息页', read: false, link: `/topics/${linkedTopic.id}` }];
@@ -3129,30 +3765,69 @@ try {
       await messageLabel.waitFor();
       const ratio = await textContrast(messageLabel);
       assert(ratio >= 4.5, `${theme}主题桌面消息关联提示对比度为 ${ratio.toFixed(2)}:1，应不低于 4.5:1`);
+      const externalLinkIcon = page.locator('svg.lucide-external-link');
+      assert.equal(await externalLinkIcon.count(), 1, `${theme}主题桌面关联消息渲染一个外链提示图标`);
+      const iconContrast = await textContrast(externalLinkIcon);
+      assert(iconContrast >= 3, `${theme}主题桌面消息外链图标对比度为 ${iconContrast.toFixed(2)}:1，应不低于 3:1`);
       assert.deepEqual(errors, [], `${theme}主题移动消息回归无浏览器错误`);
     } finally {
       await context.close();
     }
 
-    const { context: mobileContext, page: mobilePage, errors: mobileErrors } = await openMobilePage(390, messageUser, theme);
-    try {
-      await mobilePage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
-      const unreadBadge = mobilePage.getByLabel('移动主导航').getByText('1', { exact: true });
-      const unreadContrast = await textContrast(unreadBadge);
-      assert(unreadContrast >= 4.5, `${theme}主题手机未读徽标对比度为 ${unreadContrast.toFixed(2)}:1，应不低于 4.5:1`);
-      const activeMessageFilter = mobilePage.getByRole('button', { name: '全部', exact: true });
-      assert((await activeMessageFilter.getAttribute('class'))?.includes('bg-studio-primary-button'), `${theme}主题消息当前筛选使用主按钮色令牌`);
-      const filterContrast = await textContrast(activeMessageFilter);
-      assert(filterContrast >= 4.5, `${theme}主题手机消息当前筛选文字对比度为 ${filterContrast.toFixed(2)}:1，应不低于 4.5:1`);
-      const refresh = mobilePage.getByRole('button', { name: '刷新', exact: true });
-      const markAll = mobilePage.getByRole('button', { name: '全部已读', exact: true });
-      for (const [label, element] of [['手机消息刷新操作', refresh], ['手机全部已读操作', markAll]] as const) {
-        const contrast = await textContrast(element);
-        assert(contrast >= 4.5, `${theme}主题${label}对比度为 ${contrast.toFixed(2)}:1，应不低于 4.5:1`);
+    for (const width of mobileResponsiveWidths) {
+      const { context: mobileContext, page: mobilePage, errors: mobileErrors } = await openMobilePage(width, messageUser, theme);
+      try {
+        await mobilePage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+        const unreadBadge = mobilePage.getByLabel('移动主导航').getByText('1', { exact: true });
+        const unreadContrast = await textContrast(unreadBadge);
+        assert(unreadContrast >= 4.5, `${theme}主题 ${width}px 手机未读徽标对比度为 ${unreadContrast.toFixed(2)}:1，应不低于 4.5:1`);
+        const mobileMessageFilterGroup = mobilePage.getByRole('group', { name: '消息筛选', exact: true });
+        assert.equal(await mobileMessageFilterGroup.count(), 1, `${theme}主题 ${width}px 手机消息筛选使用具名分组`);
+        const mobileFilterButtons = mobileMessageFilterGroup.getByRole('button');
+        assert.equal(await mobileFilterButtons.count(), 5, `${theme}主题 ${width}px 手机消息筛选分组包含五个筛选条件`);
+        const filterGeometry = await mobileMessageFilterGroup.evaluate((group) => {
+          const bounds = group.getBoundingClientRect();
+          const buttons = Array.from(group.querySelectorAll('button')).map((button) => {
+            const rect = button.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, height: rect.height };
+          });
+          return {
+            left: bounds.left,
+            right: bounds.right,
+            scrollWidth: group.scrollWidth,
+            clientWidth: group.clientWidth,
+            buttons,
+          };
+        });
+        assert(filterGeometry.scrollWidth <= filterGeometry.clientWidth, `${theme}主题 ${width}px 手机筛选组不再需要横向滚动`);
+        assert(filterGeometry.left >= 0 && filterGeometry.right <= width, `${theme}主题 ${width}px 手机筛选组完整位于视口内`);
+        assert(filterGeometry.buttons.every((button) => button.left >= filterGeometry.left - 1 && button.right <= filterGeometry.right + 1), `${theme}主题 ${width}px 手机五个筛选按钮全部落在分组边界内`);
+        assert(filterGeometry.buttons.every((button) => button.left >= 0 && button.right <= width), `${theme}主题 ${width}px 手机五个筛选按钮都完整显示在视口内`);
+        assert(filterGeometry.buttons.every((button) => button.height >= 40), `${theme}主题 ${width}px 手机筛选按钮触控高度至少 40px`);
+        const activeMessageFilter = mobileMessageFilterGroup.getByRole('button', { name: '全部', exact: true });
+        const unreadMessageFilter = mobileMessageFilterGroup.getByRole('button', { name: '未读', exact: true });
+        const systemMessageFilter = mobileMessageFilterGroup.getByRole('button', { name: '系统', exact: true });
+        assert.equal(await activeMessageFilter.getAttribute('aria-pressed'), 'true', `${theme}主题 ${width}px 手机消息默认筛选暴露选中状态`);
+        assert.equal(await unreadMessageFilter.getAttribute('aria-pressed'), 'false', `${theme}主题 ${width}px 手机未读筛选默认暴露未选中状态`);
+        await unreadMessageFilter.click();
+        assert.equal(await unreadMessageFilter.getAttribute('aria-pressed'), 'true', `${theme}主题 ${width}px 手机未读筛选点击后暴露选中状态`);
+        await systemMessageFilter.click();
+        assert.equal(await systemMessageFilter.getAttribute('aria-pressed'), 'true', `${theme}主题 ${width}px 手机“系统”筛选可见且可操作`);
+        await activeMessageFilter.click();
+        assert.equal(await activeMessageFilter.getAttribute('aria-pressed'), 'true', `${theme}主题 ${width}px 手机全部筛选返回后暴露选中状态`);
+        assert((await activeMessageFilter.getAttribute('class'))?.includes('bg-studio-primary-button'), `${theme}主题 ${width}px 消息当前筛选使用主按钮色令牌`);
+        const filterContrast = await textContrast(activeMessageFilter);
+        assert(filterContrast >= 4.5, `${theme}主题 ${width}px 手机消息当前筛选文字对比度为 ${filterContrast.toFixed(2)}:1，应不低于 4.5:1`);
+        const refresh = mobilePage.getByRole('button', { name: '刷新', exact: true });
+        const markAll = mobilePage.getByRole('button', { name: '全部已读', exact: true });
+        for (const [label, element] of [['手机消息刷新操作', refresh], ['手机全部已读操作', markAll]] as const) {
+          const contrast = await textContrast(element);
+          assert(contrast >= 4.5, `${theme}主题 ${width}px ${label}对比度为 ${contrast.toFixed(2)}:1，应不低于 4.5:1`);
+        }
+        assert.deepEqual(mobileErrors, [], `${theme}主题 ${width}px 手机消息回归无浏览器错误`);
+      } finally {
+        await mobileContext.close();
       }
-      assert.deepEqual(mobileErrors, [], `${theme}主题手机消息回归无浏览器错误`);
-    } finally {
-      await mobileContext.close();
     }
   }
   const priorDailyPermissions = fixturePermissions;
@@ -3179,7 +3854,7 @@ try {
   fixturePermissions = priorDailyPermissions;
 
   const priorReportNavigationPermissions = fixturePermissions;
-  fixturePermissions = ['export:data', 'report:daily:submit', 'analytics:view'];
+  fixturePermissions = ['export:data', 'report:daily:submit', 'report:daily:archive', 'analytics:view'];
   for (const theme of ['light', 'dark'] as const) {
     const { context, page, errors } = await openMobilePage(1440, user, theme);
     try {
@@ -3195,18 +3870,60 @@ try {
       await weeklyTab.click();
       assert((await weeklyTab.getAttribute('class'))?.includes('bg-studio-primary-button'), `${theme}主题报告中心当前标签应使用主按钮色令牌`);
       assert((await textContrast(weeklyTab)) >= 4.5, `${theme}主题报告中心当前标签文字对比度应不低于 4.5:1`);
-      await page.goto(`${baseUrl}/daily-report`, { waitUntil: 'domcontentloaded' });
-      await page.getByRole('button', { name: '总结归档', exact: true }).click();
+      await page.goto(`${baseUrl}/daily-report/summary`, { waitUntil: 'domcontentloaded' });
+      const archivePeriodGroup = page.getByRole('group', { name: '归档周期', exact: true });
+      const archivePeriods = ['日报', '月报', '年报'].map((label) => archivePeriodGroup.getByRole('button', { name: label, exact: true }));
       const archiveKind = page.getByRole('button', { name: '日报', exact: true });
       await archiveKind.waitFor();
+      assert.equal(await archivePeriodGroup.getByRole('button').count(), 3, '日报归档周期由三个互斥按钮组成');
+      assert.equal(await archiveKind.getAttribute('aria-pressed'), 'true', `${theme}主题日报归档周期向辅助技术报告选中状态`);
+      assert.deepEqual(await Promise.all(archivePeriods.map((button) => button.getAttribute('aria-pressed'))), ['true', 'false', 'false'], 'only one archive period is selected at a time');
+      for (const [index, period] of archivePeriods.entries()) {
+        const height = await period.evaluate((button) => button.getBoundingClientRect().height);
+        assert(height >= 40, `${theme}主题归档周期 ${index + 1} 高度为 ${height}px，应至少 40px`);
+      }
       assert((await archiveKind.getAttribute('class'))?.includes('bg-studio-primary-button'), `${theme}主题日报总结归档当前类型使用主按钮色令牌`);
       assert((await textContrast(archiveKind)) >= 4.5, `${theme}主题日报总结归档当前类型文字对比度应不低于 4.5:1`);
+      for (const [selected, other] of [[1, [0, 2]], [2, [0, 1]], [0, [1, 2]]] as const) {
+        await archivePeriods[selected].click();
+        const pressedStates = await Promise.all(archivePeriods.map((button) => button.getAttribute('aria-pressed')));
+        assert.deepEqual(pressedStates, pressedStates.map((_, index) => (index === selected ? 'true' : 'false')), 'archive period selection and its accessible state stay in sync');
+        assert.equal(await archivePeriods[selected].getAttribute('aria-pressed'), 'true', 'the selected archive period is exposed as pressed');
+        for (const otherIndex of other) assert.equal(await archivePeriods[otherIndex].getAttribute('aria-pressed'), 'false', 'inactive archive periods are exposed as not pressed');
+      }
       assert.deepEqual(errors, [], `${theme}主题桌面日报/报告中心页面无浏览器错误`);
     } finally {
       await context.close();
     }
   }
   fixturePermissions = priorReportNavigationPermissions;
+
+  const priorArchiveControlPermissions = fixturePermissions;
+  fixturePermissions = ['report:daily:submit'];
+  for (const width of [320, 390] as const) {
+    const { context, page, errors } = await openMobilePage(width, user, 'light');
+    try {
+      await page.goto(`${baseUrl}/daily-report/summary`, { waitUntil: 'domcontentloaded' });
+      const archivePeriodGroup = page.getByRole('group', { name: '归档周期', exact: true });
+      const dailyPeriod = archivePeriodGroup.getByRole('button', { name: '日报', exact: true });
+      const monthlyPeriod = archivePeriodGroup.getByRole('button', { name: '月报', exact: true });
+      const yearlyPeriod = archivePeriodGroup.getByRole('button', { name: '年报', exact: true });
+      assert.equal(await dailyPeriod.getAttribute('aria-pressed'), 'true', `${width}px 当前日报周期状态可读`);
+      assert.equal(await monthlyPeriod.getAttribute('aria-pressed'), 'false', `${width}px 禁用月报周期仍报告未选中`);
+      assert.equal(await yearlyPeriod.getAttribute('aria-pressed'), 'false', `${width}px 禁用年报周期仍报告未选中`);
+      assert.equal(await monthlyPeriod.isDisabled(), true, `${width}px 无归档权限时月报保持禁用`);
+      assert.equal(await yearlyPeriod.isDisabled(), true, `${width}px 无归档权限时年报保持禁用`);
+      for (const period of [dailyPeriod, monthlyPeriod, yearlyPeriod]) {
+        const height = await period.evaluate((button) => button.getBoundingClientRect().height);
+        assert(height >= 40, `${width}px 归档周期按钮高度为 ${height}px，应至少 40px`);
+      }
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width}px 归档周期控件不应导致横向溢出`);
+      assert.deepEqual(errors, [], `${width}px 日报总结归档页面无浏览器错误`);
+    } finally {
+      await context.close();
+    }
+  }
+  fixturePermissions = priorArchiveControlPermissions;
 
   const { context: messageReadContext, page: messageReadPage, errors: messageReadErrors, expectConsoleFailure: expectMessageReadFailure } = await openMobilePage(390, messageUser);
   try {
@@ -3229,6 +3946,50 @@ try {
     assert.deepEqual(messageReadErrors, [], messageReadErrors.join('\n'));
   } finally {
     await messageReadContext.close();
+  }
+
+  const technicalReadMessageId = 1289;
+  mobileMessagesFixture = [{ id: technicalReadMessageId, title: '只读核实异常消息', content: '技术错误不能泄露，也不能触发自动重试。', read: false, type: 'info' }];
+  messageReadAttempts = 0;
+  messageReadFailureIds.clear();
+  messageReadFailureIds.add(technicalReadMessageId);
+  messageReadStatusAttempts = 0;
+  const { context: technicalReadContext, page: technicalReadPage, errors: technicalReadErrors, expectConsoleFailure: expectTechnicalReadFailure } = await openMobilePage(390, messageUser);
+  try {
+    expectTechnicalReadFailure();
+    await technicalReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    const message = technicalReadPage.getByRole('button', { name: /只读核实异常消息/ });
+    await message.waitFor();
+    await technicalReadPage.route(`**/api/messages/${technicalReadMessageId}/read-status`, (route) => route.abort('failed'));
+    const failedPut = technicalReadPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${technicalReadMessageId}`) && response.status() === 503);
+    const failedStatus = technicalReadPage.waitForEvent('requestfailed', (request) => request.method() === 'GET'
+      && request.url().endsWith(`/api/messages/${technicalReadMessageId}/read-status`));
+    await message.click();
+    await Promise.all([failedPut, failedStatus]);
+    await technicalReadPage.getByRole('button', { name: '只读核实', exact: true }).waitFor();
+    await technicalReadPage.getByText(/暂时无法核实消息状态/).waitFor();
+    assert.equal(await technicalReadPage.getByText(/Failed to fetch/i).count(), 0, 'mobile message read recovery hides browser transport errors');
+    assert.equal(await message.isDisabled(), true, 'unknown read state keeps the message write locked');
+    assert.equal(messageReadAttempts, 1, 'a failed read-only status lookup never resends the write');
+
+    await technicalReadPage.unroute(`**/api/messages/${technicalReadMessageId}/read-status`);
+    const recoveredStatus = technicalReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().endsWith(`/api/messages/${technicalReadMessageId}/read-status`) && response.status() === 200);
+    await technicalReadPage.getByRole('button', { name: '只读核实', exact: true }).click();
+    await recoveredStatus;
+    await technicalReadPage.getByText(/服务器已确认消息仍未读/).waitFor();
+    assert.equal(await message.isDisabled(), false, 'a successful read-only check restores the explicit retry');
+    const explicitRetry = technicalReadPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${technicalReadMessageId}`) && response.status() === 200);
+    await message.click();
+    await explicitRetry;
+    assert.equal(messageReadAttempts, 2, 'the second PUT follows the user explicit retry only');
+    assert.deepEqual(technicalReadErrors, [], technicalReadErrors.join('\n'));
+  } finally {
+    messageReadFailures = 0;
+    messageReadFailureIds.clear();
+    await technicalReadContext.close();
   }
 
   const committedReadMessageId = 1291;
@@ -3287,6 +4048,30 @@ try {
     assert.equal(await mobileBulkReadPage.getByLabel('移动主导航').getByText('9+', { exact: true }).count(), 1, 'mobile navigation badge uses the account-wide unread summary rather than the first page count');
     await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).waitFor();
 
+    let resolveDelayedRefreshStarted!: () => void;
+    const delayedRefreshStarted = new Promise<void>((resolve) => { resolveDelayedRefreshStarted = resolve; });
+    let releaseDelayedRefresh!: () => void;
+    const delayedRefreshGate = new Promise<void>((resolve) => { releaseDelayedRefresh = resolve; });
+    await mobileBulkReadPage.route('**/api/messages?*', async (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === 'GET' && url.searchParams.get('page') === '1') {
+        resolveDelayedRefreshStarted();
+        await delayedRefreshGate;
+      }
+      await route.fallback();
+    });
+    const refreshedFirstPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).searchParams.get('page') === '1' && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '刷新', exact: true }).click();
+    await delayedRefreshStarted;
+    const refreshingMessages = mobileBulkReadPage.getByRole('button', { name: '刷新中…', exact: true });
+    assert.equal(await refreshingMessages.getAttribute('aria-busy'), 'true', 'manual message refresh exposes its pending list read');
+    assert.equal(await refreshingMessages.isDisabled(), true, 'manual refresh cannot be repeated while its list read is pending');
+    releaseDelayedRefresh();
+    await refreshedFirstPage;
+    await mobileBulkReadPage.unroute('**/api/messages?*');
+    await mobileBulkReadPage.getByRole('button', { name: '刷新', exact: true }).waitFor();
+
     let resolveDelayedPageStarted!: () => void;
     const delayedPageStarted = new Promise<void>((resolve) => { resolveDelayedPageStarted = resolve; });
     let releaseDelayedPage!: () => void;
@@ -3341,11 +4126,37 @@ try {
     assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息/ }).count(), 29, 'marking one unread item refreshes the first server page and loads all remaining rows without a pagination gap');
     messageReadAttempts = 0;
 
+    const mobileBulkReadRecoveryKey = `xmt:message-read-all-pending:v1:actor:${messageUser.id}`;
+    const bulkReadAttemptsBeforeStorageDrop = messageBulkReadAttempts;
+    await suppressSessionStorageWrite(mobileBulkReadPage, mobileBulkReadRecoveryKey);
+    await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await mobileBulkReadPage.getByText(/无法安全保存批量已读请求编号/).waitFor();
+    assert.equal(await mobileBulkReadPage.evaluate((key) => sessionStorage.getItem(key), mobileBulkReadRecoveryKey), null, 'mobile bulk-read marker remains absent after a silent storage drop');
+    assert.equal(messageBulkReadAttempts, bulkReadAttemptsBeforeStorageDrop, 'mobile bulk-read sends no POST without a confirmed marker');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 29, 'mobile unread state is unchanged when the recovery marker cannot be confirmed');
+    await restoreSessionStorageWrite(mobileBulkReadPage);
+
     messageBulkReadFailures = 1;
     expectMobileBulkReadFailure();
+    let resolveInitialBulkReadStarted!: () => void;
+    const initialBulkReadStarted = new Promise<void>((resolve) => { resolveInitialBulkReadStarted = resolve; });
+    let releaseInitialBulkRead!: () => void;
+    const initialBulkReadGate = new Promise<void>((resolve) => { releaseInitialBulkRead = resolve; });
+    await mobileBulkReadPage.route('**/api/messages/read-all', async (route) => {
+      resolveInitialBulkReadStarted();
+      await initialBulkReadGate;
+      await route.continue();
+    });
     const failedBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
     await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await initialBulkReadStarted;
+    const inFlightBulkRead = mobileBulkReadPage.getByRole('button', { name: '处理中…', exact: true });
+    await inFlightBulkRead.waitFor();
+    assert.equal(await inFlightBulkRead.getAttribute('aria-busy'), 'true', 'mobile bulk-read exposes its busy state while the write is in flight');
+    assert.equal(await inFlightBulkRead.isDisabled(), true, 'mobile bulk-read remains disabled until the write result is known');
+    releaseInitialBulkRead();
     await failedBulkRead;
+    await mobileBulkReadPage.unroute('**/api/messages/read-all');
     const firstRequestId = messageBulkReadRequestIds.at(-1) ?? '';
     assert.equal(messageBulkReadRequestIds.length, 1, 'the fixture parsed exactly one generated client_request_id from the initial POST');
     assert.match(firstRequestId, /^[0-9a-f-]{36}$/i, 'all-read sends a generated client_request_id');
@@ -3376,6 +4187,26 @@ try {
     assert.equal(await mobileBulkReadPage.getByRole('button', { name: '只读核实', exact: true }).isDisabled(), false, 'status-unavailable recovery exposes only a read-only recheck');
     assert.equal(messageBulkReadAttempts, 2, 'uncertain bulk-read response is not automatically resubmitted');
     assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'server committed prior reads and kept the concurrent arrival unread');
+    let releaseBulkReadStatusCheck!: () => void;
+    let resolveBulkReadStatusCheckStarted!: () => void;
+    const bulkReadStatusCheckGate = new Promise<void>((resolve) => { releaseBulkReadStatusCheck = resolve; });
+    const bulkReadStatusCheckStarted = new Promise<void>((resolve) => { resolveBulkReadStatusCheckStarted = resolve; });
+    await mobileBulkReadPage.route('**/api/messages/read-all-requests/*', async (route) => {
+      resolveBulkReadStatusCheckStarted();
+      await bulkReadStatusCheckGate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'unknown' }) });
+    });
+    await mobileBulkReadPage.getByRole('button', { name: '只读核实', exact: true }).click();
+    await bulkReadStatusCheckStarted;
+    const checkingBulkRead = mobileBulkReadPage.getByRole('button', { name: '核实中…', exact: true });
+    assert.equal(await checkingBulkRead.getAttribute('aria-busy'), 'true', 'read-only recovery exposes its pending status lookup');
+    assert.equal(await checkingBulkRead.isDisabled(), true, 'read-only recovery cannot be submitted twice while the lookup is pending');
+    releaseBulkReadStatusCheck();
+    const recoveredReadOnlyCheck = mobileBulkReadPage.getByRole('button', { name: '只读核实', exact: true });
+    await recoveredReadOnlyCheck.waitFor({ state: 'visible' });
+    await mobileBulkReadPage.unroute('**/api/messages/read-all-requests/*');
+    assert.equal(await recoveredReadOnlyCheck.isDisabled(), false, 'a failed lookup returns to a retryable read-only recovery state');
+    assert.equal(messageBulkReadAttempts, 2, 'pending and failed read-only recovery never add a business write');
     const recoveredStatus = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/read-all-requests/') && response.status() === 200);
     const recoveredList = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
     await mobileBulkReadPage.reload({ waitUntil: 'domcontentloaded' });
@@ -3507,10 +4338,12 @@ try {
     await desktopMessageCard.waitFor();
     const failedDesktopMessageRead = desktopMessagePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/993') && response.status() === 503);
     await desktopMessageCard.click();
-    await desktopMessagePage.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.disabled && button.getAttribute('aria-busy') === 'true'));
+    await desktopMessagePage.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('桌面待处理提醒') && button.disabled && button.getAttribute('aria-busy') === 'true'));
     assert.equal(await desktopMessageCard.isDisabled(), true, 'the in-flight message action must not be submitted again');
+    assert.equal(await desktopMessageCard.getAttribute('aria-busy'), 'true', 'the in-flight message card exposes its own busy state');
     await failedDesktopMessageRead;
     assert.equal(messageReadAttempts, 1, 'one click must issue one read request');
+    assert.equal(await desktopMessageCard.getAttribute('aria-busy'), 'false', 'the message card clears its busy state after the failed request is resolved');
     await desktopMessagePage.getByText(/服务器已确认消息仍未读/).waitFor();
     assert.equal(await desktopMessagePage.url(), `${baseUrl}/messages`, 'a failed mark must preserve the inbox and its retry opportunity');
     assert.equal(await desktopMessageCard.getByText('未读', { exact: true }).count(), 1, 'a failed mark must preserve unread state');
@@ -3559,10 +4392,25 @@ try {
     assert.equal(await message.isDisabled(), true, 'an unknown read result locks the unread action');
     assert.equal(messageReadAttempts, 1, 'status lookup failure never triggers an automatic second PUT');
 
+    let releaseSingleReadStatusCheck!: () => void;
+    let resolveSingleReadStatusCheckStarted!: () => void;
+    const singleReadStatusCheckGate = new Promise<void>((resolve) => { releaseSingleReadStatusCheck = resolve; });
+    const singleReadStatusCheckStarted = new Promise<void>((resolve) => { resolveSingleReadStatusCheckStarted = resolve; });
+    await desktopUncertainReadPage.route(`**/api/messages/${desktopUncertainReadId}/read-status`, async (route) => {
+      resolveSingleReadStatusCheckStarted();
+      await singleReadStatusCheckGate;
+      await route.continue();
+    });
     const unreadStatus = desktopUncertainReadPage.waitForResponse((response) => response.request().method() === 'GET'
       && response.url().endsWith(`/api/messages/${desktopUncertainReadId}/read-status`) && response.status() === 200);
     await desktopUncertainReadPage.getByRole('button', { name: '只读核实', exact: true }).click();
+    await singleReadStatusCheckStarted;
+    const verifyingSingleRead = desktopUncertainReadPage.getByRole('button', { name: '核实中…', exact: true });
+    assert.equal(await verifyingSingleRead.getAttribute('aria-busy'), 'true', 'single-message read verification exposes its pending status lookup');
+    assert.equal(await verifyingSingleRead.isDisabled(), true, 'single-message read verification cannot be submitted twice while pending');
+    releaseSingleReadStatusCheck();
     await unreadStatus;
+    await desktopUncertainReadPage.unroute(`**/api/messages/${desktopUncertainReadId}/read-status`);
     await desktopUncertainReadPage.getByText(/服务器已确认消息仍未读/).waitFor();
     assert.equal(messageReadAttempts, 1, 'read-only recheck does not retry the write');
     assert.equal(await message.isDisabled(), false, 'after unread is confirmed, an explicit retry is available');
@@ -3835,6 +4683,15 @@ try {
     await messagePaginationPage.getByText('本页 20 条，共 45 条', { exact: true }).waitFor();
     await messagePaginationPage.getByRole('button', { name: '下一页' }).click();
     await messagePaginationPage.getByRole('heading', { name: '分页消息 21', exact: true }).waitFor();
+    const desktopBulkReadRecoveryKey = 'xmt:message-read-all-pending:v1:actor:11';
+    const desktopBulkReadAttemptsBeforeStorageDrop = messageBulkReadAttempts;
+    await suppressSessionStorageWrite(messagePaginationPage, desktopBulkReadRecoveryKey);
+    await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await messagePaginationPage.getByText(/无法安全保存批量已读请求编号/).waitFor();
+    assert.equal(await messagePaginationPage.evaluate((key) => sessionStorage.getItem(key), desktopBulkReadRecoveryKey), null, 'desktop bulk-read marker remains absent after a silent storage drop');
+    assert.equal(messageBulkReadAttempts, desktopBulkReadAttemptsBeforeStorageDrop, 'desktop bulk-read sends no POST without a confirmed marker');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 30, 'desktop unread state is unchanged when the recovery marker cannot be confirmed');
+    await restoreSessionStorageWrite(messagePaginationPage);
     expectMessageClearFailure();
     const failedBulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST'
       && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
@@ -3915,6 +4772,15 @@ try {
 
     await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).click();
     await messagePaginationPage.getByRole('heading', { name: '确认清空消息' }).waitFor();
+    const desktopClearRecoveryKey = 'xmt:message-clear-pending:v1:actor:11';
+    const desktopClearAttemptsBeforeStorageDrop = messageClearAttempts;
+    await suppressSessionStorageWrite(messagePaginationPage, desktopClearRecoveryKey);
+    await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
+    await messagePaginationPage.getByText(/无法安全保存清空请求编号/).waitFor();
+    assert.equal(await messagePaginationPage.evaluate((key) => sessionStorage.getItem(key), desktopClearRecoveryKey), null, 'desktop clear marker remains absent after a silent storage drop');
+    assert.equal(messageClearAttempts, desktopClearAttemptsBeforeStorageDrop, 'message clear sends no DELETE without a confirmed marker');
+    assert.equal(mobileMessagesFixture.length, 46, 'all messages remain when the clear marker cannot be confirmed');
+    await restoreSessionStorageWrite(messagePaginationPage);
     const failedClearResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/messages'));
     expectMessageClearFailure();
     await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
@@ -4444,17 +5310,36 @@ try {
     try {
       await fontSizePage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
       await fontSizePage.getByText('普通人员', { exact: true }).waitFor();
-      const fontSizeButtons = fontSizePage.getByRole('button', { name: /^(14|16|18)$/ });
+      const fontSizeGroup = fontSizePage.getByRole('group', { name: '字体大小', exact: true });
+      assert.equal(await fontSizeGroup.count(), 1, `${theme} ${width}px font-size options belong to a named accessibility group`);
+      const fontSizeButtons = fontSizeGroup.getByRole('button', { name: /^(14|16|18)$/ });
       assert.equal(await fontSizeButtons.count(), 3, 'the mobile account page exposes all three font-size choices');
+      assert.deepEqual(await fontSizeButtons.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-pressed'))), ['true', 'false', 'false'], `${theme} ${width}px exposes 14px as the sole initially selected font size`);
       for (let index = 0; index < 3; index += 1) {
         const bounds = await fontSizeButtons.nth(index).boundingBox();
         assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `${theme} ${width}px font-size option ${index + 1} is at least 40×40px`);
       }
       await assertMobileLayout(fontSizePage, width, `mobile-me-font-size-${theme}-${width}`);
-      await fontSizePage.getByRole('button', { name: '18', exact: true }).click();
+      await fontSizeButtons.nth(2).click();
       await fontSizePage.waitForFunction(() => localStorage.getItem('xmt_fontSize') === '18');
+      assert.deepEqual(await fontSizeButtons.evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-pressed'))), ['false', 'false', 'true'], `${theme} ${width}px exposes 18px as the sole selected font size after selection`);
       await assertMobileLayout(fontSizePage, width, `mobile-me-font-size-large-${theme}-${width}`);
       assert.deepEqual(fontSizeErrors, [], `${theme} ${width}px font-size page has no browser errors`);
+      const initialThemeLabel = `主题 当前${theme === 'dark' ? '深色' : '浅色'}`;
+      const switchedThemeLabel = `主题 当前${theme === 'dark' ? '浅色' : '深色'}`;
+      const themeToggle = fontSizePage.getByRole('button', { name: initialThemeLabel, exact: true });
+      assert.equal(await themeToggle.getAttribute('aria-labelledby'), null, `${theme} ${width}px derives its accessible name from button text`);
+      assert.equal(await themeToggle.getAttribute('aria-label'), null, `${theme} ${width}px does not override its visible name`);
+      assert.equal(await themeToggle.getAttribute('aria-pressed'), theme === 'dark' ? 'true' : 'false', `${theme} ${width}px exposes the active theme as toggle state`);
+      await themeToggle.focus();
+      await themeToggle.press('Space');
+      const switchedThemeToggle = fontSizePage.getByRole('button', { name: switchedThemeLabel, exact: true });
+      assert.equal(await switchedThemeToggle.getAttribute('aria-labelledby'), null, `${theme} ${width}px keeps using the visible text as the accessible name`);
+      assert.equal(await switchedThemeToggle.getAttribute('aria-pressed'), theme === 'dark' ? 'false' : 'true', `${theme} ${width}px announces the switched theme state`);
+      assert.equal(await fontSizePage.evaluate(() => localStorage.getItem('xmt_theme')), theme === 'dark' ? 'light' : 'dark', 'the theme control updates the saved user preference');
+      await switchedThemeToggle.click();
+      assert.equal(await fontSizePage.getByRole('button', { name: initialThemeLabel, exact: true }).getAttribute('aria-pressed'), theme === 'dark' ? 'true' : 'false', `${theme} ${width}px can restore the original theme state`);
+      assert.equal(await fontSizePage.evaluate(() => localStorage.getItem('xmt_theme')), theme, 'restoring the theme does not write to a business API');
     } finally {
       await fontSizeContext.close();
     }
@@ -4469,6 +5354,8 @@ try {
   try {
     await profilePage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
     await profilePage.getByText('普通人员', { exact: true }).waitFor();
+    assert.equal(await profilePage.locator('#mobile-profile-name').getAttribute('name'), 'name', 'the profile form gives the name field a stable form name');
+    assert.equal(await profilePage.locator('#mobile-profile-email').getAttribute('name'), 'email', 'the profile form gives the email field a stable form name');
     const initialProfileWriteCount = profileUpdateAttempts;
     await profilePage.getByRole('textbox', { name: '姓名' }).fill('尚未保存的移动姓名');
     await profilePage.getByRole('textbox', { name: '邮箱' }).fill('unsaved-mobile-profile@example.test');
@@ -4566,6 +5453,25 @@ try {
     await correctedProfileRetry;
     await profilePage.getByText('个人资料已保存。', { exact: true }).waitFor();
 
+    await profilePage.getByRole('textbox', { name: '姓名' }).fill('技术错误提示核验');
+    profileUpdateFailures = 1;
+    profileUpdateFailureStatus = 400;
+    profileUpdateFailureMessage = 'Internal Server Error';
+    const profileReadsBeforeTechnicalRejection = profileReadAttempts;
+    const profileWritesBeforeTechnicalRejection = profileUpdateAttempts;
+    const technicalProfileRejection = profilePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 400);
+    await profilePage.getByRole('textbox', { name: '姓名' }).press('Enter');
+    await technicalProfileRejection;
+    await profilePage.getByText('个人资料保存失败，请检查后重试。', { exact: true }).waitFor();
+    assert.equal(await profilePage.getByText('Internal Server Error', { exact: true }).count(), 0, 'mobile profile does not expose a raw English server error');
+    assert.equal(profileReadAttempts, profileReadsBeforeTechnicalRejection, 'a definite profile rejection is not followed by an unnecessary verification read');
+    assert.equal(profileUpdateAttempts, profileWritesBeforeTechnicalRejection + 1, 'pressing Enter submits the profile form exactly once');
+    assert.equal(await profilePage.getByRole('textbox', { name: '姓名' }).isDisabled(), false, 'a definite technical rejection keeps the profile form editable');
+    const technicalProfileRetry = profilePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 200);
+    await profilePage.getByRole('button', { name: '保存个人资料' }).click();
+    await technicalProfileRetry;
+    await profilePage.getByText('个人资料已保存。', { exact: true }).waitFor();
+
     await profilePage.getByRole('textbox', { name: '姓名' }).fill('响应丢失后已保存');
     await profilePage.getByRole('textbox', { name: '邮箱' }).fill('committed-profile@example.test');
     profileUpdateFailures = 1;
@@ -4626,6 +5532,55 @@ try {
     await explicitProfileOverwrite;
     await profilePage.getByText('个人资料已保存。', { exact: true }).waitFor();
     assert.equal(profileUpdateAttempts, writesBeforeConflict + 2, 'server conflict is overwritten only after an explicit user action');
+
+    const writesBeforeUnverifiedStorage = profileUpdateAttempts;
+    await profilePage.getByRole('textbox', { name: '姓名' }).fill('凭证无法写入时不提交');
+    await profilePage.getByRole('textbox', { name: '邮箱' }).fill('marker-missing@example.test');
+    await suppressSessionStorageWrite(profilePage, 'xmt:mobile-profile-recovery:v1:actor:12');
+    try {
+      await profilePage.getByRole('button', { name: '保存个人资料' }).click();
+      await profilePage.getByRole('alert').getByText('本机无法完整保存个人资料核验记录，本次保存未发送。请检查浏览器存储后重试。', { exact: true }).waitFor();
+      assert.equal(profileUpdateAttempts, writesBeforeUnverifiedStorage, 'a silently dropped recovery marker prevents the profile PUT');
+      assert.equal(await profilePage.evaluate(() => sessionStorage.getItem('xmt:mobile-profile-recovery:v1:actor:12')), null, 'the fixture confirms no marker was stored');
+    } finally {
+      await restoreSessionStorageWrite(profilePage);
+    }
+
+    await profilePage.getByRole('textbox', { name: '姓名' }).fill('刷新后保留的资料草稿');
+    await profilePage.getByRole('textbox', { name: '邮箱' }).fill('refresh-profile@example.test');
+    profileUpdateFailures = 1;
+    profileUpdateFailureCommit = false;
+    profileReadFailures = 1;
+    expectProfileFailure();
+    expectProfileFailure();
+    const unresolvedProfilePut = profilePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 503);
+    const unresolvedProfileGet = profilePage.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/auth/me') && response.status() === 503);
+    const writesBeforeRefreshRecovery = profileUpdateAttempts;
+    await profilePage.getByRole('button', { name: '保存个人资料' }).click();
+    await unresolvedProfilePut;
+    await unresolvedProfileGet;
+    await profilePage.getByTestId('mobile-profile-recovery').getByText(/尚未核实/).waitFor();
+    const storedProfileRecovery = await profilePage.evaluate(() => {
+      const value = sessionStorage.getItem('xmt:mobile-profile-recovery:v1:actor:12');
+      return value ? JSON.parse(value) as Record<string, unknown> : null;
+    });
+    assert.deepEqual(Object.keys(storedProfileRecovery ?? {}).sort(), ['actorId', 'authMode', 'before', 'draft', 'requestId', 'version'], 'the saved profile marker contains only scoped request metadata and the compared profile fields');
+    assert.equal(storedProfileRecovery?.actorId, 12, 'the pending profile marker is scoped to the current account');
+    assert.equal(JSON.stringify(storedProfileRecovery).includes('token'), false, 'the profile marker does not store an access token');
+    assert.equal(profileUpdateAttempts, writesBeforeRefreshRecovery + 1, 'the unresolved profile update is sent once before refresh');
+
+    await profilePage.reload({ waitUntil: 'domcontentloaded' });
+    await profilePage.getByTestId('mobile-profile-recovery').getByText('服务器仍是本次编辑前的资料。没有自动重发；确认后可明确重新保存。', { exact: true }).waitFor();
+    assert.equal(await profilePage.getByRole('textbox', { name: '姓名' }).inputValue(), '刷新后保留的资料草稿', 'refresh restores the profile name draft');
+    assert.equal(await profilePage.getByRole('textbox', { name: '邮箱' }).inputValue(), 'refresh-profile@example.test', 'refresh restores the profile email draft');
+    assert.equal(await profilePage.getByRole('textbox', { name: '姓名' }).isDisabled(), true, 'the profile draft stays locked until the user chooses recovery');
+    assert.equal(profileUpdateAttempts, writesBeforeRefreshRecovery + 1, 'refresh recovery uses read-only verification and does not repeat the PUT');
+    const retryAfterRefresh = profilePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 200);
+    await profilePage.getByRole('button', { name: '确认重试保存' }).click();
+    await retryAfterRefresh;
+    await profilePage.getByText('个人资料已保存。', { exact: true }).waitFor();
+    assert.equal(profileUpdateAttempts, writesBeforeRefreshRecovery + 2, 'one explicit retry after refresh sends exactly one new profile PUT');
+    assert.equal(await profilePage.evaluate(() => sessionStorage.getItem('xmt:mobile-profile-recovery:v1:actor:12')), null, 'verified completion clears the mobile profile recovery record');
     assert.deepEqual(profileErrors, [], profileErrors.join('\n'));
   } finally {
     await profileContext.close();
@@ -4639,8 +5594,32 @@ try {
   const { context: passwordContext, page: passwordPage, errors: passwordErrors, expectConsoleFailure: expectPasswordFailure } = await openMobilePage(390, passwordUser);
   try {
     await passwordPage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
-    await passwordPage.getByRole('button', { name: '账号安全' }).click();
+    const accountSecurityToggle = passwordPage.getByRole('button', { name: '账号安全', exact: true });
+    assert.equal(await accountSecurityToggle.getAttribute('aria-expanded'), 'false', 'account security disclosure reports its initial collapsed state');
+    assert.equal(await passwordPage.getByLabel('当前密码').count(), 0, 'collapsed account security hides the password form');
+    const passwordWritesBeforeDisclosure = passwordChangeAttempts;
+    await accountSecurityToggle.click();
+    assert.equal(await accountSecurityToggle.getAttribute('aria-expanded'), 'true', 'account security disclosure reports its expanded state');
     await passwordPage.getByLabel('当前密码').waitFor();
+    await accountSecurityToggle.click();
+    assert.equal(await accountSecurityToggle.getAttribute('aria-expanded'), 'false', 'account security disclosure reports its collapsed state after closing');
+    assert.equal(await passwordPage.getByLabel('当前密码').count(), 0, 'collapsing account security hides the password form');
+    assert.equal(passwordChangeAttempts, passwordWritesBeforeDisclosure, 'opening and closing account security does not submit a password change');
+    const changelogToggle = passwordPage.getByRole('button', { name: '更新说明', exact: true });
+    assert.equal(await changelogToggle.getAttribute('aria-expanded'), 'false', 'mobile changelog disclosure reports its initial collapsed state');
+    assert.equal(await passwordPage.locator('article').count(), 0, 'collapsed changelog hides its entries');
+    await changelogToggle.click();
+    assert.equal(await changelogToggle.getAttribute('aria-expanded'), 'true', 'mobile changelog disclosure reports its expanded state');
+    assert.ok(await passwordPage.locator('article').count() > 0, 'expanded changelog exposes update entries');
+    await changelogToggle.click();
+    assert.equal(await changelogToggle.getAttribute('aria-expanded'), 'false', 'mobile changelog disclosure returns to its collapsed state');
+    assert.equal(await passwordPage.locator('article').count(), 0, 'collapsing changelog hides its entries again');
+    await accountSecurityToggle.click();
+    assert.equal(await accountSecurityToggle.getAttribute('aria-expanded'), 'true', 'account security can be reopened after the state check');
+    await passwordPage.getByLabel('当前密码').waitFor();
+    assert.equal(await passwordPage.locator('#mobile-current-password').getAttribute('name'), 'currentPassword', 'the password form names its current-password field');
+    assert.equal(await passwordPage.locator('#mobile-new-password').getAttribute('name'), 'newPassword', 'the password form names its new-password field');
+    assert.equal(await passwordPage.locator('#mobile-password-username').getAttribute('autocomplete'), 'username', 'the password form supplies the username context to password managers');
     await passwordPage.getByRole('button', { name: '更新密码' }).click();
     await passwordPage.getByText('请输入当前密码。', { exact: true }).waitFor();
     await passwordPage.getByLabel('当前密码').fill('current-pass');
@@ -4665,6 +5644,18 @@ try {
     assert.equal(passwordChangeAttempts, 2, 'correcting a definite rejection sends one explicit new request');
     assert.equal(passwordChangeCommitted, true, 'the isolated fixture confirms the successful retry was committed');
 
+    passwordChangeFailureResponses = [{ status: 400, message: 'Internal Server Error' }];
+    await passwordPage.getByLabel('当前密码').fill('current-pass');
+    await passwordPage.getByLabel('新密码（至少 6 位）').fill('246810');
+    const technicalPasswordRejection = passwordPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/auth/change-password') && response.status() === 400);
+    await passwordPage.getByLabel('新密码（至少 6 位）').press('Enter');
+    await technicalPasswordRejection;
+    await passwordPage.getByText('修改密码失败，请检查当前密码和网络后重试。', { exact: true }).waitFor();
+    assert.equal(await passwordPage.getByText('Internal Server Error', { exact: true }).count(), 0, 'mobile password form does not expose a raw English server error');
+    assert.equal(await passwordPage.getByLabel('当前密码').isDisabled(), false, 'a definite password rejection keeps the current-password field editable');
+    assert.equal(await passwordPage.getByLabel('新密码（至少 6 位）').isDisabled(), false, 'a definite password rejection keeps the new-password field editable');
+    assert.equal(passwordChangeAttempts, 3, 'pressing Enter submits one definite password request');
+
     passwordChangeCommitted = false;
     passwordChangeFailureResponses = [{ status: 503, message: '密码服务暂不可用，请勿重复提交', commit: true }];
     await passwordPage.getByLabel('当前密码').fill('updated-current-pass');
@@ -4675,7 +5666,7 @@ try {
     await ambiguousPasswordUpdate;
     await passwordPage.getByText('密码修改结果尚未确认。为避免重复修改，密码输入与提交已锁定；请退出后尝试使用新密码重新登录。密码不会保存在本机。', { exact: true }).waitFor();
     assert.equal(passwordChangeCommitted, true, 'the isolated fixture can commit a password change before returning 503');
-    assert.equal(passwordChangeAttempts, 3, 'the ambiguous response follows two prior explicit requests');
+    assert.equal(passwordChangeAttempts, 4, 'the ambiguous response follows three prior explicit requests');
     assert.equal(await passwordPage.getByLabel('当前密码').isDisabled(), true, 'unknown outcome clears and locks the current-password input');
     assert.equal(await passwordPage.getByLabel('新密码（至少 6 位）').isDisabled(), true, 'unknown outcome clears and locks the new-password input');
     assert.equal(await passwordPage.getByRole('button', { name: '结果待核实' }).isDisabled(), true, 'unknown outcome locks password submission');
@@ -4691,10 +5682,10 @@ try {
     await passwordLeaveDialog.waitFor();
     assert.equal(new URL(passwordPage.url()).pathname, '/me', 'unresolved password recovery blocks in-app navigation');
     await passwordLeaveDialog.getByRole('button', { name: '留在当前页面', exact: true }).click();
-    assert.equal(passwordChangeAttempts, 3, 'canceling navigation does not resend an unresolved password change');
+    assert.equal(passwordChangeAttempts, 4, 'canceling navigation does not resend an unresolved password change');
     await passwordPage.getByText('密码修改结果尚未确认。', { exact: false }).waitFor();
     await passwordPage.waitForTimeout(250);
-    assert.equal(passwordChangeAttempts, 3, 'an ambiguous password result never automatically sends a second POST');
+    assert.equal(passwordChangeAttempts, 4, 'an ambiguous password result never automatically sends a second POST');
     await passwordPage.screenshot({ path: '/tmp/xmt-mobile-password-unknown-390.png' });
     assert.deepEqual(passwordErrors, [], passwordErrors.join('\n'));
   } finally {
@@ -5206,6 +6197,24 @@ try {
           const tab = contentLabHover.page.getByRole('button', { name: panel.tab, exact: true });
           if ((await tab.getAttribute('aria-pressed')) !== 'true') await tab.click();
           await contentLabHover.page.getByRole('heading', { name: panel.heading, exact: true }).waitFor();
+          if (panel.tab === '协作动态') {
+            const humanReadableToggle = contentLabHover.page.getByRole('checkbox', { name: /人类可读模式/ });
+            const accentColors = await humanReadableToggle.evaluate((element) => {
+              const probe = document.createElement('span');
+              probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--xmt-primary').trim();
+              document.body.appendChild(probe);
+              const expected = getComputedStyle(probe).color;
+              probe.remove();
+              return { actual: getComputedStyle(element).accentColor, expected };
+            });
+            assert.equal(accentColors.actual, accentColors.expected, `${theme}主题人类可读模式复选框应使用 Studio 主色令牌`);
+            await humanReadableToggle.check();
+            assert.equal(await humanReadableToggle.isChecked(), true, `${theme}主题人类可读模式复选框应响应启用操作`);
+            await contentLabHover.page.getByRole('heading', { name: '叙事视图', exact: true }).waitFor();
+            await humanReadableToggle.uncheck();
+            assert.equal(await humanReadableToggle.isChecked(), false, `${theme}主题人类可读模式复选框应响应关闭操作`);
+            await contentLabHover.page.getByRole('heading', { name: '时间轴', exact: true }).waitFor();
+          }
           const action = contentLabHover.page.getByRole('button', { name: panel.action, exact: true });
           await action.waitFor();
           const defaultBackground = await action.evaluate((element) => getComputedStyle(element).backgroundImage);
@@ -5522,6 +6531,12 @@ try {
   const { context: desktopCreatorContext, page: desktopCreatorPage, errors: desktopCreatorErrors, expectConsoleFailure: expectDesktopFailure } = await openMobilePage(1440, desktopTopicCreator);
   try {
     await desktopCreatorPage.goto(`${baseUrl}/topics/add`, { waitUntil: 'domcontentloaded' });
+    const topicPreviewMode = desktopCreatorPage.getByRole('button', { name: '预览模式', exact: true });
+    assert.equal(await topicPreviewMode.getAttribute('aria-pressed'), 'false', 'new topic starts in edit mode and exposes the unpressed preview state');
+    await topicPreviewMode.click();
+    assert.equal(await topicPreviewMode.getAttribute('aria-pressed'), 'true', 'preview mode exposes the pressed state');
+    await topicPreviewMode.click();
+    assert.equal(await topicPreviewMode.getAttribute('aria-pressed'), 'false', 'returning to edit mode clears the pressed state');
     const titleInput = desktopCreatorPage.getByPlaceholder('请输入选题标题');
     await titleInput.waitFor();
     const title = '桌面提报失败后仍可重试';
@@ -5575,15 +6590,22 @@ try {
   try {
     let topicAssetRetryAttempts = 0;
     let dimensionAddAttempts = 0;
+    let failTopicDimensionReadAfterUncertainWrite = false;
     const topicAssetListMethods: string[] = [];
     let registeredDimensions: Array<{ id: number; type: 'city' | 'person' | 'project'; value: string }> = [];
     await topicAssetsPage.route('**/api/topics/931/asset-dimensions', async (route) => {
       if (route.request().method() === 'GET') {
+        if (failTopicDimensionReadAfterUncertainWrite) {
+          failTopicDimensionReadAfterUncertainWrite = false;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '内容维度核实暂不可用' }) });
+          return;
+        }
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: registeredDimensions }) });
         return;
       }
       dimensionAddAttempts += 1;
       if (dimensionAddAttempts === 1) {
+        failTopicDimensionReadAfterUncertainWrite = true;
         await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '维度服务暂不可用，请重试' }) });
         return;
       }
@@ -5643,10 +6665,17 @@ try {
     await assertMobileLayout(topicAssetsPage, 390, 'topic-assets');
     await topicAssetsPage.getByLabel('维度名称-931').fill('杭州');
     expectTopicAssetConsoleFailure();
+    expectTopicAssetConsoleFailure();
     await Promise.all([
       topicAssetsPage.waitForResponse((response) => response.url().includes('/api/topics/931/asset-dimensions') && response.status() === 503),
       topicAssetsPage.getByRole('button', { name: '添加维度' }).first().click(),
     ]);
+    const verifyDimensionOutcome = topicAssetsPage.getByRole('button', { name: '只读核实当前状态' });
+    await verifyDimensionOutcome.waitFor();
+    const verifyDimensionBounds = await verifyDimensionOutcome.boundingBox();
+    assert.ok(verifyDimensionBounds && verifyDimensionBounds.height >= 40, `read-only dimension recovery control meets the 40px touch target: ${JSON.stringify(verifyDimensionBounds)}`);
+    assert.equal(await topicAssetsPage.getByLabel('维度名称-931').isDisabled(), true, 'uncertain dimension write stays locked until read-only verification');
+    await verifyDimensionOutcome.click();
     await topicAssetsPage.getByRole('status').getByText('只读核实未发现城市“杭州”；未自动重试，如仍需登记请再次点击“添加维度”。', { exact: true }).waitFor();
     assert.equal(await topicAssetsPage.getByLabel('维度名称-931').inputValue(), '杭州', 'read-only reconciliation keeps the requested value available for an explicit retry');
     await Promise.all([
@@ -5732,12 +6761,19 @@ try {
   const desktopTopicDimensionUser = { ...user, id: 14, username: 'desktop-topic-dimensions', name: '桌面维度验收', role: 'editor' };
   fixtureUser = desktopTopicDimensionUser;
   fixturePermissions = ['topic:update'];
-  const { context: desktopTopicDimensionContext, page: desktopTopicDimensionPage, errors: desktopTopicDimensionErrors } = await openMobilePage(1440, desktopTopicDimensionUser);
+  const { context: desktopTopicDimensionContext, page: desktopTopicDimensionPage, errors: desktopTopicDimensionErrors, expectConsoleFailure: expectDesktopTopicDimensionFailure } = await openMobilePage(1440, desktopTopicDimensionUser);
   try {
     let registeredDesktopDimension: { id: number; type: 'city' | 'person' | 'project'; value: string } | null = null;
+    let failNextDesktopTopicDimensionRead = false;
+    let failNextDesktopTopicDimensionDelete = false;
     await desktopTopicDimensionPage.route(`**/api/topics/${linkedTopic.id}/asset-dimensions**`, async (route) => {
       const request = route.request();
       if (request.method() === 'GET') {
+        if (failNextDesktopTopicDimensionRead) {
+          failNextDesktopTopicDimensionRead = false;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '内容维度服务暂不可用' }) });
+          return;
+        }
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: registeredDesktopDimension ? [registeredDesktopDimension] : [] }) });
         return;
       }
@@ -5747,6 +6783,12 @@ try {
         await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ message: '维度已登记', id: 960, data: registeredDesktopDimension }) });
         return;
       }
+      if (failNextDesktopTopicDimensionDelete) {
+        failNextDesktopTopicDimensionDelete = false;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '删除结果暂时无法确认' }) });
+        return;
+      }
+      registeredDesktopDimension = null;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: '维度已移除' }) });
     });
     await desktopTopicDimensionPage.goto(`${baseUrl}/topics/${linkedTopic.id}`, { waitUntil: 'domcontentloaded' });
@@ -5757,11 +6799,33 @@ try {
     await desktopTopicDimensionPage.getByRole('button', { name: '添加维度' }).click();
     await addPersonResponse;
     await desktopTopicDimensionPage.getByText('李师傅', { exact: true }).waitFor();
+    const removeDesktopDimensionButton = desktopTopicDimensionPage.getByRole('button', { name: '移除人物：李师傅', exact: true });
+    const removeDesktopDimensionBounds = await removeDesktopDimensionButton.boundingBox();
+    assert.ok(removeDesktopDimensionBounds && removeDesktopDimensionBounds.width >= 40 && removeDesktopDimensionBounds.height >= 40, `desktop topic dimension remove action is at least 40×40px: ${JSON.stringify(removeDesktopDimensionBounds)}`);
+    failNextDesktopTopicDimensionDelete = true;
+    failNextDesktopTopicDimensionRead = true;
+    expectDesktopTopicDimensionFailure();
+    expectDesktopTopicDimensionFailure();
+    const uncertainDesktopRemoveResponse = desktopTopicDimensionPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(`/api/topics/${linkedTopic.id}/asset-dimensions/`) && response.status() === 503);
+    await removeDesktopDimensionButton.click();
+    await uncertainDesktopRemoveResponse;
+    await desktopTopicDimensionPage.getByRole('alert').getByText(/操作结果暂不明确；只读核实失败：/).waitFor();
+    const verifyDesktopDimensionButton = desktopTopicDimensionPage.getByRole('button', { name: '只读核实当前状态', exact: true });
+    const verifyDesktopDimensionBounds = await verifyDesktopDimensionButton.boundingBox();
+    assert.ok(verifyDesktopDimensionBounds && verifyDesktopDimensionBounds.width >= 40 && verifyDesktopDimensionBounds.height >= 40, `desktop topic dimension recovery action is at least 40×40px: ${JSON.stringify(verifyDesktopDimensionBounds)}`);
+    await verifyDesktopDimensionButton.click();
+    await desktopTopicDimensionPage.getByRole('status').getByText('只读核实发现该维度仍存在；未自动重试，请再次点击“移除”后重试。', { exact: true }).waitFor();
     await assertMobileLayout(desktopTopicDimensionPage, 1440, 'topic-dimensions');
     await desktopTopicDimensionPage.screenshot({ path: '/tmp/xmt-topic-dimensions-desktop-1440.png', fullPage: true });
     await desktopTopicDimensionPage.setViewportSize({ width: 320, height: 844 });
     await desktopTopicDimensionPage.getByRole('heading', { name: '城市、人物与项目' }).waitFor();
     await assertMobileLayout(desktopTopicDimensionPage, 320, 'topic-dimensions-desktop-resized-narrow');
+    const narrowRemoveDesktopDimensionBounds = await removeDesktopDimensionButton.boundingBox();
+    assert.ok(narrowRemoveDesktopDimensionBounds && narrowRemoveDesktopDimensionBounds.width >= 40 && narrowRemoveDesktopDimensionBounds.height >= 40, `topic dimension remove action remains at least 40×40px at 320px: ${JSON.stringify(narrowRemoveDesktopDimensionBounds)}`);
+    const removeDesktopDimensionResponse = desktopTopicDimensionPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().includes(`/api/topics/${linkedTopic.id}/asset-dimensions/`) && response.status() === 200);
+    await removeDesktopDimensionButton.click();
+    await removeDesktopDimensionResponse;
+    assert.equal(await desktopTopicDimensionPage.getByText('李师傅', { exact: true }).count(), 0, 'desktop dimension removal updates the list after explicit confirmation');
     assert.deepEqual(desktopTopicDimensionErrors, [], desktopTopicDimensionErrors.join('\n'));
   } finally {
     await desktopTopicDimensionContext.close();

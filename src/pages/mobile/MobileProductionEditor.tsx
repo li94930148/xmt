@@ -8,6 +8,7 @@ import ProductionMaterialHistorySnapshot from '@/components/production/Productio
 import ProductionOriginPanel from '@/components/production/ProductionOriginPanel';
 import { productionStatusLabel } from '@/components/production/productionStatusLabel';
 import { ActionButton } from '@/components/studio';
+import ErrorState from '@/components/common/ErrorState';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import { getProductionVersionRoomId } from '@/collaboration/core/events';
 import { createProductionEditorAdapter } from '@/editor/adapters/productionEditorAdapter';
@@ -20,6 +21,7 @@ import { usePermission } from '@/hooks/usePermission';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
 import { isWeb } from '@/platform/runtime';
 import AccessDeniedState from '@/components/AccessDeniedState';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import {
   persistMobileProductionWriteRecovery,
   readMobileProductionWriteRecovery,
@@ -85,7 +87,8 @@ function persistMobileProductionCreateRecovery(recovery: MobileProductionCreateR
       throw new Error('创作恢复状态未能完整保存。');
     }
   } catch (error) {
-    throw new Error(`本次创作请求未发送：${error instanceof Error ? error.message : '浏览器无法保存恢复状态'}`);
+    const reason = getUserFacingErrorMessage(error, '浏览器无法保存恢复状态');
+    throw new Error(`本次创作请求未发送：${reason}`);
   }
 }
 
@@ -296,7 +299,7 @@ export default function MobileProductionEditor() {
     } catch (error) {
       if (requestId !== loadRequestRef.current) return;
       setLoadFailed(true);
-      setNotice(error instanceof Error ? error.message : '加载稿件失败');
+      setNotice(getUserFacingErrorMessage(error, '稿件加载失败，请检查连接后重试。'));
     } finally {
       if (requestId === loadRequestRef.current) {
         setLoading(false);
@@ -354,7 +357,7 @@ export default function MobileProductionEditor() {
         const uncertain = {
           ...recovery,
           phase: 'uncertain' as const,
-          readError: storageError instanceof Error ? storageError.message : '恢复信息保存失败；暂不允许重试。',
+          readError: getUserFacingErrorMessage(storageError, '恢复信息保存失败；暂不允许重试。'),
         };
         updatePendingCreateRecovery(uncertain);
         setNotice(uncertain.readError);
@@ -363,7 +366,7 @@ export default function MobileProductionEditor() {
       const uncertain = {
         ...recovery,
         phase: 'uncertain' as const,
-        readError: `创作结果仍无法确认（${error instanceof Error ? error.message : '读取失败'}）。请只读核实，不要重新创建。`,
+        readError: `创作结果仍无法确认（${getUserFacingErrorMessage(error, '暂时无法读取服务器状态')}）。请只读核实，不要重新创建。`,
       };
       updatePendingCreateRecovery(uncertain);
       setNotice(uncertain.readError);
@@ -416,7 +419,7 @@ export default function MobileProductionEditor() {
         if (isDefinitiveMobileProductionCreateRejection(error)) {
           removeMobileProductionCreateRecovery(recovery.userId, recovery.clientRequestId);
           updatePendingCreateRecovery(null);
-          setNotice(error instanceof Error ? error.message : '创作保存失败，请检查后重试。');
+          setNotice(getUserFacingErrorMessage(error, '创作保存失败，请检查后重试。'));
         } else {
           await resolveMobileProductionCreate({ ...recovery, phase: 'uncertain', readError: null });
         }
@@ -425,7 +428,7 @@ export default function MobileProductionEditor() {
       const uncertain = {
         ...recovery,
         phase: 'uncertain' as const,
-        readError: error instanceof Error ? error.message : '本机恢复信息无法确认；未安全重试。',
+        readError: getUserFacingErrorMessage(error, '本机恢复信息无法确认；未安全重试。'),
       };
       updatePendingCreateRecovery(uncertain);
       setNotice(uncertain.readError);
@@ -565,7 +568,7 @@ export default function MobileProductionEditor() {
       const uncertain: MobileProductionWriteRecovery = {
         ...recovery,
         phase: 'uncertain',
-        readError: `稿件写入结果仍无法确认（${error instanceof Error ? error.message : '只读读取失败'}）。编辑和后续写入已暂停。`,
+        readError: `稿件写入结果仍无法确认（${getUserFacingErrorMessage(error, '暂时无法读取稿件')}）。编辑和后续写入已暂停。`,
       };
       try { persistMobileProductionWriteRecovery(uncertain); } catch { /* Keep the in-memory write lock even if session storage is unavailable. */ }
       updatePendingWriteRecovery(uncertain);
@@ -695,7 +698,7 @@ export default function MobileProductionEditor() {
         : recovery.operation === 'review-approve' ? '审核已通过'
           : recovery.operation === 'review-submit' ? '已提交审核' : '已保存草稿');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '稿件更新失败');
+      setNotice(getUserFacingErrorMessage(error, '稿件更新失败，请检查后重试。'));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -801,7 +804,7 @@ export default function MobileProductionEditor() {
             removeMobileProductionCreateRecovery(recovery.userId, recovery.clientRequestId);
             updatePendingCreateRecovery(null);
             createRecovery = null;
-            setNotice(error instanceof Error ? error.message : '创作保存失败，请检查后重试。');
+            setNotice(getUserFacingErrorMessage(error, '创作保存失败，请检查后重试。'));
           } else {
             await resolveMobileProductionCreate(recovery);
           }
@@ -809,7 +812,7 @@ export default function MobileProductionEditor() {
       }
     } catch (error) {
       if (createRecovery) await resolveMobileProductionCreate(createRecovery);
-      else setNotice(error instanceof Error ? error.message : '保存稿件失败');
+      else setNotice(getUserFacingErrorMessage(error, '保存稿件失败，请检查后重试。'));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -850,7 +853,7 @@ export default function MobileProductionEditor() {
       setContent(approvedContent);
       setNotice(outcome === 'recovered' ? '服务器已确认审核通过，没有重复提交。' : '审核已通过');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '审核稿件失败');
+      setNotice(getUserFacingErrorMessage(error, '审核稿件失败，请检查后重试。'));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -949,14 +952,12 @@ export default function MobileProductionEditor() {
       ) : null}
       {routeDataLoading ? <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-studio-text-muted">正在载入稿件…</p> : null}
       {!routeDataLoading && loadFailed ? (
-        <div className="space-y-3">
-          <p role="alert" className="rounded-2xl border border-studio-coral/30 bg-studio-coral-soft p-4 text-sm text-studio-coral-contrast">
-            {notice || '加载稿件失败；正文暂不可用。'}
-          </p>
-          <button type="button" disabled={loading} onClick={() => void load()} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center px-4 disabled:opacity-50">
-            {loading ? '正在重新加载…' : '重试加载'}
-          </button>
-        </div>
+        <ErrorState
+          title="暂时无法读取创作详情"
+          description={notice || '稿件加载失败，请检查连接后重试。'}
+          actionText="重新读取创作详情"
+          onRetry={() => void load()}
+        />
       ) : null}
       {!routeDataLoading && !loadFailed && historyUnavailable && isHistoricalView ? (
         <p role="alert" className="rounded-2xl border border-studio-coral/30 bg-studio-coral-soft p-4 text-sm text-studio-coral-contrast">
@@ -973,6 +974,7 @@ export default function MobileProductionEditor() {
           {!canEdit ? <p className="border-b border-studio-border-soft px-4 py-3 text-sm text-studio-text-muted">{pendingCreateRecovery ? '新建结果正在只读核实；原正文已保留，核实期间编辑与新建操作已暂停。' : createRecoveryInvalid ? '恢复标记无法读取；为避免重复创建，当前页面保持只读。' : visibleWriteRecovery ? '稿件写入结果正在只读核实；原正文已保留，核实期间编辑、保存与审核操作已暂停。' : writeRecoveryInvalid ? '恢复标记无法读取；为避免重复写入，当前页面保持只读。' : reviewTaskUnavailable ? '待审核任务已结束：当前页面只读。' : '只读模式：当前账号仅可查看。'}</p> : null}
           <ContentEditor
             key={historicalVersion ? `production-${production?.id}-history-${historicalVersion.id}` : production ? `production-${production.id}-current-${production.version}` : `new-${topicId}`}
+            ariaLabel={historicalVersion ? '历史成片正文' : '成片正文编辑区'}
             value={displayedContent}
             onChange={canEdit && !saving && !reviewSuggestionAccepting ? setContent : undefined}
             readOnly={!canEdit || saving || reviewSuggestionAccepting}
@@ -988,7 +990,7 @@ export default function MobileProductionEditor() {
         </section>
       ) : null}
       {production && routeDataReady ? (
-        <ProductionOriginPanel sourceType={production.origin_source_type} sourceSnapshot={production.origin_source_content_snapshot} sourceOutlineVersion={production.origin_source_outline_version} sourceTopicId={production.topic_id} />
+      <ProductionOriginPanel sourceType={production.origin_source_type} sourceSnapshot={production.origin_source_content_snapshot} sourceOutlineVersion={production.origin_source_outline_version} sourceTopicId={production.origin_source_topic_id} />
       ) : null}
       {isWeb() && historicalVersion && routeDataReady ? (
         <ProductionMaterialHistorySnapshot

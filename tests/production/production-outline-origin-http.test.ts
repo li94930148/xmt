@@ -66,11 +66,13 @@ try {
     source_type: string;
     source_content_snapshot: string;
     source_outline_version: string | null;
+    source_topic_id: number | null;
     captured_at: string;
-  }>('SELECT source_type,source_content_snapshot,source_outline_version,captured_at FROM production_origin_snapshots WHERE production_id=?', [createdPayload.productionId]);
+  }>('SELECT source_type,source_content_snapshot,source_outline_version,source_topic_id,captured_at FROM production_origin_snapshots WHERE production_id=?', [createdPayload.productionId]);
   assert.equal(source?.source_type, 'topic_outline');
   assert.equal(source?.source_content_snapshot, originalOutline);
   assert.equal(source?.source_outline_version, 'v1.2', 'a uniquely matching explicit outline version is linked to the exact snapshot');
+  assert.equal(source?.source_topic_id, topicId, 'the origin snapshot records the topic it came from');
   assert.ok(source?.captured_at, 'source snapshot includes its capture time');
 
   const detail = await fetch(`${base}/${createdPayload.productionId}`, { headers });
@@ -79,6 +81,31 @@ try {
   assert.equal(detailPayload.origin_source_type, 'topic_outline');
   assert.equal(detailPayload.origin_source_content_snapshot, originalOutline);
   assert.equal(detailPayload.origin_source_outline_version, 'v1.2');
+  assert.equal(detailPayload.origin_source_topic_id, topicId);
+
+  const reassignedTopicId = await createTopic('重关联后的选题', '<p>另一个选题的同版本大纲</p>');
+  await database.execute(`INSERT INTO workflow_document_versions
+    (document_type,document_id,version,content,change_type,is_baseline,operator_id,created_at)
+    VALUES ('topic_outline',?,'v1.2','<p>另一个选题的同版本大纲</p>','minor',0,?,datetime('now'))`, [String(reassignedTopicId), userId]);
+  const reassigned = await fetch(`${base}/${createdPayload.productionId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      topic_id: reassignedTopicId,
+      version: 'v1.0',
+      content: originalOutline,
+      status: 'draft',
+      version_action: 'none',
+      expected_content: originalOutline,
+    }),
+  });
+  assert.equal(reassigned.status, 200, 'production may keep its existing topic-reassignment contract');
+  const reassignedDetail = await fetch(`${base}/${createdPayload.productionId}`, { headers });
+  assert.equal(reassignedDetail.status, 200);
+  const reassignedPayload = await reassignedDetail.json() as Record<string, unknown>;
+  assert.equal(reassignedPayload.topic_id, reassignedTopicId, 'the current production relation reflects the reassignment');
+  assert.equal(reassignedPayload.origin_source_topic_id, topicId, 'the historical origin still points to the creation-time topic');
+  assert.equal(reassignedPayload.origin_source_outline_version, 'v1.2', 'same version labels on another topic do not change the source identity');
 
   await database.execute('UPDATE topics SET outline=? WHERE id=?', ['后续修改的大纲', topicId]);
   await database.execute('UPDATE production SET content=? WHERE id=?', ['持续改写后的创作正文', createdPayload.productionId]);

@@ -29,6 +29,7 @@ let deleteWriteRequests = 0;
 let promoteWriteRequests = 0;
 let commentWriteRequests = 0;
 let inspirationListReadRequests = 0;
+let failNextInspirationListRead = false;
 let nextCreatedInspirationId = 902;
 let nextTopicId = 990;
 let nextCommentId = 9902;
@@ -241,6 +242,10 @@ async function run() {
   app.get(['/api/system-settings', '/api/system-settings/public'], (_request, response) => response.json({}));
   app.get('/api/inspirations', (_request, response) => {
     inspirationListReadRequests += 1;
+    if (failNextInspirationListRead) {
+      failNextInspirationListRead = false;
+      return response.status(503).json({ message: 'Internal Server Error' });
+    }
     return response.json({ data: inspirations, total: inspirations.length });
   });
   app.get('/api/inspirations/create-request/:requestId', (request, response) => {
@@ -290,6 +295,7 @@ async function run() {
   });
   app.get('/__qa/state', (_request, response) => response.json({ voteWriteRequests, inspiration: inspirations.find((item) => item.id === inspiration.id) }));
   app.post('/__qa/control', (request, response) => {
+    failNextInspirationListRead = request.body.failNextInspirationListRead === true;
     commitNextCreateThenFailResponse = request.body.commitNextCreateThenFailResponse === true;
     failNextCreateStateRead = request.body.failNextCreateStateRead === true;
     failNextVote = request.body.failNextVote === true;
@@ -311,6 +317,9 @@ async function run() {
     delayNextPromotion = request.body.delayNextPromotion === true;
     failNextComment = request.body.failNextComment === true;
     delayNextComment = request.body.delayNextComment === true;
+    if (request.body.seedPromotionRecoveryInspiration === true && !inspirations.some((item) => item.id === 905)) {
+      inspirations = [...inspirations, { ...inspiration, id: 905, title: '转选题刷新恢复：仍需核实', votes: 0, comment_count: 0, voted: false }];
+    }
     if (Number.isFinite(request.body.commentDelayMs) && request.body.commentDelayMs > 0) commentDelayMs = request.body.commentDelayMs;
     return response.json({ ok: true });
   });
@@ -564,6 +573,45 @@ async function run() {
         await page.goto(`${base}/__qa?theme=${theme}`);
         await page.getByRole('heading', { name: '灵感池' }).waitFor();
         await page.getByRole('heading', { name: inspiration.title }).waitFor();
+        if (width === 1440 && theme === 'light') {
+          await page.evaluate(async () => {
+            await fetch('/__qa/control', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ failNextInspirationListRead: true }),
+            });
+          });
+          const failedListRead = page.waitForResponse((response) =>
+            response.request().method() === 'GET'
+            && new URL(response.url()).pathname === '/api/inspirations'
+            && response.status() === 503,
+          );
+          await page.getByRole('combobox', { name: '按分类筛选灵感' }).selectOption('科普');
+          await failedListRead;
+          await page.getByRole('alert').getByRole('button', { name: '重新加载灵感' }).waitFor();
+          assert.equal(await page.getByRole('heading', { name: '还没有灵感', exact: true }).count(), 0,
+            'a failed filtered read must not present the stale list as an empty result');
+          await page.getByRole('heading', { name: inspiration.title }).waitFor();
+
+          const retriedListRead = page.waitForResponse((response) =>
+            response.request().method() === 'GET'
+            && new URL(response.url()).pathname === '/api/inspirations'
+            && response.status() === 200,
+          );
+          await page.getByRole('button', { name: '重新加载灵感' }).click();
+          await retriedListRead;
+          await page.getByRole('heading', { name: '还没有灵感', exact: true }).waitFor();
+          assert.equal(await page.getByRole('alert').count(), 0, 'a successful empty response clears the error state');
+
+          const resetListRead = page.waitForResponse((response) =>
+            response.request().method() === 'GET'
+            && new URL(response.url()).pathname === '/api/inspirations'
+            && response.status() === 200,
+          );
+          await page.getByRole('combobox', { name: '按分类筛选灵感' }).selectOption('');
+          await resetListRead;
+          await page.getByRole('heading', { name: inspiration.title }).waitFor();
+        }
         await assertTailwindAlphaUtilities(page, theme);
         await assertStudioColorAliases(page, theme);
         await waitForInspirationRoom(io);
@@ -656,6 +704,27 @@ async function run() {
         await assertHoverSurface(page, card.getByRole('button', { name: '转为选题', exact: true }), `${theme} 转为选题`);
 
         if (width === 320 && theme === 'light') {
+          const voteWritesBeforeStorageDrop = voteWriteRequests;
+          const voteRecoveryStorageKey = `xmt:inspiration-vote-pending:v1:${user.id}:${inspiration.id}`;
+          await page.evaluate((key) => {
+            const storage = window.sessionStorage;
+            const nativeSetItem = storage.setItem.bind(storage);
+            Object.defineProperty(storage, 'setItem', {
+              configurable: true,
+              value: (name: string, value: string) => {
+                if (name !== key) nativeSetItem(name, value);
+              },
+            });
+          }, voteRecoveryStorageKey);
+          await voteButton.click();
+          await page.getByRole('alert').filter({ hasText: '无法安全提交点赞' }).waitFor();
+          assert.equal(voteWriteRequests, voteWritesBeforeStorageDrop, 'a silently dropped vote recovery marker prevents the vote POST');
+          assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), voteRecoveryStorageKey), null, 'the silently dropped vote marker remains absent');
+          assert.equal(await voteButton.getAttribute('aria-pressed'), 'false', 'a storage preflight failure leaves the visible vote state unchanged');
+          await page.evaluate(() => { delete (window.sessionStorage as Storage & { setItem?: unknown }).setItem; });
+          await page.reload();
+          await page.getByRole('heading', { name: inspiration.title }).waitFor();
+
           failNextVote = true;
           const vote = voteButton;
           const failedVote = page.waitForResponse((response) => response.url().endsWith(`/api/inspirations/${inspiration.id}/vote`) && response.request().method() === 'POST' && response.status() === 503);
@@ -715,12 +784,98 @@ async function run() {
             .some((button) => button.getAttribute('aria-label') === `点赞灵感：${title}` && button.textContent?.trim() === '3'), inspiration.title);
         }
 
-        await page.getByRole('button', { name: '提交灵感', exact: true }).click();
+        const createTrigger = page.getByRole('button', { name: '提交灵感', exact: true });
+        const writesBeforeCreateDialog = apiWriteRequests;
+        await createTrigger.click();
+        const createDialog = page.getByRole('dialog', { name: '提交灵感', exact: true });
+        await createDialog.waitFor();
+        assert.equal(await createDialog.getAttribute('aria-modal'), 'true', `${theme} ${width}px inspiration creation is exposed as a modal dialog`);
+        const createTitleInput = createDialog.getByLabel('标题 *', { exact: true });
+        assert.equal(await createTitleInput.evaluate((element) => document.activeElement === element), true,
+          `${theme} ${width}px opening the create dialog moves focus into its title field`);
+        const createCloseButton = createDialog.getByRole('button', { name: '关闭提交灵感弹窗', exact: true });
+        const createSubmitButton = createDialog.getByRole('button', { name: '提交', exact: true });
+        const closeBounds = await createCloseButton.boundingBox();
+        assert(closeBounds && closeBounds.width >= 40 && closeBounds.height >= 40,
+          `${theme} ${width}px create dialog close action meets the 40×40px target`);
+        await createCloseButton.focus();
+        await page.keyboard.press('Shift+Tab');
+        assert.equal(await createSubmitButton.evaluate((element) => document.activeElement === element), true,
+          `${theme} ${width}px Shift+Tab from the first create-dialog control wraps to the last control`);
+        await page.keyboard.press('Tab');
+        assert.equal(await createCloseButton.evaluate((element) => document.activeElement === element), true,
+          `${theme} ${width}px Tab from the last create-dialog control wraps to the first control`);
+        await createCloseButton.click();
+        await createDialog.waitFor({ state: 'detached' });
+        assert.equal(await createTrigger.evaluate((element) => document.activeElement === element), true,
+          `${theme} ${width}px the named close action restores focus to the create trigger`);
+        assert.equal(apiWriteRequests, writesBeforeCreateDialog, `${theme} ${width}px closing the create dialog performs no business writes`);
+
+        await createTrigger.click();
+        await createDialog.waitFor();
+        await page.keyboard.press('Escape');
+        await createDialog.waitFor({ state: 'detached' });
+        assert.equal(await createTrigger.evaluate((element) => document.activeElement === element), true,
+          `${theme} ${width}px Escape restores focus to the create trigger`);
+        assert.equal(apiWriteRequests, writesBeforeCreateDialog, `${theme} ${width}px opening and closing the create dialog performs no business writes`);
+
+        await createTrigger.click();
+        await createDialog.waitFor();
         assert.equal(await page.getByLabel('标题 *', { exact: true }).isVisible(), true, 'creation title is associated with its label');
         assert.equal(await page.getByLabel('描述', { exact: true }).isVisible(), true, 'creation description is associated with its label');
         assert.equal(await page.getByLabel('分类', { exact: true }).isVisible(), true, 'creation category is associated with its label');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${theme} ${width}px create dialog must not overflow horizontally`);
         if (width === 320 && theme === 'light') {
+          const writesBeforeStorageFailures = createWriteRequests;
+          assert.equal(writesBeforeStorageFailures, 0, 'recovery-marker failure cases begin before any inspiration create POST');
+          const storageFailureTitle = '隔离验收：创建恢复信息写入失败';
+          await createTitleInput.fill(storageFailureTitle);
+          await createDialog.getByLabel('描述', { exact: true }).fill('浏览器存储写入失败时保留当前草稿。');
+          await page.evaluate(() => {
+            const key = 'xmt:inspiration-create-pending:v1:1';
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function (storageKey: string, value: string) {
+              if (storageKey === key) {
+                Storage.prototype.setItem = originalSetItem;
+                throw new DOMException('Injected inspiration recovery write failure', 'QuotaExceededError');
+              }
+              return originalSetItem.call(this, storageKey, value);
+            };
+          });
+          await createSubmitButton.click();
+          await createDialog.getByRole('alert').getByText('浏览器无法确认灵感创建恢复信息已保存；本次未发送。请检查浏览器存储后重试。', { exact: true }).waitFor();
+          assert.equal(await createTitleInput.inputValue(), storageFailureTitle, 'a failed recovery-marker write preserves the inspiration title draft');
+          assert.equal(await createDialog.getByLabel('描述', { exact: true }).inputValue(), '浏览器存储写入失败时保留当前草稿。', 'a failed recovery-marker write preserves the inspiration description draft');
+          assert.equal(createWriteRequests, writesBeforeStorageFailures, 'a failed recovery-marker write prevents the inspiration POST');
+          assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:inspiration-create-pending:v1:1')), null, 'a failed recovery-marker write leaves no misleading pending marker');
+
+          const readbackMismatchTitle = '隔离验收：创建恢复信息回读不一致';
+          await createTitleInput.fill(readbackMismatchTitle);
+          await createDialog.getByLabel('描述', { exact: true }).fill('浏览器回读到不同内容时保留当前草稿。');
+          await page.evaluate(() => {
+            const key = 'xmt:inspiration-create-pending:v1:1';
+            const originalSetItem = Storage.prototype.setItem;
+            const originalGetItem = Storage.prototype.getItem;
+            Storage.prototype.setItem = function (storageKey: string, value: string) {
+              if (storageKey !== key) return originalSetItem.call(this, storageKey, value);
+              Storage.prototype.setItem = originalSetItem;
+              originalSetItem.call(this, storageKey, value);
+              Storage.prototype.getItem = function (readKey: string) {
+                if (readKey !== key) return originalGetItem.call(this, readKey);
+                Storage.prototype.getItem = originalGetItem;
+                const stored = originalGetItem.call(this, readKey);
+                const marker = JSON.parse(stored || '{}') as { title?: string };
+                return JSON.stringify({ ...marker, title: `${marker.title || ''}（回读不一致）` });
+              };
+            };
+          });
+          await createSubmitButton.click();
+          await createDialog.getByRole('alert').getByText('浏览器无法确认灵感创建恢复信息已保存；本次未发送。请检查浏览器存储后重试。', { exact: true }).waitFor();
+          assert.equal(await createTitleInput.inputValue(), readbackMismatchTitle, 'a mismatched recovery-marker readback preserves the inspiration title draft');
+          assert.equal(await createDialog.getByLabel('描述', { exact: true }).inputValue(), '浏览器回读到不同内容时保留当前草稿。', 'a mismatched recovery-marker readback preserves the inspiration description draft');
+          assert.equal(createWriteRequests, writesBeforeStorageFailures, 'a mismatched recovery-marker readback prevents the inspiration POST');
+          assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:inspiration-create-pending:v1:1')), null, 'a mismatched recovery-marker readback removes the matching current marker when possible');
+
           const title = '隔离验收：创建后立即显示';
           const listReadsBeforeCreate = inspirationListReadRequests;
           await page.getByLabel('标题 *', { exact: true }).fill(title);
@@ -751,6 +906,13 @@ async function run() {
           await Promise.all([lostCreateResponse, failedCreateRead]);
           await page.getByText('上次创建结果待确认；再次提交已暂停。', { exact: true }).waitFor();
           assert.equal(await page.getByLabel('标题 *', { exact: true }).isDisabled(), true, 'an uncertain create locks the original payload');
+          assert.equal(await createDialog.getByRole('button', { name: '关闭提交灵感弹窗', exact: true }).isDisabled(), true,
+            'an uncertain create keeps the explicit close control locked');
+          assert.equal(await createDialog.getByRole('button', { name: '取消', exact: true }).isDisabled(), true,
+            'an uncertain create keeps the cancel action locked');
+          await page.keyboard.press('Escape');
+          await createDialog.waitFor();
+          assert.equal(createWriteRequests, 2, 'Escape cannot close or resubmit an uncertain create');
           assert.equal(createWriteRequests, 2, 'uncertain create does not automatically send a second POST');
           assert.equal(createPersistedRows, 2, 'the injected response loss committed exactly one new inspiration row');
 
@@ -776,6 +938,26 @@ async function run() {
           const commentBox = page.getByPlaceholder('写下你的想法，补充角度、风险点、延展方向...');
           const commentText = '这条评论用于验证失败保留与重复提交保护。';
           await commentBox.fill(commentText);
+          await page.evaluate(() => {
+            const originalSetItem = Storage.prototype.setItem;
+            let failCommentRecoveryWrite = true;
+            Storage.prototype.setItem = function (key: string, value: string) {
+              if (failCommentRecoveryWrite && key === 'xmt:inspiration-comment-pending:v1:1:902') {
+                failCommentRecoveryWrite = false;
+                throw new DOMException('Injected session storage failure', 'QuotaExceededError');
+              }
+              return originalSetItem.call(this, key, value);
+            };
+          });
+          await page.getByRole('button', { name: '发表评论', exact: true }).click();
+          await page.getByText('本次未发送', { exact: true }).waitFor();
+          await page.getByText('浏览器无法确认评论恢复信息已保存；本次没有发送评论。请检查浏览器存储后重试。', { exact: true }).waitFor();
+          assert.equal(await commentBox.inputValue(), commentText, 'a failed recovery-marker write preserves the comment draft');
+          assert.equal(commentWriteRequests, 0, 'a failed recovery-marker write prevents the comment POST');
+          assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:inspiration-comment-pending:v1:1:902')), null,
+            'a failed recovery-marker write leaves no misleading durable marker');
+          await closeNotifications(page);
+
           await page.evaluate(async () => {
             await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextComment: true }) });
           });
@@ -927,6 +1109,34 @@ async function run() {
           assert.deepEqual(topicVersionRequestPaths, [], 'mobile topic detail loads outline history only when a source version is requested');
 
           await page.goto(`${base}/inspirations`);
+          await page.evaluate(async () => {
+            await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seedPromotionRecoveryInspiration: true }) });
+          });
+          await page.reload();
+          await getInspirationCard(page, '转选题刷新恢复：仍需核实').waitFor();
+          await page.evaluate(async () => {
+            await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commitNextPromotionThenFailResponse: true, failNextPromotionStateRead: true }) });
+          });
+          const committedPromotionWithoutResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/905/promote') && response.request().method() === 'POST' && response.status() === 503);
+          const missingPromotionRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/905') && response.request().method() === 'GET' && response.status() === 503);
+          await getInspirationCard(page, '转选题刷新恢复：仍需核实').getByRole('button', { name: '转为选题', exact: true }).click();
+          await Promise.all([committedPromotionWithoutResponse, missingPromotionRead]);
+          await getInspirationCard(page, '转选题刷新恢复：仍需核实').getByText('转选题结果待确认；再次转化已暂停。', { exact: true }).waitFor();
+          assert.equal(promoteWriteRequests, 3, 'the refresh recovery scenario sends only the original conversion POST');
+
+          await page.reload();
+          const recoveredPromotionCard = getInspirationCard(page, '转选题刷新恢复：仍需核实');
+          await recoveredPromotionCard.getByText('转选题结果待确认；再次转化已暂停。', { exact: true }).waitFor();
+          assert.equal(await recoveredPromotionCard.getByRole('button', { name: '只读核实转选题状态：转选题刷新恢复：仍需核实', exact: true }).count(), 1,
+            'refresh restores a read-only verification action for the uncertain promotion');
+          assert.equal(promoteWriteRequests, 3, 'page refresh does not repeat the promotion write');
+          const refreshedPromotionRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/905') && response.request().method() === 'GET' && response.status() === 200);
+          await recoveredPromotionCard.getByRole('button', { name: '只读核实转选题状态：转选题刷新恢复：仍需核实', exact: true }).click();
+          await refreshedPromotionRead;
+          await page.waitForURL('**/topics/991');
+          assert.equal(promoteWriteRequests, 3, 'read-only verification after refresh opens the linked topic without another conversion POST');
+
+          await page.goto(`${base}/inspirations`);
           await page.getByRole('heading', { name: '灵感池' }).waitFor();
           if (width === 320 && theme === 'light') await page.screenshot({ path: '/tmp/xmt-inspiration-comment-light-320.png', fullPage: true });
           const ambiguousDeleteCard = getInspirationCard(page, inspiration.title);
@@ -989,14 +1199,14 @@ async function run() {
     assert.deepEqual(errors, [], `unexpected browser errors: ${errors.slice(0, 5).join(' | ')}`);
     assert.equal(expectedHttpNotFoundResponses.length, 2, `the only 404s are read-only checks confirming deleted inspiration state: ${JSON.stringify(expectedHttpNotFoundResponses)}`);
     assert.equal(consoleNotFoundMessages.length, expectedHttpNotFoundResponses.length, 'each expected deleted-record 404 has one browser console message');
-    assert.equal(expectedHttpErrors.length, 15, 'the isolated fixtures return fifteen intentional 503 responses, including ambiguous create, vote, comment, deletion, and promotion writes plus failed state reads');
+    assert.equal(expectedHttpErrors.length, 17, 'the isolated fixtures return seventeen intentional 503 responses, including promotion refresh recovery write and read failures');
     assert.equal(voteWriteRequests, 5, 'vote tests cover failure/retry, in-flight deduplication, committed-but-unconfirmed state recovery, and a deliberate final toggle');
     assert.equal(createWriteRequests, 2, 'the isolated create tests cover a normal create and one committed-but-unconfirmed create without retrying its POST');
     assert.equal(createPersistedRows, 2, 'create retries/read-back do not create extra inspiration rows');
     assert.equal(commentWriteRequests, 4, 'the isolated comment test covers a failure/retry, ambiguous commit/read-back, and a late confirmed write');
     assert.equal(new Set(commentRequestIds).size, 3, 'the comment retry reuses one key while separate comments receive distinct keys');
     assert.equal(deleteWriteRequests, 5, 'deletion tests cover failed retry, lost response read-back, and explicit recovery without duplicate writes');
-    assert.equal(promoteWriteRequests, 2, 'promotion tests cover one definite failure and one committed-but-unconfirmed conversion recovered read-only');
+    assert.equal(promoteWriteRequests, 3, 'promotion tests cover a definite failure, same-page recovery, and refresh recovery without duplicate writes');
     assert.equal(apiWriteRequests, 0, 'other browser acceptance flows do not send business writes');
     console.log('灵感新评论提示亮暗主题对比、320/390/1440px可见性与横向溢出回归通过');
   } finally {

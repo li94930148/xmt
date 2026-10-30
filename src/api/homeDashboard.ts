@@ -58,6 +58,11 @@ export type HomeAttentionSummary = {
     total: number;
     tasks: HomeRetrospectiveTask[];
   };
+  my_retro_actions: {
+    available: boolean;
+    total: number;
+    tasks: HomeRetroActionTask[];
+  };
   topics: HomeAttentionTopic[];
   topic_stages: Record<HomePipelineStage, { total: number; topics: HomePipelineTopic[] }>;
   my_drafts: { tasks: HomeDraftTask[] };
@@ -89,6 +94,20 @@ function isRecordArray(value: unknown): value is Record<string, unknown>[] {
   return Array.isArray(value) && value.every(isRecord);
 }
 
+function isHomeRetroActionSummary(value: unknown): value is HomeAttentionSummary['my_retro_actions'] {
+  return isRecord(value)
+    && typeof value.available === 'boolean'
+    && typeof value.total === 'number' && Number.isFinite(value.total)
+    && Array.isArray(value.tasks) && value.tasks.length <= 3
+    && value.tasks.every((task) => isRecord(task)
+      && Number.isInteger(task.id) && Number(task.id) > 0
+      && Number.isInteger(task.retro_id) && Number(task.retro_id) > 0
+      && typeof task.title === 'string'
+      && typeof task.retro_title === 'string'
+      && (task.due_date === null || typeof task.due_date === 'string')
+      && (task.status === 'todo' || task.status === 'doing'));
+}
+
 function hasCountAndRecords(value: unknown): value is Record<string, unknown> & { total: number; tasks: Record<string, unknown>[] } {
   return isRecord(value) && typeof value.total === 'number' && Number.isFinite(value.total) && isRecordArray(value.tasks);
 }
@@ -117,6 +136,7 @@ function isHomeAttentionSummary(value: unknown): value is HomeAttentionSummary {
     && typeof value.production_reviews.available === 'boolean'
     && hasCountAndRecords(value.retrospectives)
     && typeof value.retrospectives.available === 'boolean'
+    && isHomeRetroActionSummary(value.my_retro_actions)
     && isRecordArray(value.topics)
     && hasStagePreviews
     && isRecord(value.my_drafts) && isRecordArray(value.my_drafts.tasks);
@@ -161,6 +181,15 @@ export type HomeRetrospectiveTask = {
   period_end: string;
   status: 'draft' | 'published' | 'archived';
   updated_at: string;
+};
+
+export type HomeRetroActionTask = {
+  id: number;
+  retro_id: number;
+  title: string;
+  retro_title: string;
+  due_date: string | null;
+  status: 'todo' | 'doing';
 };
 
 export async function getHomeAttention(signal?: AbortSignal): Promise<HomeAttentionSummary> {

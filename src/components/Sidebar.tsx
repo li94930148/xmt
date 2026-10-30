@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { navigationSections, canAccessNavigationItem, canAccessNavigationSection, findNavigationSectionByPath, isNavigationItemActive } from '@/config/navigation';
 import { useAppStore, useAuthStore, useMessageStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
+import ActionButton from './studio/ActionButton';
 import NotificationBadge from './studio/NotificationBadge';
 import { useEffect, useRef, useState } from 'react';
 
@@ -109,9 +110,9 @@ export default function Sidebar({
         {(!collapsed || isMobile) && (
           <div className="min-w-0 flex-1">
             <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-studio-text-muted">Studio</p>
-            <h1 className="truncate text-sm font-semibold tracking-tight text-studio-text-primary">
+            <p className="truncate text-sm font-semibold tracking-tight text-studio-text-primary">
               {systemSettings.system.name || '新媒体工作台'}
-            </h1>
+            </p>
           </div>
         )}
 
@@ -143,17 +144,20 @@ export default function Sidebar({
         </button>
       </div>
 
-      <nav className={`flex-1 overflow-y-auto pb-3 ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}>
+      <nav aria-label="侧边导航" className={`flex-1 overflow-y-auto pb-3 ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}>
         {visibleSections.map((section, sectionIndex) => {
           const SectionIcon = section.icon;
           const expanded = expandedGroup === section.id;
           const sectionExpanded = expanded && (!collapsed || isMobile);
-          const hasActiveItem = section.items.some((item) => isNavigationItemActive(location.pathname, item.path, location.search));
+          const activeItem = section.items.find((item) => isNavigationItemActive(location.pathname, item.path, location.search));
+          const hasActiveItem = Boolean(activeItem);
+          const hasDuplicateSectionItemLabel = section.items.some((item) => item.label === section.label);
+          const sectionGroupLabel = hasDuplicateSectionItemLabel ? `${section.label}导航分组` : section.label;
           const isDirectEntry = section.id === 'home' && section.items.length === 1;
 
           if (isDirectEntry) {
             const item = section.items[0];
-            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} aria-label={collapsed && !isMobile ? section.label : undefined} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
+            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} aria-label={collapsed && !isMobile ? section.label : undefined} aria-current={hasActiveItem ? 'page' : undefined} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
           }
 
           return (
@@ -173,7 +177,9 @@ export default function Sidebar({
                 persistExpandedGroup(nextGroup, location.pathname);
               }}
               title={section.label}
-              aria-label={collapsed && !isMobile ? section.label : undefined}
+              aria-label={collapsed && !isMobile
+                ? activeItem ? `${sectionGroupLabel}，当前视图：${activeItem.label}` : sectionGroupLabel
+                : hasDuplicateSectionItemLabel ? sectionGroupLabel : undefined}
               className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`}
               style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}
               aria-expanded={sectionExpanded}
@@ -203,6 +209,7 @@ export default function Sidebar({
                       type="button"
                       onClick={() => handleNavigate(item.path)}
                       title={item.label}
+                      aria-current={isActive ? 'page' : undefined}
                       className={`group relative flex w-full items-center gap-3 rounded-button text-left transition-all duration-200 ${
                         collapsed && !isMobile ? 'justify-center' : ''
                       } ${collapsed && !isMobile ? 'px-2' : 'px-3'} ${
@@ -252,14 +259,15 @@ export default function Sidebar({
       </div>
 
       {!isMobile && (
-        <button
+        <ActionButton
+          variant="icon"
           type="button"
           onClick={onToggle}
-          className="absolute -right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-studio-border-soft bg-studio-surface text-studio-text-muted shadow-card transition-all duration-200 hover:border-studio-border-active hover:text-studio-cyan"
+          className="absolute -right-5 top-1/2 z-10 h-10 w-10 min-h-10 min-w-10 -translate-y-1/2 rounded-full border border-studio-border-soft bg-studio-surface p-0 text-studio-text-muted shadow-card transition-all duration-200 hover:border-studio-border-active hover:text-studio-cyan"
           aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-        </button>
+        </ActionButton>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { createCalendarEvent, getCalendarEventCreateStatus, getCalendarEvents, getTopics } from '../api';
 import type { CalendarEvent, CalendarEventCreatePayload } from '../api/calendar';
 import type { Topic } from '../types';
@@ -21,7 +22,7 @@ type PendingCalendarCreate = {
   userId: number;
   clientRequestId: string;
   payload: CalendarEventCreatePayload;
-  phase: 'uncertain' | 'ready';
+  phase: 'uncertain' | 'ready' | 'cleanup-created' | 'cleanup-deleted' | 'cleanup-rejected';
 };
 
 function calendarCreateRecoveryKey(userId: number) {
@@ -33,7 +34,11 @@ function readPendingCalendarCreate(userId: number): PendingCalendarCreate | null
     const value = JSON.parse(window.sessionStorage.getItem(calendarCreateRecoveryKey(userId)) || 'null') as Partial<PendingCalendarCreate> | null;
     if (!value || Number(value.userId) !== userId || typeof value.clientRequestId !== 'string' || !CALENDAR_CREATE_REQUEST_PATTERN.test(value.clientRequestId)) return null;
     if (!value.payload || typeof value.payload.title !== 'string' || typeof value.payload.event_date !== 'string') return null;
-    if (value.phase !== 'uncertain' && value.phase !== 'ready') return null;
+    if (value.phase !== 'uncertain'
+      && value.phase !== 'ready'
+      && value.phase !== 'cleanup-created'
+      && value.phase !== 'cleanup-deleted'
+      && value.phase !== 'cleanup-rejected') return null;
     return {
       userId,
       clientRequestId: value.clientRequestId,
@@ -53,8 +58,20 @@ function readPendingCalendarCreate(userId: number): PendingCalendarCreate | null
 
 function savePendingCalendarCreate(pending: PendingCalendarCreate) {
   try {
-    window.sessionStorage.setItem(calendarCreateRecoveryKey(pending.userId), JSON.stringify(pending));
-    return true;
+    const key = calendarCreateRecoveryKey(pending.userId);
+    const serialized = JSON.stringify(pending);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function persistPendingCalendarCreatePhase(pending: PendingCalendarCreate) {
+  try {
+    const stored = readPendingCalendarCreate(pending.userId);
+    if (stored?.clientRequestId !== pending.clientRequestId) return false;
+    return savePendingCalendarCreate(pending);
   } catch {
     return false;
   }
@@ -63,10 +80,14 @@ function savePendingCalendarCreate(pending: PendingCalendarCreate) {
 function clearPendingCalendarCreate(userId: number, clientRequestId: string) {
   try {
     const key = calendarCreateRecoveryKey(userId);
-    const stored = JSON.parse(window.sessionStorage.getItem(key) || 'null') as { clientRequestId?: unknown } | null;
-    if (stored?.clientRequestId === clientRequestId) window.sessionStorage.removeItem(key);
+    const raw = window.sessionStorage.getItem(key);
+    if (raw === null) return true;
+    const stored = JSON.parse(raw) as { clientRequestId?: unknown } | null;
+    if (stored?.clientRequestId !== clientRequestId) return false;
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null;
   } catch {
-    // A stale marker is safe: the next page load will reconcile it read-only.
+    return false;
   }
 }
 
@@ -130,6 +151,7 @@ export default function CalendarPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
+  const [activeCalendarDate, setActiveCalendarDate] = useState(toDateKey(today));
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,6 +165,8 @@ export default function CalendarPage() {
   const submittingRef = useRef(false);
   const verifyingCalendarCreateRef = useRef(false);
   const eventsRequestSequenceRef = useRef(0);
+  const calendarDayButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingCalendarFocusRef = useRef<{ date: string; year: number; month: number } | null>(null);
   const [selectedDate, setSelectedDate] = useState('');
   const [formData, setFormData] = useState({
     title: '',
@@ -168,7 +192,7 @@ export default function CalendarPage() {
       setConfirmedCreatedEventTitle('');
     } catch (error) {
       if (requestSequence !== eventsRequestSequenceRef.current) return;
-      setLoadError((error as Error).message || '获取日历事件失败');
+      setLoadError(getUserFacingErrorMessage(error, '日历暂时无法加载，请检查连接后重试。'));
     } finally {
       if (requestSequence === eventsRequestSequenceRef.current) setLoading(false);
     }
@@ -194,7 +218,9 @@ export default function CalendarPage() {
         topic_id: pending.payload.topic_id ? String(pending.payload.topic_id) : '',
       });
       setShowModal(true);
-      setCalendarCreateRecoveryMessage('发现一条尚未确认结果的日历创建请求，正在只读核实；不会自动重复创建。');
+      setCalendarCreateRecoveryMessage(pending.phase.startsWith('cleanup-')
+        ? '本机恢复记录尚未确认清除，日历创建操作保持暂停；请继续只读核实。'
+        : '发现一条尚未确认结果的日历创建请求，正在只读核实；不会自动重复创建。');
     }
   }, [authUserId]);
 
@@ -205,7 +231,16 @@ export default function CalendarPage() {
     try {
       const result = await getCalendarEventCreateStatus(pending.clientRequestId);
       if (result.status === 'created') {
-        clearPendingCalendarCreate(pending.userId, pending.clientRequestId);
+        if (!clearPendingCalendarCreate(pending.userId, pending.clientRequestId)) {
+          const cleanupPending: PendingCalendarCreate = { ...pending, phase: 'cleanup-created' };
+          persistPendingCalendarCreatePhase(cleanupPending);
+          setPendingCalendarCreate(cleanupPending);
+          setCalendarCreateRecoveryMessage('服务器已确认事件创建成功，但本机恢复记录尚未清除。为避免重复创建，操作保持暂停；请继续只读核实。');
+          setConfirmedCreatedEventTitle(pending.payload.title.trim());
+          setShowModal(true);
+          void fetchEvents();
+          return;
+        }
         setPendingCalendarCreate(null);
         setCalendarCreateRecoveryMessage('');
         setConfirmedCreatedEventTitle(pending.payload.title.trim());
@@ -215,20 +250,50 @@ export default function CalendarPage() {
         return;
       }
       if (result.status === 'deleted') {
-        clearPendingCalendarCreate(pending.userId, pending.clientRequestId);
+        if (!clearPendingCalendarCreate(pending.userId, pending.clientRequestId)) {
+          const cleanupPending: PendingCalendarCreate = { ...pending, phase: 'cleanup-deleted' };
+          persistPendingCalendarCreatePhase(cleanupPending);
+          setPendingCalendarCreate(cleanupPending);
+          setCalendarCreateRecoveryMessage('服务器已确认原请求对应的事件已删除，但本机恢复记录尚未清除。日历创建操作保持暂停；请继续只读核实。');
+          setShowModal(true);
+          return;
+        }
         setPendingCalendarCreate(null);
         setCalendarCreateRecoveryMessage('该请求对应的事件已被删除，不会因恢复而重新创建。');
         setShowModal(false);
         addNotification({ title: '事件已删除', message: '原创建请求已完成，不会重复创建。', type: 'info' });
         return;
       }
+      if (pending.phase === 'cleanup-rejected') {
+        if (clearPendingCalendarCreate(pending.userId, pending.clientRequestId)) {
+          setPendingCalendarCreate(null);
+          setCalendarCreateRecoveryMessage('服务器确认本次请求未创建，恢复记录已清除；原表单已保留，可修正后再提交。');
+          setShowModal(true);
+          addNotification({ title: '请求未创建', message: '服务器确认事件未创建，恢复记录已清除；可修正原表单后重新提交。', type: 'info' });
+        } else {
+          const cleanupPending: PendingCalendarCreate = { ...pending, phase: 'cleanup-rejected' };
+          persistPendingCalendarCreatePhase(cleanupPending);
+          setPendingCalendarCreate(cleanupPending);
+          setCalendarCreateRecoveryMessage('服务器确认本次请求未创建，但本机恢复记录仍未清除。为避免重复操作，创建保持暂停；请稍后继续只读核实。');
+        }
+        return;
+      }
+      if (pending.phase === 'cleanup-created' || pending.phase === 'cleanup-deleted') {
+        setCalendarCreateRecoveryMessage('服务器暂未找到原请求，但此前的结果已确认且本机恢复记录仍未清除。为避免重复创建，操作继续锁定；请稍后继续只读核实。');
+        return;
+      }
       const ready = { ...pending, phase: 'ready' as const };
-      savePendingCalendarCreate(ready);
+      if (!persistPendingCalendarCreatePhase(ready)) {
+        setPendingCalendarCreate(pending);
+        setShowModal(true);
+        setCalendarCreateRecoveryMessage('服务器尚未找到原请求，但本机恢复记录无法更新。创建操作保持暂停；请稍后继续只读核实。');
+        return;
+      }
       setPendingCalendarCreate(ready);
       setShowModal(true);
       setCalendarCreateRecoveryMessage('服务器尚未找到这次请求。原表单已保留；确认后会用同一请求编号安全重试。');
     } catch (error) {
-      setCalendarCreateRecoveryMessage(`${(error as Error).message || '暂时无法核实创建结果'}。请先重新核实，不要另建同一事件。`);
+      setCalendarCreateRecoveryMessage(`${getUserFacingErrorMessage(error, '暂时无法核实创建结果')}。请先重新核实，不要另建同一事件。`);
     } finally {
       verifyingCalendarCreateRef.current = false;
       setVerifyingCalendarCreate(false);
@@ -281,6 +346,15 @@ export default function CalendarPage() {
     return days;
   }, [year, month, daysInMonth, firstDay, prevMonthDays]);
 
+  useEffect(() => {
+    const pendingFocus = pendingCalendarFocusRef.current;
+    if (!pendingFocus || loading || loadError || year !== pendingFocus.year || month !== pendingFocus.month) return;
+    const target = calendarDayButtonRefs.current.get(pendingFocus.date);
+    if (!target) return;
+    target.focus();
+    pendingCalendarFocusRef.current = null;
+  }, [activeCalendarDate, loadError, loading, month, year]);
+
   const eventsByDate = useMemo(() => {
     const map: Record<string, CalendarEvent[]> = {};
     events.forEach((eventItem) => {
@@ -332,20 +406,60 @@ export default function CalendarPage() {
   );
 
   const goToPrevMonth = () => {
+    const nextYear = month === 1 ? year - 1 : year;
+    const nextMonth = month === 1 ? 12 : month - 1;
+    setActiveCalendarDate(`${nextYear}-${String(nextMonth).padStart(2, '0')}-01`);
     if (month === 1) {
-      setYear((currentYear) => currentYear - 1);
+      setYear(nextYear);
       setMonth(12);
     } else {
-      setMonth((currentMonth) => currentMonth - 1);
+      setMonth(nextMonth);
     }
   };
 
   const goToNextMonth = () => {
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    setActiveCalendarDate(`${nextYear}-${String(nextMonth).padStart(2, '0')}-01`);
     if (month === 12) {
-      setYear((currentYear) => currentYear + 1);
+      setYear(nextYear);
       setMonth(1);
     } else {
-      setMonth((currentMonth) => currentMonth + 1);
+      setMonth(nextMonth);
+    }
+  };
+
+  const handleCalendarDayKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, dateKey: string) => {
+    let dayOffset: number | null = null;
+    if (event.key === 'ArrowLeft') dayOffset = -1;
+    else if (event.key === 'ArrowRight') dayOffset = 1;
+    else if (event.key === 'ArrowUp') dayOffset = -7;
+    else if (event.key === 'ArrowDown') dayOffset = 7;
+
+    const [dateYear, dateMonth, dateDay] = dateKey.split('-').map(Number);
+    const currentDate = new Date(dateYear, dateMonth - 1, dateDay);
+    let targetDate: Date | null = null;
+    if (dayOffset !== null) {
+      targetDate = new Date(dateYear, dateMonth - 1, dateDay + dayOffset);
+    } else if (event.key === 'Home' || event.key === 'End') {
+      const mondayOffset = (currentDate.getDay() + 6) % 7;
+      targetDate = new Date(dateYear, dateMonth - 1, dateDay + (event.key === 'Home' ? -mondayOffset : 6 - mondayOffset));
+    }
+
+    if (!targetDate) return;
+    event.preventDefault();
+
+    const targetDateKey = toDateKey(targetDate);
+    const targetYear = targetDate.getFullYear();
+    const targetMonth = targetDate.getMonth() + 1;
+    setActiveCalendarDate(targetDateKey);
+    pendingCalendarFocusRef.current = { date: targetDateKey, year: targetYear, month: targetMonth };
+
+    if (targetYear !== year || targetMonth !== month) {
+      setLoading(true);
+      setLoadError('');
+      setYear(targetYear);
+      setMonth(targetMonth);
     }
   };
 
@@ -368,7 +482,7 @@ export default function CalendarPage() {
 
   const handleCreate = async () => {
     if (submittingRef.current || verifyingCalendarCreateRef.current) return;
-    if (pendingCalendarCreate?.phase === 'uncertain') {
+    if (pendingCalendarCreate && pendingCalendarCreate.phase !== 'ready') {
       await verifyPendingCalendarCreate(pendingCalendarCreate);
       return;
     }
@@ -388,7 +502,7 @@ export default function CalendarPage() {
       event_type: formData.event_type,
       topic_id: formData.topic_id ? Number(formData.topic_id) : undefined,
     };
-    const pending = pendingCalendarCreate || {
+    let pending: PendingCalendarCreate = pendingCalendarCreate || {
       userId: Number(authUserId),
       clientRequestId: window.crypto.randomUUID(),
       payload,
@@ -398,13 +512,31 @@ export default function CalendarPage() {
       addNotification({ title: '暂不能创建', message: '浏览器无法保存本次恢复信息，请检查会话存储后重试。', type: 'error' });
       return;
     }
+    if (pendingCalendarCreate?.phase === 'ready') {
+      pending = { ...pendingCalendarCreate, phase: 'uncertain' };
+      if (!persistPendingCalendarCreatePhase(pending)) {
+        addNotification({ title: '暂不能重试', message: '本机恢复记录无法更新，日历事件未重新提交。请检查会话存储后继续核实。', type: 'error' });
+        return;
+      }
+      setPendingCalendarCreate(pending);
+    }
     if (!pendingCalendarCreate) setPendingCalendarCreate(pending);
 
     submittingRef.current = true;
     setSubmitting(true);
     try {
       await createCalendarEvent(payload, pending.clientRequestId);
-      clearPendingCalendarCreate(pending.userId, pending.clientRequestId);
+      if (!clearPendingCalendarCreate(pending.userId, pending.clientRequestId)) {
+        const cleanupPending: PendingCalendarCreate = { ...pending, phase: 'cleanup-created' };
+        persistPendingCalendarCreatePhase(cleanupPending);
+        setPendingCalendarCreate(cleanupPending);
+        setCalendarCreateRecoveryMessage('服务器已确认事件创建成功，但本机恢复记录尚未清除。为避免重复创建，操作保持暂停；请继续只读核实。');
+        setConfirmedCreatedEventTitle(payload.title.trim());
+        setShowModal(true);
+        addNotification({ title: '事件已创建', message: '本机恢复记录尚未清除；为避免重复创建，日历创建操作已暂停。', type: 'error' });
+        void fetchEvents();
+        return;
+      }
       setPendingCalendarCreate(null);
       setCalendarCreateRecoveryMessage('');
       setConfirmedCreatedEventTitle(payload.title.trim());
@@ -418,10 +550,18 @@ export default function CalendarPage() {
     } catch (error) {
       const status = Number((error as Error & { status?: number }).status);
       if (status >= 400 && status < 500 && status !== 408) {
-        clearPendingCalendarCreate(pending.userId, pending.clientRequestId);
-        setPendingCalendarCreate(null);
-        setCalendarCreateRecoveryMessage('');
-        addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+        if (clearPendingCalendarCreate(pending.userId, pending.clientRequestId)) {
+          setPendingCalendarCreate(null);
+          setCalendarCreateRecoveryMessage('');
+          addNotification({ title: '创建失败', message: getUserFacingErrorMessage(error, '服务器未接受本次创建请求，日历事件未创建。'), type: 'error' });
+        } else {
+          const cleanupPending: PendingCalendarCreate = { ...pending, phase: 'cleanup-rejected' };
+          persistPendingCalendarCreatePhase(cleanupPending);
+          setPendingCalendarCreate(cleanupPending);
+          setCalendarCreateRecoveryMessage('服务器未接受本次创建请求，但本机恢复记录尚未清除。原表单已保留；创建操作保持暂停，请继续只读核实。');
+          setShowModal(true);
+          addNotification({ title: '创建结果需核实', message: '服务器未接受本次创建请求，但本机恢复记录尚未清除；创建操作已暂停。', type: 'error' });
+        }
       } else {
         const uncertain = { ...pending, phase: 'uncertain' as const };
         savePendingCalendarCreate(uncertain);
@@ -463,7 +603,7 @@ export default function CalendarPage() {
         <div role="status" aria-live="polite" className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-studio-amber/30 bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
           <span>{calendarCreateRecoveryMessage || '有一条日历创建请求尚未完成核实，当前不会开始另一条创建。'}</span>
           <ActionButton type="button" variant="secondary" onClick={() => setShowModal(true)}>
-            {pendingCalendarCreate.phase === 'uncertain' ? '继续核实' : '继续处理'}
+            {pendingCalendarCreate.phase === 'ready' ? '继续处理' : '继续只读核实'}
           </ActionButton>
         </div>
       ) : null}
@@ -495,72 +635,85 @@ export default function CalendarPage() {
           <GlassPanel className="min-w-0 overflow-hidden">
             <div className="min-w-0">
               <div className="w-full min-w-0">
-                <div className="grid grid-cols-7 border-b border-studio-border-soft bg-studio-surface-soft">
-                  {WEEKDAYS.map((day) => (
-                    <div key={day} className="px-0.5 py-2 text-center text-[10px] font-semibold text-studio-text-secondary sm:px-3 sm:text-xs sm:py-3">
-                      周{day}
+                <div role="grid" aria-label={`${year}年${month}月日历`}>
+                  <div role="row" aria-label="星期" className="grid grid-cols-7 border-b border-studio-border-soft bg-studio-surface-soft">
+                    {WEEKDAYS.map((day) => (
+                      <div key={day} role="columnheader" aria-label={`星期${day}`} className="px-0.5 py-2 text-center text-[10px] font-semibold text-studio-text-secondary sm:px-3 sm:text-xs sm:py-3">
+                        周{day}
+                      </div>
+                    ))}
+                  </div>
+
+                  {Array.from({ length: 6 }, (_, weekIndex) => (
+                    <div key={weekIndex} role="row" aria-label={`第${weekIndex + 1}周`} className="grid grid-cols-7">
+                      {calendarDays.slice(weekIndex * 7, weekIndex * 7 + 7).map((cell) => {
+                        const cellEvents = eventsByDate[cell.date] || [];
+                        const eventDescriptionId = cellEvents.length > 0 ? `calendar-day-events-${cell.date}` : undefined;
+
+                        return (
+                          <div key={cell.date} role="gridcell" className="min-w-0">
+                            <button
+                              ref={(element) => {
+                                if (element) calendarDayButtonRefs.current.set(cell.date, element);
+                                else calendarDayButtonRefs.current.delete(cell.date);
+                              }}
+                              type="button"
+                              tabIndex={activeCalendarDate === cell.date ? 0 : -1}
+                              aria-label={`${cell.date}，${cellEvents.length ? `${cellEvents.length} 项日程` : '无日程'}`}
+                              aria-current={isToday(cell.date) ? 'date' : undefined}
+                              aria-describedby={eventDescriptionId}
+                              onFocus={() => setActiveCalendarDate(cell.date)}
+                              onKeyDown={(event) => handleCalendarDayKeyDown(event, cell.date)}
+                              onClick={() => handleDateClick(cell.date)}
+                              className={`min-h-16 w-full border-b border-r border-studio-border-soft p-1 text-left transition hover:bg-studio-surface-soft sm:min-h-20 sm:p-1.5 md:min-h-[118px] md:p-2 ${
+                                !cell.isCurrentMonth ? 'bg-studio-surface-soft/50 text-studio-text-secondary' : 'text-studio-text-primary'
+                              } ${isToday(cell.date) ? 'bg-studio-primary/10' : ''}`}
+                            >
+                              <div className="mb-2 flex items-center justify-between">
+                                <span
+                                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm ${
+                                    isToday(cell.date)
+                                      ? 'bg-studio-primary-button text-white shadow-glow-primary'
+                                      : cell.isCurrentMonth
+                                        ? 'text-studio-text-primary'
+                                        : 'text-studio-text-secondary'
+                                  }`}
+                                >
+                                  {cell.day}
+                                </span>
+                                {cellEvents.length > 0 && cell.isCurrentMonth ? (
+                                  <span className="rounded-full bg-studio-surface-elevated px-2 py-0.5 text-[10px] text-studio-text-secondary">{cellEvents.length}</span>
+                                ) : null}
+                              </div>
+                              <div className="hidden space-y-1 md:block">
+                                {cellEvents.slice(0, 3).map((eventItem, eventIndex) => (
+                                  <div
+                                    key={eventIndex}
+                                    className={`truncate rounded-md border px-2 py-1 text-[11px] font-medium ${eventTypeBadgeClass[getEventTone(eventItem.event_type)]}`}
+                                  >
+                                    {eventItem.title}
+                                  </div>
+                                ))}
+                                {cellEvents.length > 3 ? <div className="text-center text-[10px] text-studio-text-secondary">+{cellEvents.length - 3} 更多</div> : null}
+                              </div>
+                              {cellEvents.length > 0 ? (
+                                <div aria-hidden="true" className="mt-1 flex min-h-1.5 items-center gap-0.5 md:hidden">
+                                  {cellEvents.slice(0, 3).map((eventItem, eventIndex) => {
+                                    return <span key={eventIndex} className={`h-1.5 w-1.5 rounded-full ${eventTypeDotClass[getEventTone(eventItem.event_type)]}`} />;
+                                  })}
+                                </div>
+                              ) : null}
+                              {cellEvents.length > 0 ? (
+                                <span id={eventDescriptionId} className="sr-only">
+                                  {cellEvents.map((eventItem) => `${eventTypeText[eventItem.event_type || 'other'] || '事项'}：${eventItem.title}`).join('；')}
+                                </span>
+                              ) : null}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
-                </div>
-
-                <div className="grid grid-cols-7">
-                  {calendarDays.map((cell, index) => {
-                    const cellEvents = eventsByDate[cell.date] || [];
-                    const eventDescriptionId = cellEvents.length > 0 ? `calendar-day-events-${cell.date}` : undefined;
-
-                    return (
-                      <button
-                        key={index}
-                        type="button"
-                        aria-label={`${cell.date}，${cellEvents.length ? `${cellEvents.length} 项日程` : '无日程'}`}
-                        aria-describedby={eventDescriptionId}
-                        onClick={() => handleDateClick(cell.date)}
-                        className={`min-h-16 border-b border-r border-studio-border-soft p-1 text-left transition hover:bg-studio-surface-soft sm:min-h-20 sm:p-1.5 md:min-h-[118px] md:p-2 ${
-                          !cell.isCurrentMonth ? 'bg-studio-surface-soft/50 text-studio-text-secondary' : 'text-studio-text-primary'
-                        } ${isToday(cell.date) ? 'bg-studio-primary/10' : ''}`}
-                      >
-                        <div className="mb-2 flex items-center justify-between">
-                          <span
-                            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm ${
-                              isToday(cell.date)
-                                ? 'bg-studio-primary-button text-white shadow-glow-primary'
-                                : cell.isCurrentMonth
-                                  ? 'text-studio-text-primary'
-                                  : 'text-studio-text-secondary'
-                            }`}
-                          >
-                            {cell.day}
-                          </span>
-                          {cellEvents.length > 0 && cell.isCurrentMonth ? (
-                            <span className="rounded-full bg-studio-surface-elevated px-2 py-0.5 text-[10px] text-studio-text-secondary">{cellEvents.length}</span>
-                          ) : null}
-                        </div>
-                        <div className="hidden space-y-1 md:block">
-                          {cellEvents.slice(0, 3).map((eventItem, eventIndex) => (
-                            <div
-                              key={eventIndex}
-                              className={`truncate rounded-md border px-2 py-1 text-[11px] font-medium ${eventTypeBadgeClass[getEventTone(eventItem.event_type)]}`}
-                            >
-                              {eventItem.title}
-                            </div>
-                          ))}
-                          {cellEvents.length > 3 ? <div className="text-center text-[10px] text-studio-text-secondary">+{cellEvents.length - 3} 更多</div> : null}
-                        </div>
-                        {cellEvents.length > 0 ? (
-                          <div aria-hidden="true" className="mt-1 flex min-h-1.5 items-center gap-0.5 md:hidden">
-                            {cellEvents.slice(0, 3).map((eventItem, eventIndex) => {
-                              return <span key={eventIndex} className={`h-1.5 w-1.5 rounded-full ${eventTypeDotClass[getEventTone(eventItem.event_type)]}`} />;
-                            })}
-                          </div>
-                        ) : null}
-                        {cellEvents.length > 0 ? (
-                          <span id={eventDescriptionId} className="sr-only">
-                            {cellEvents.map((eventItem) => `${eventTypeText[eventItem.event_type || 'other'] || '事项'}：${eventItem.title}`).join('；')}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
                 </div>
               </div>
             </div>
@@ -608,9 +761,7 @@ export default function CalendarPage() {
           </div>
         }
         description={`日期：${selectedDate}`}
-        submitText={pendingCalendarCreate?.phase === 'uncertain'
-          ? '重新核实'
-          : pendingCalendarCreate?.phase === 'ready' ? '确认重试创建' : '创建'}
+        submitText={pendingCalendarCreate?.phase === 'ready' ? '确认重试创建' : pendingCalendarCreate ? '重新核实' : '创建'}
         cancelText="取消"
         loading={submitting || verifyingCalendarCreate}
         size="md"
@@ -628,6 +779,7 @@ export default function CalendarPage() {
               name="title"
               type="text"
               value={formData.title}
+              required
               readOnly={Boolean(pendingCalendarCreate)}
               onChange={(event) => setFormData({ ...formData, title: event.target.value })}
               className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"

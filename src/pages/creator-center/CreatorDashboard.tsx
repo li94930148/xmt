@@ -12,6 +12,7 @@ import { ReactBitsPageScene } from '@/features/reactbits-appearance/slots/ReactB
 import { ReactBitsHeadingSlot } from '@/features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsCardSlot } from '@/features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsRevealSlot } from '@/features/reactbits-appearance/ReactBitsRevealSlot';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type BindingRecoveryMarker = { actorId: number; accountId: string; requestId: string; ttlMinutes: number };
 type DisplayedBindingCode = { actorId: number; accountId: string; code: string; expiresAt: string };
@@ -41,8 +42,10 @@ function readBindingRecoveryMarker(actorId: number, accountId: string): BindingR
 
 function writeBindingRecoveryMarker(marker: BindingRecoveryMarker) {
   try {
-    window.sessionStorage.setItem(bindingRecoveryStorageKeyFor(marker.actorId, marker.accountId), JSON.stringify(marker));
-    return true;
+    const key = bindingRecoveryStorageKeyFor(marker.actorId, marker.accountId);
+    const serialized = JSON.stringify(marker);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -105,12 +108,12 @@ export default function CreatorDashboard() {
     ]);
     if (requestId !== loadRequestRef.current) return;
     if (dashboardResult.status === 'fulfilled') setData(dashboardResult.value);
-    else setError(dashboardResult.reason instanceof Error ? dashboardResult.reason.message : '抖音数据驾驶舱加载失败');
+    else setError(getUserFacingErrorMessage(dashboardResult.reason, '抖音数据驾驶舱暂不可用，请重试。'));
     if (dashboardResult.status === 'fulfilled') setLoadedAccountUid(accountUid);
     if (syncLogsResult.status === 'fulfilled') setLogs(syncLogsResult.value);
-    else setSyncLogsError(syncLogsResult.reason instanceof Error ? syncLogsResult.reason.message : '同步记录加载失败');
+    else setSyncLogsError(getUserFacingErrorMessage(syncLogsResult.reason, '同步记录读取失败。'));
     if (statusResult.status === 'fulfilled') setAgentStatus(statusResult.value);
-    else setAgentStatusError(statusResult.reason instanceof Error ? statusResult.reason.message : '采集端状态加载失败');
+    else setAgentStatusError(getUserFacingErrorMessage(statusResult.reason, '采集端状态读取失败。'));
     setLoading(false);
   }, [accountUid]);
   useEffect(() => { void load(); }, [load]);
@@ -165,10 +168,10 @@ export default function CreatorDashboard() {
   if (!hasCurrentAccountData || !data) return <LoadingState />;
   const account = asRecord(data.account);
   const lastLog = logs?.[0];
-  const agent = agentStatus?.agents.find((item) => !accountUid || item.account_id === accountUid) || agentStatus?.agents[0];
+  const agent = currentAccountId ? agentStatus?.agents.find((item) => item.account_id === currentAccountId) : undefined;
   const accountQuery = accountUid ? `?account_id=${encodeURIComponent(accountUid)}` : '';
   const official = data.data_source === 'douyin_official_export';
-  const agentStatusLabel = agentStatusError ? '采集端状态暂不可用' : !agentStatus ? '采集端状态未读取' : agent?.online ? '采集端在线' : '采集端离线';
+  const agentStatusLabel = agentStatusError ? '采集端状态暂不可用' : !agentStatus ? '采集端状态未读取' : !agent ? '尚未绑定采集端' : agent.online ? '采集端在线' : '采集端离线';
   const agentStatusTone = !agentStatusError && agentStatus && agent?.online ? 'bg-studio-success/10 text-studio-success-contrast' : 'bg-studio-amber/10 text-studio-amber-contrast';
   const createBindingCode = async (existingMarker?: BindingRecoveryMarker) => {
     const accountId = currentAccountId;
@@ -225,7 +228,7 @@ export default function CreatorDashboard() {
 
   return <ReactBitsPageScene page="creator"><div className="mx-auto max-w-[1500px] space-y-6 pb-12">
     <div className="sr-only"><ReactBitsHeadingSlot>抖音数据驾驶舱</ReactBitsHeadingSlot></div><PageHeader title="抖音数据驾驶舱" description="账号与内容表现概览" loading={loading} onRefresh={() => void load()} refreshLabel="刷新数据" actions={<span className={`inline-flex h-10 items-center rounded-lg px-3 text-sm ${agentStatusTone}`}>{agentStatusLabel}</span>} />
-    {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/8 p-4 text-sm text-studio-coral-contrast"><span>驾驶舱刷新失败，仍显示最近一次成功数据：{error}</span><button type="button" onClick={() => void load()} disabled={loading} className="xmt-btn xmt-btn-secondary inline-flex min-h-9 items-center gap-2 px-3 disabled:opacity-60">重新加载</button></div> : null}
+    {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/8 p-4 text-sm text-studio-coral-contrast"><span>驾驶舱刷新失败，仍显示最近一次成功数据：{error}</span><button type="button" onClick={() => void load()} disabled={loading} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-3 disabled:opacity-60">重新加载</button></div> : null}
     <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="creator-profile" className="min-w-0"><CreatorProfileCard
       avatarUrl={typeof account.avatar === 'string' ? account.avatar : undefined}
       name={String(account.nickname || account.account_name || '抖音账号')}
@@ -238,7 +241,7 @@ export default function CreatorDashboard() {
     /></ReactBitsCardSlot></ReactBitsRevealSlot>
     <Panel title="Creator Agent" description="本机采集设备与浏览器状态">
       <div className="mb-4 flex flex-wrap items-center gap-3"><span className={`inline-flex min-h-9 items-center rounded-lg px-3 text-sm ${agentStatusTone}`}>{agentStatusLabel}</span>{agentStatusError ? <p role="alert" className="text-sm text-studio-coral-contrast">采集端状态读取失败；点击页面上方“刷新数据”重试。</p> : null}</div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-secondary">设备</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.device_name || '尚未绑定'}</p></div><div><span className="text-xs text-studio-text-secondary">浏览器</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_type || '未就绪'} {!agentStatusError || agent ? agent?.browser_version || '' : ''}</p></div><div><span className="text-xs text-studio-text-secondary">兼容状态</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_compatibility || '未检测'}</p></div><div><span className="text-xs text-studio-text-secondary">抖音登录</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_login_status === 'valid' ? '正常' : agent?.browser_login_status ? '未确认' : agentStatusError ? '暂不可用' : '未确认'}</p></div></div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-secondary">设备</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.device_name || (!agent ? '尚未绑定采集端' : '未知设备')}</p></div><div><span className="text-xs text-studio-text-secondary">浏览器</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_type || '未就绪'} {!agentStatusError || agent ? agent?.browser_version || '' : ''}</p></div><div><span className="text-xs text-studio-text-secondary">兼容状态</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_compatibility || '未检测'}</p></div><div><span className="text-xs text-studio-text-secondary">抖音登录</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_login_status === 'valid' ? '正常' : agent?.browser_login_status ? '未确认' : agentStatusError ? '暂不可用' : '未确认'}</p></div></div>
       <div className="mt-4 flex flex-wrap items-center gap-3"><ActionButton type="button" variant="primary" disabled={bindingBusy||bindingRecoveryState==='checking'||!currentAccountId} onClick={runBindingAction}>{bindingButtonLabel}</ActionButton>{visibleBinding?<div role="status" className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{visibleBinding.code}</code><span className="ml-3 text-xs text-studio-text-secondary">有效期至 {formatDate(visibleBinding.expiresAt,true)} · 仅可使用一次</span></div>:null}</div>
       {bindingError?<p role="alert" className="mt-3 text-sm text-studio-coral-contrast">{bindingError}</p>:null}
     </Panel>

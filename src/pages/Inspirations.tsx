@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useId } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
@@ -26,8 +27,15 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { showRealtimeToast } from '../components/RealtimeToast';
 import SimilarTopicReview from '../components/topics/SimilarTopicReview';
 import { formatBeijingTime } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { findSimilarTopicsByTitle, normalizeTopicTitle, type SimilarTopic } from '../utils/topic-title-similarity';
 import ActionButton from '../components/studio/ActionButton';
+import {
+  persistInspirationPromotionRecovery,
+  readAllInspirationPromotionRecoveries,
+  removeInspirationPromotionRecovery,
+  type PendingInspirationPromotion,
+} from './inspirationPromotionRecovery';
 import {
   Plus,
   Search,
@@ -58,6 +66,7 @@ type DetailState = {
 type PendingCommentRequest = {
   clientRequestId: string;
   content: string;
+  inspirationId: number;
   userId: number;
   needsVerification: boolean;
 };
@@ -125,8 +134,10 @@ function readStoredInspirationVotes(userId: number): PendingInspirationVote[] {
 
 function persistInspirationVote(pending: PendingInspirationVote): boolean {
   try {
-    sessionStorage.setItem(voteStorageKey(pending.userId, pending.inspirationId), JSON.stringify(pending));
-    return true;
+    const key = voteStorageKey(pending.userId, pending.inspirationId);
+    const serialized = JSON.stringify(pending);
+    sessionStorage.setItem(key, serialized);
+    return sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -147,11 +158,13 @@ function readStoredCommentRequest(userId: number, inspirationId: number): Pendin
     const value = sessionStorage.getItem(commentStorageKey(userId, inspirationId));
     if (!value) return null;
     const parsed = JSON.parse(value) as Partial<PendingCommentRequest>;
-    if (parsed.userId !== userId || typeof parsed.content !== 'string'
+    if (parsed.userId !== userId || (parsed.inspirationId !== undefined && parsed.inspirationId !== inspirationId)
+      || typeof parsed.content !== 'string'
       || typeof parsed.clientRequestId !== 'string'
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parsed.clientRequestId)) return null;
     return {
       userId,
+      inspirationId,
       content: parsed.content,
       clientRequestId: parsed.clientRequestId,
       needsVerification: parsed.needsVerification === true,
@@ -161,11 +174,23 @@ function readStoredCommentRequest(userId: number, inspirationId: number): Pendin
   }
 }
 
+function commentRequestMatchesStored(inspirationId: number, pending: PendingCommentRequest) {
+  if (pending.inspirationId !== inspirationId) return false;
+  const stored = readStoredCommentRequest(pending.userId, inspirationId);
+  return Boolean(stored
+    && stored.userId === pending.userId
+    && stored.inspirationId === inspirationId
+    && stored.clientRequestId === pending.clientRequestId.toLowerCase()
+    && stored.content === pending.content
+    && stored.needsVerification === pending.needsVerification);
+}
+
 function persistCommentRequest(inspirationId: number, pending: PendingCommentRequest) {
   try {
     sessionStorage.setItem(commentStorageKey(pending.userId, inspirationId), JSON.stringify(pending));
+    return commentRequestMatchesStored(inspirationId, pending);
   } catch {
-    // The in-memory idempotency key still protects retries for this page session.
+    return false;
   }
 }
 
@@ -202,11 +227,23 @@ function readStoredInspirationCreate(userId: number): PendingInspirationCreate |
   }
 }
 
-function persistInspirationCreate(pending: PendingInspirationCreate) {
+function inspirationCreateMatchesStored(pending: PendingInspirationCreate) {
+  const stored = readStoredInspirationCreate(pending.userId);
+  return Boolean(stored
+    && stored.userId === pending.userId
+    && stored.clientRequestId.toLowerCase() === pending.clientRequestId.toLowerCase()
+    && stored.title === pending.title
+    && stored.description === pending.description
+    && stored.category === pending.category
+    && stored.needsVerification === pending.needsVerification);
+}
+
+function persistInspirationCreate(pending: PendingInspirationCreate): boolean {
   try {
     sessionStorage.setItem(inspirationCreateStorageKey(pending.userId), JSON.stringify(pending));
+    return inspirationCreateMatchesStored(pending);
   } catch {
-    // Keep the request key in memory even when this browser blocks session storage.
+    return false;
   }
 }
 
@@ -224,12 +261,14 @@ function removeStoredInspirationCreate(userId: number, clientRequestId?: string)
 export default function Inspirations() {
   const [inspirations, setInspirations] = useState<Inspiration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creatingInspiration, setCreatingInspiration] = useState(false);
   const [createRecoveryPending, setCreateRecoveryPending] = useState(false);
   const [createRecoveryUncertain, setCreateRecoveryUncertain] = useState(false);
+  const [createStorageError, setCreateStorageError] = useState<string | null>(null);
   const [createVerificationInFlight, setCreateVerificationInFlight] = useState(false);
   const [formData, setFormData] = useState({ title: '', description: '', category: '其他' });
   const [promotingIds, setPromotingIds] = useState<Set<number>>(new Set());
@@ -249,6 +288,8 @@ export default function Inspirations() {
   const voteRecoveryNoticeShownRef = useRef(new Set<number>());
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const createDialogRef = useRef<HTMLDivElement>(null);
+  const createDialogTitleId = useId();
   const detailDialogRef = useRef<HTMLDivElement>(null);
   const detailDialogTitleId = useId();
   const [detailLoading, setDetailLoading] = useState(false);
@@ -256,6 +297,7 @@ export default function Inspirations() {
   const [commentText, setCommentText] = useState('');
   const [commentSubmittingIds, setCommentSubmittingIds] = useState<Set<number>>(new Set());
   const [commentUncertainKeys, setCommentUncertainKeys] = useState<Set<string>>(new Set());
+  const [commentRecoveryStorageWarningKeys, setCommentRecoveryStorageWarningKeys] = useState<Set<string>>(new Set());
   const [commentVerifyingKeys, setCommentVerifyingKeys] = useState<Set<string>>(new Set());
   const [similarTopicReview, setSimilarTopicReview] = useState<{
     inspirationId: number;
@@ -264,6 +306,8 @@ export default function Inspirations() {
     checkFailed: boolean;
   } | null>(null);
   const [promotionVerificationIds, setPromotionVerificationIds] = useState<Set<number>>(new Set());
+  const [promotionRecoveryReady, setPromotionRecoveryReady] = useState(false);
+  const [promotionRecoveryStorageBlocked, setPromotionRecoveryStorageBlocked] = useState(false);
   const addNotification = useAppStore((state) => state.addNotification);
   const navigate = useNavigate();
   const authStore = useAuthStore();
@@ -283,6 +327,7 @@ export default function Inspirations() {
   const deleteRealtimeConfirmedRef = useRef(new Set<number>());
   const promoteInFlightRef = useRef(new Set<number>());
   const promotionUncertainRef = useRef(new Set<number>());
+  const promotionRequestsRef = useRef(new Map<number, PendingInspirationPromotion>());
   const promotionVerificationInFlightRef = useRef(new Set<number>());
   const commentInFlightRef = useRef(new Set<number>());
   const commentUncertainRef = useRef(new Set<string>());
@@ -380,6 +425,7 @@ export default function Inspirations() {
 
   const fetchInspirations = useCallback(async () => {
     setLoading(true);
+    setListError(null);
     try {
       const result = await getInspirations({
         search: debouncedSearch || undefined,
@@ -387,15 +433,11 @@ export default function Inspirations() {
       });
       setInspirations(result.data || []);
     } catch (error) {
-      addNotification({
-        title: '获取灵感列表失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      setListError(getUserFacingErrorMessage(error, '获取灵感列表失败，请检查连接后重试。'));
     } finally {
       setLoading(false);
     }
-  }, [addNotification, debouncedSearch, categoryFilter]);
+  }, [debouncedSearch, categoryFilter]);
 
   useEffect(() => {
     void fetchInspirations();
@@ -573,7 +615,7 @@ export default function Inspirations() {
         selectedIdRef.current = null;
         addNotification({
           title: '获取灵感详情失败',
-          message: (error as Error).message,
+          message: getUserFacingErrorMessage(error, '获取灵感详情失败，请检查连接后重试。'),
           type: 'error',
         });
         setSelectedId(null);
@@ -591,6 +633,12 @@ export default function Inspirations() {
     setCommentText('');
   };
 
+  const closeCreateDialog = () => {
+    if (createRecoveryPending) return;
+    setShowCreateModal(false);
+  };
+
+  useModalLifecycle(showCreateModal, createDialogRef, closeCreateDialog, !createRecoveryPending);
   useModalLifecycle(selectedId !== null, detailDialogRef, closeDetail, true);
 
   const finishInspirationCreate = (created: Inspiration, pending: PendingInspirationCreate, verified: boolean) => {
@@ -646,7 +694,15 @@ export default function Inspirations() {
     }
     pending.needsVerification = true;
     createRequestRef.current = pending;
-    persistInspirationCreate(pending);
+    setCreateStorageError(null);
+    if (!persistInspirationCreate(pending)) {
+      removeStoredInspirationCreate(pending.userId, pending.clientRequestId);
+      if (createRequestRef.current?.clientRequestId === pending.clientRequestId) createRequestRef.current = null;
+      setCreateRecoveryPending(false);
+      setCreateRecoveryUncertain(false);
+      setCreateStorageError('浏览器无法确认灵感创建恢复信息已保存；本次未发送。请检查浏览器存储后重试。');
+      return;
+    }
     setCreateRecoveryPending(true);
 
     createInFlightRef.current = true;
@@ -932,7 +988,11 @@ export default function Inspirations() {
         finishConfirmedDelete(id);
         addNotification({ title: '删除状态已核实', message: '服务端确认这条灵感已不存在，列表已同步。', type: 'success' });
       } else if (error instanceof InspirationDeleteError && error.status === 403) {
-        addNotification({ title: '删除失败', message: error.message, type: 'error' });
+        addNotification({
+          title: '删除失败',
+          message: getUserFacingErrorMessage(error, '当前账号没有删除这条灵感的权限，请联系管理员。'),
+          type: 'error',
+        });
       } else {
         try {
           const status = await getInspirationDeleteStatus(id);
@@ -1001,7 +1061,8 @@ export default function Inspirations() {
   };
 
   const handlePromote = async (id: number) => {
-    if (promoteInFlightRef.current.has(id) || promotionReviewRef.current === id || promotionUncertainRef.current.has(id)) return;
+    if (!promotionRecoveryReady || promotionRecoveryStorageBlocked || !Number.isSafeInteger(authUserId)
+      || promoteInFlightRef.current.has(id) || promotionReviewRef.current === id || promotionUncertainRef.current.has(id)) return;
     const inspiration = inspirations.find((item) => item.id === id);
     if (!inspiration) return;
     const reviewKey = `${id}:${normalizeTopicTitle(inspiration.title)}`;
@@ -1024,7 +1085,23 @@ export default function Inspirations() {
         reviewedPromotionTitles.current.add(reviewKey);
       }
 
+      const pending: PendingInspirationPromotion = {
+        schemaVersion: 1,
+        userId: Number(authUserId),
+        inspirationId: id,
+        operationId: window.crypto.randomUUID(),
+      };
+      if (!persistInspirationPromotionRecovery(window.sessionStorage, pending)) {
+        addNotification({ title: '转为选题未发送', message: '本机无法保存待核实标记，本次没有发送转换请求。请检查浏览器存储权限后重试。', type: 'error' });
+        return;
+      }
+      promotionRequestsRef.current.set(id, pending);
+      promotionUncertainRef.current.add(id);
+
       const result = await promoteInspiration(id);
+      removeInspirationPromotionRecovery(window.sessionStorage, pending);
+      promotionRequestsRef.current.delete(id);
+      promotionUncertainRef.current.delete(id);
       addNotification({
         title: '转为选题成功',
         message: `已创建选题 #${result.topicId}`,
@@ -1034,10 +1111,18 @@ export default function Inspirations() {
       closeDetail();
       navigate(`/topics/${result.topicId}`, { state: { mobileReturnTo: '/inspirations' } });
     } catch {
+      const pendingRecovery = promotionRequestsRef.current.get(id);
+      if (!pendingRecovery) {
+        addNotification({ title: '转为选题失败', message: '本次转换请求未发送；可以在确认相似选题后重试。', type: 'error' });
+        return;
+      }
       try {
         const latest = await getInspirationDetail(id);
         const current = latest.inspiration;
         if (current.topic_id) {
+          removeInspirationPromotionRecovery(window.sessionStorage, pendingRecovery);
+          promotionRequestsRef.current.delete(id);
+          promotionUncertainRef.current.delete(id);
           syncInspirationPatch(id, { status: current.status, topic_id: current.topic_id });
           addNotification({ title: '转选题结果已核实', message: `服务器已关联选题 #${current.topic_id}，现在为你打开。`, type: 'success' });
           closeDetail();
@@ -1047,14 +1132,22 @@ export default function Inspirations() {
           setPromotionVerificationIds((items) => new Set(items).add(id));
           addNotification({ title: '关联选题待核实', message: '服务器显示该灵感已转为选题，但暂时没有可确认的关联编号；请重试只读核实，不要重复转化。', type: 'warning' });
         } else {
-          addNotification({ title: '转为选题失败', message: '服务器当前尚未建立选题关联，可以在确认相似选题后安全重试。', type: 'error' });
+          if (removeInspirationPromotionRecovery(window.sessionStorage, pendingRecovery)) {
+            promotionRequestsRef.current.delete(id);
+            promotionUncertainRef.current.delete(id);
+            addNotification({ title: '转为选题失败', message: '服务器当前尚未建立选题关联，可以在确认相似选题后安全重试。', type: 'error' });
+          } else {
+            promotionUncertainRef.current.add(id);
+            setPromotionVerificationIds((items) => new Set(items).add(id));
+            addNotification({ title: '转为选题结果待确认', message: '服务器尚未建立选题关联，但本机恢复标记仍未能核验清除；请先只读核实。', type: 'warning' });
+          }
         }
       } catch (error) {
         promotionUncertainRef.current.add(id);
         setPromotionVerificationIds((items) => new Set(items).add(id));
         addNotification({
           title: '转选题结果待确认',
-          message: `操作结果无法确认${error instanceof Error ? `（${error.message}）` : ''}，且服务器状态暂时无法读取。已暂停再次转化；请只读核实，不要重复操作。`,
+          message: `操作结果无法确认（${getUserFacingErrorMessage(error, '读取失败')}），且服务器状态暂时无法读取。已暂停再次转化；请只读核实，不要重复操作。`,
           type: 'warning',
         });
       }
@@ -1070,12 +1163,16 @@ export default function Inspirations() {
 
   const verifyPromotionState = async (id: number) => {
     if (promotionVerificationInFlightRef.current.has(id)) return;
+    const pending = promotionRequestsRef.current.get(id);
+    if (!pending || !promotionUncertainRef.current.has(id)) return;
     promotionVerificationInFlightRef.current.add(id);
     setPromotingIds((current) => new Set(current).add(id));
     try {
       const latest = await getInspirationDetail(id);
       const current = latest.inspiration;
       if (current.topic_id) {
+        removeInspirationPromotionRecovery(window.sessionStorage, pending);
+        promotionRequestsRef.current.delete(id);
         promotionUncertainRef.current.delete(id);
         setPromotionVerificationIds((items) => {
           const next = new Set(items);
@@ -1089,13 +1186,18 @@ export default function Inspirations() {
       } else if (current.status === 'promoted') {
         addNotification({ title: '关联选题仍待核实', message: '服务器显示该灵感已转为选题，但关联编号仍不可用；请稍后只读重试或联系管理员核对。', type: 'warning' });
       } else {
-        promotionUncertainRef.current.delete(id);
-        setPromotionVerificationIds((items) => {
-          const next = new Set(items);
-          next.delete(id);
-          return next;
-        });
-        addNotification({ title: '转选题状态已核实', message: '服务器尚未建立选题关联，已恢复安全重试入口。', type: 'info' });
+        if (removeInspirationPromotionRecovery(window.sessionStorage, pending)) {
+          promotionRequestsRef.current.delete(id);
+          promotionUncertainRef.current.delete(id);
+          setPromotionVerificationIds((items) => {
+            const next = new Set(items);
+            next.delete(id);
+            return next;
+          });
+          addNotification({ title: '转选题状态已核实', message: '服务器尚未建立选题关联，已恢复安全重试入口。', type: 'info' });
+        } else {
+          addNotification({ title: '恢复状态仍待处理', message: '服务器尚未建立选题关联，但本机核实标记未能清除；为避免重复转换，请稍后重新核实。', type: 'warning' });
+        }
       }
     } catch {
       addNotification({ title: '仍无法核实转选题状态', message: '本次只读读取未成功；再次转化仍保持暂停，请稍后重试核实。', type: 'error' });
@@ -1108,6 +1210,34 @@ export default function Inspirations() {
       });
     }
   };
+
+  useEffect(() => {
+    promotionRequestsRef.current.clear();
+    promotionUncertainRef.current.clear();
+    promotionVerificationInFlightRef.current.clear();
+    setPromotionVerificationIds(new Set());
+    setPromotionRecoveryReady(false);
+    setPromotionRecoveryStorageBlocked(false);
+    if (!Number.isSafeInteger(authUserId) || Number(authUserId) <= 0) return;
+
+    try {
+      const stored = readAllInspirationPromotionRecoveries(window.sessionStorage, Number(authUserId));
+      if (stored.state !== 'ready' || stored.invalidIds.length > 0) {
+        setPromotionRecoveryStorageBlocked(true);
+        setPromotionRecoveryReady(true);
+        return;
+      }
+
+      const requests = new Map(stored.pending.map((pending) => [pending.inspirationId, pending]));
+      promotionRequestsRef.current = requests;
+      promotionUncertainRef.current = new Set(requests.keys());
+      setPromotionVerificationIds(new Set(requests.keys()));
+      setPromotionRecoveryReady(true);
+    } catch {
+      setPromotionRecoveryStorageBlocked(true);
+      setPromotionRecoveryReady(true);
+    }
+  }, [authUserId]);
 
   const continueAfterSimilarityReview = () => {
     if (!similarTopicReview) return;
@@ -1156,6 +1286,12 @@ export default function Inspirations() {
       }
     }
     clearCommentUncertainty(requestKey);
+    setCommentRecoveryStorageWarningKeys((current) => {
+      if (!current.has(requestKey)) return current;
+      const next = new Set(current);
+      next.delete(requestKey);
+      return next;
+    });
   };
 
   const handleCommentSubmit = async () => {
@@ -1169,12 +1305,22 @@ export default function Inspirations() {
     let pending = commentRequestByKeyRef.current.get(requestKey) || readStoredCommentRequest(userId, inspirationId);
     if (!pending || pending.userId !== userId || pending.content !== content) {
       if (pending) removeStoredCommentRequest(userId, inspirationId, pending.clientRequestId);
-      pending = { clientRequestId: crypto.randomUUID(), content, userId, needsVerification: true };
+      pending = { clientRequestId: crypto.randomUUID(), content, inspirationId, userId, needsVerification: true };
       commentRequestByKeyRef.current.set(requestKey, pending);
     }
     commentRequestByKeyRef.current.set(requestKey, pending);
     pending.needsVerification = true;
-    persistCommentRequest(inspirationId, pending);
+    if (!persistCommentRequest(inspirationId, pending)) {
+      // No request has been sent for this attempt, so keep this draft retryable in memory.
+      pending.needsVerification = false;
+      commentRequestByKeyRef.current.set(requestKey, pending);
+      addNotification({
+        title: '本次未发送',
+        message: '浏览器无法确认评论恢复信息已保存；本次没有发送评论。请检查浏览器存储后重试。',
+        type: 'error',
+      });
+      return;
+    }
 
     commentInFlightRef.current.add(inspirationId);
     setCommentSubmittingIds((current) => new Set(current).add(inspirationId));
@@ -1204,12 +1350,22 @@ export default function Inspirations() {
         }
       } catch {
         pending.needsVerification = true;
-        persistCommentRequest(inspirationId, pending);
+        const recoveryPersisted = persistCommentRequest(inspirationId, pending)
+          || commentRequestMatchesStored(inspirationId, pending);
+        setCommentRecoveryStorageWarningKeys((current) => {
+          if (current.has(requestKey) === !recoveryPersisted) return current;
+          const next = new Set(current);
+          if (recoveryPersisted) next.delete(requestKey);
+          else next.add(requestKey);
+          return next;
+        });
         commentUncertainRef.current.add(requestKey);
         setCommentUncertainKeys((current) => new Set(current).add(requestKey));
         addNotification({
           title: '评论结果待确认',
-          message: '请求未获确认，且服务器状态暂时无法读取。已暂停再次发表评论；请先只读核实，避免重复操作。',
+          message: recoveryPersisted
+            ? '请求未获确认，且服务器状态暂时无法读取。已暂停再次发表评论；请先只读核实，避免重复操作。'
+            : '请求未获确认，服务器状态暂时无法读取，且无法确认恢复编号仍保存在浏览器中。请勿刷新或关闭当前页面；只读核实前已暂停再次发表评论。',
           type: 'warning',
         });
       }
@@ -1242,7 +1398,14 @@ export default function Inspirations() {
         addNotification({ title: '评论状态已核实', message: '服务器已保存这条评论，讨论区已同步。', type: 'success' });
       } else {
         pending.needsVerification = false;
-        persistCommentRequest(inspirationId, pending);
+        const recoveryPersisted = persistCommentRequest(inspirationId, pending);
+        setCommentRecoveryStorageWarningKeys((current) => {
+          if (current.has(requestKey) === !recoveryPersisted) return current;
+          const next = new Set(current);
+          if (recoveryPersisted) next.delete(requestKey);
+          else next.add(requestKey);
+          return next;
+        });
         clearCommentUncertainty(requestKey);
         addNotification({ title: '评论状态已核实', message: '服务器尚未保存这条评论；当前输入已保留，可以安全重试。', type: 'info' });
       }
@@ -1270,13 +1433,14 @@ export default function Inspirations() {
     ? commentRecoveryKey(authStore.user.id, selectedId)
     : null;
   const activeCommentUncertain = Boolean(activeCommentRecoveryKey && commentUncertainKeys.has(activeCommentRecoveryKey));
+  const activeCommentRecoveryStorageWarning = Boolean(activeCommentRecoveryKey && commentRecoveryStorageWarningKeys.has(activeCommentRecoveryKey));
   const activeCommentVerifying = Boolean(activeCommentRecoveryKey && commentVerifyingKeys.has(activeCommentRecoveryKey));
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div>
-          <h1 className={styles.pageTitle}>灵感池</h1>
+          <PageHeading className={styles.pageTitle}>灵感池</PageHeading>
           <p className={`${styles.subtitle} mt-1`}>收集团队灵感，快速互动，再在详情里集中讨论</p>
         </div>
         <button
@@ -1287,6 +1451,12 @@ export default function Inspirations() {
           <span className="font-medium text-sm">提交灵感</span>
         </button>
       </div>
+
+      {promotionRecoveryStorageBlocked ? (
+        <div role="alert" className="rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast">
+          转选题恢复记录暂时无法确认，新的转选题操作已暂停。请检查浏览器存储权限并重新加载页面。
+        </div>
+      ) : null}
 
       <div className={`${styles.card} p-4`}>
         <div className="flex flex-col md:flex-row gap-4">
@@ -1323,8 +1493,15 @@ export default function Inspirations() {
         </div>
       </div>
 
-      {loading ? (
+      {loading && inspirations.length === 0 ? (
         <LoadingState type="inline" text="正在加载灵感列表…" className="flex h-64 w-full justify-center" />
+      ) : inspirations.length === 0 && listError ? (
+        <div role="alert" className={`${styles.card} flex flex-col items-center gap-3 p-8 text-center`}>
+          <p className={styles.textPrimary}>{listError}</p>
+          <ActionButton type="button" variant="secondary" onClick={() => void fetchInspirations()}>
+            重新加载灵感
+          </ActionButton>
+        </div>
       ) : inspirations.length === 0 ? (
         <div className={`${styles.card} p-12 text-center`}>
           <Lightbulb className={`w-12 h-12 ${styles.textMuted} mx-auto mb-4`} />
@@ -1332,6 +1509,15 @@ export default function Inspirations() {
           <p className={`${styles.textSecondary} mb-4`}>点击右上角“提交灵感”开始收集团队创意</p>
         </div>
       ) : (
+        <>
+        {listError ? (
+          <div role="alert" className={`${styles.card} mb-4 flex flex-wrap items-center justify-between gap-3 p-4`}>
+            <p className={styles.textPrimary}>{listError}</p>
+            <ActionButton type="button" variant="secondary" onClick={() => void fetchInspirations()}>
+              重新加载灵感
+            </ActionButton>
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {inspirations.map((inspiration) => {
             const isPromoted = inspiration.status === 'promoted';
@@ -1454,7 +1640,7 @@ export default function Inspirations() {
                         variant="danger"
                         aria-label={`删除灵感：${inspiration.title}`}
                         aria-busy={deletingIds.has(inspiration.id) || deleteVerifyingIds.has(inspiration.id)}
-                        disabled={deletingIds.has(inspiration.id) || deleteVerificationIds.has(inspiration.id)}
+                        disabled={!promotionRecoveryReady || promotionRecoveryStorageBlocked || deletingIds.has(inspiration.id) || deleteVerificationIds.has(inspiration.id) || promotionVerificationIds.has(inspiration.id)}
                         onClick={(event) => {
                           event.stopPropagation();
                           setPendingDeleteId(inspiration.id);
@@ -1528,22 +1714,41 @@ export default function Inspirations() {
             );
           })}
         </div>
+        </>
       )}
 
-      {showCreateModal && (
-        <div className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-modal`}>
+      {showCreateModal && createPortal((
+        <div
+          ref={createDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={createDialogTitleId}
+          tabIndex={-1}
+          className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-modal p-4`}
+        >
           <div className={`${styles.modal} p-6 w-full max-w-md mx-4`}>
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-studio-primary" />
-                <h2 className={`text-lg font-bold ${styles.textPrimary}`}>提交灵感</h2>
+                <h2 id={createDialogTitleId} className={`text-lg font-bold ${styles.textPrimary}`}>提交灵感</h2>
               </div>
-              <button onClick={() => setShowCreateModal(false)} disabled={createRecoveryPending} className={styles.textMuted}>
+              <button
+                type="button"
+                aria-label="关闭提交灵感弹窗"
+                onClick={closeCreateDialog}
+                disabled={createRecoveryPending}
+                className={`xmt-btn xmt-btn-ghost h-10 w-10 min-h-10 min-w-10 shrink-0 !p-0 ${styles.textMuted}`}
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-4">
+              {createStorageError ? (
+                <div role="alert" className="rounded-lg border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-sm text-studio-amber-contrast">
+                  {createStorageError}
+                </div>
+              ) : null}
               {createRecoveryPending ? (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-studio-amber/30 bg-studio-amber-soft px-3 py-2 text-xs text-studio-amber-contrast">
                   <span>
@@ -1572,10 +1777,14 @@ export default function Inspirations() {
                 <input
                   id="inspiration-title"
                   name="title"
+                  data-modal-autofocus=""
                   type="text"
                   value={formData.title}
                   disabled={createRecoveryPending}
-                  onChange={(event) => setFormData({ ...formData, title: event.target.value })}
+                  onChange={(event) => {
+                    setFormData({ ...formData, title: event.target.value });
+                    setCreateStorageError(null);
+                  }}
                   className={`w-full px-4 py-2.5 ${styles.input} text-sm`}
                   placeholder="你的灵感是什么？"
                 />
@@ -1587,7 +1796,10 @@ export default function Inspirations() {
                   name="description"
                   value={formData.description}
                   disabled={createRecoveryPending}
-                  onChange={(event) => setFormData({ ...formData, description: event.target.value })}
+                  onChange={(event) => {
+                    setFormData({ ...formData, description: event.target.value });
+                    setCreateStorageError(null);
+                  }}
                   className={`w-full px-4 py-2.5 ${styles.input} text-sm resize-none`}
                   rows={4}
                   placeholder="补充更多想法、场景、切入角度"
@@ -1600,7 +1812,10 @@ export default function Inspirations() {
                   name="category"
                   value={formData.category}
                   disabled={createRecoveryPending}
-                  onChange={(event) => setFormData({ ...formData, category: event.target.value })}
+                  onChange={(event) => {
+                    setFormData({ ...formData, category: event.target.value });
+                    setCreateStorageError(null);
+                  }}
                   className={`w-full px-4 py-2.5 ${styles.input} text-sm`}
                 >
                   {categories
@@ -1615,7 +1830,8 @@ export default function Inspirations() {
 
               <div className="flex gap-3 pt-2">
                 <button
-                  onClick={() => setShowCreateModal(false)}
+                  type="button"
+                  onClick={closeCreateDialog}
                   disabled={createRecoveryPending}
                   className={`flex-1 px-4 py-2.5 ${styles.buttonSecondary} rounded-xl text-sm`}
                 >
@@ -1633,7 +1849,7 @@ export default function Inspirations() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {selectedId !== null && createPortal((
         <div
@@ -1731,7 +1947,9 @@ export default function Inspirations() {
                   <div className="flex flex-col gap-3">
                     {activeCommentUncertain && selectedId !== null ? (
                       <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-studio-amber/30 bg-studio-amber-soft px-3 py-2 text-xs text-studio-amber-contrast">
-                        <span>评论结果待确认；再次发表评论已暂停。</span>
+                        <span>{activeCommentRecoveryStorageWarning
+                          ? '评论结果待确认；恢复编号无法确认仍保存在浏览器中。请勿刷新或关闭当前页面，只读核实前已暂停再次发表评论。'
+                          : '评论结果待确认；再次发表评论已暂停。'}</span>
                         <ActionButton
                           type="button"
                           variant="ghost"

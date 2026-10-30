@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateContextMenuPosition, getContextMenuSubmenuSide, shouldShowEditorBubbleMenu } from './menuBehavior';
+import {
+  calculateContextMenuPosition,
+  calculateContextMenuSubmenuSafePosition,
+  getContextMenuSubmenuArrowKey,
+  getContextMenuSubmenuSide,
+  shouldShowEditorBubbleMenu,
+} from './menuBehavior';
 
 const menu = { width: 236, height: 384 };
 const viewport = { width: 1280, height: 720 };
@@ -43,5 +49,32 @@ test('右键菜单靠近左边缘时子菜单保持向右展开', () => {
   assert.equal(
     getContextMenuSubmenuSide({ x: 8, y: 120 }, { width: 200, height: 384 }, { width: 160, height: 120 }, { width: 1280, height: 720 }),
     'right',
+  );
+});
+
+test('子菜单按实际展开方向选择键盘进入与退出方向', () => {
+  assert.equal(getContextMenuSubmenuArrowKey('right', 'open'), 'ArrowRight');
+  assert.equal(getContextMenuSubmenuArrowKey('right', 'close'), 'ArrowLeft');
+  assert.equal(getContextMenuSubmenuArrowKey('left', 'open'), 'ArrowLeft');
+  assert.equal(getContextMenuSubmenuArrowKey('left', 'close'), 'ArrowRight');
+});
+
+test('桌面窄视口中菜单会移到子菜单完整展开的一侧', () => {
+  const menuSize = { width: 200, height: 384 };
+  const submenuSize = { width: 160, height: 120 };
+  const viewport = { width: 390, height: 824 };
+  const safePosition = calculateContextMenuSubmenuSafePosition({ x: 130, y: 200 }, menuSize, submenuSize, viewport);
+
+  assert.deepEqual(safePosition, { x: 168, y: 200 });
+  assert.equal(getContextMenuSubmenuSide(safePosition, menuSize, submenuSize, viewport), 'left');
+});
+
+test('手机视口内联子菜单时不为并排布局移动主菜单', () => {
+  const viewport = { width: 320, height: 568 };
+  const position = { x: 92, y: 120 };
+
+  assert.deepEqual(
+    calculateContextMenuSubmenuSafePosition(position, { width: 200, height: 384 }, { width: 160, height: 120 }, viewport),
+    position,
   );
 });

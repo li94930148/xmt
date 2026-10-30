@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import { getPublishingById, getPublishingScriptVersions, syncPublishingPublishedArchive, updatePublishing } from '../api';
@@ -7,6 +8,7 @@ import { ChevronLeft, FileText, Camera, Send, Clock, Save, CheckCircle, ArrowRig
 import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { ActionButton, PageShell } from '../components/studio';
@@ -14,6 +16,7 @@ import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
 import { getWorkflowStatusLabel, isKnownWorkflowStatus } from '../platform/workflow-status-labels';
 import { getPlatformLabel } from '../platform/platform-labels';
 import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScriptSourceTimestamp } from '../utils/workflow-script-source';
+import { productionSourceSnapshotHref } from '../lib/productionSourceSnapshot';
 import { usePermission } from '../hooks/usePermission';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -187,6 +190,7 @@ export default function PublishingDetail() {
   const [archiveSyncPending, setArchiveSyncPending] = useState(false);
   const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
   const archiveSyncRetryInFlightRef = useRef(false);
+  const [pendingScriptSaveAccessRevoked, setPendingScriptSaveAccessRevoked] = useState(false);
   const sourceProductionId = data
     ? data.script_content !== null ? data.script_source_production_id : data.production?.id
     : null;
@@ -196,6 +200,7 @@ export default function PublishingDetail() {
   const sourceProduction = data
     ? data.script_content !== null ? data.script_source_production : data.production
     : null;
+  const sourceSnapshotHref = productionSourceSnapshotHref(sourceProductionId, sourceVersion);
   const sourceProductionTimestamp = workflowScriptSourceTimestamp(sourceProduction);
   const savedScriptContent = data?.script_content ?? data?.production?.content ?? data?.production?.content_markdown ?? '';
   const hasUnsavedScript = Boolean(data && editMode && scriptContent !== savedScriptContent);
@@ -231,13 +236,24 @@ export default function PublishingDetail() {
   useEffect(() => {
     const pending = loadPublishingScriptSaveVerification(authUserId, Number(id));
     setPendingScriptSaveVerification(pending);
+    setPendingScriptSaveAccessRevoked(false);
     initialPendingScriptSaveRef.current = pending;
     restoredPendingScriptSaveStartedRef.current = false;
   }, [authUserId, id]);
 
   const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
     if (hasPendingScriptSaveForCurrentRecord) {
-      appStore.addNotification({ title: '剧本保存结果待核实', message: '请先只读核实服务器状态；核实完成前不能离开当前发布记录。', type: 'warning' });
+      if (pendingScriptSaveAccessRevoked && pendingScriptSaveVerification?.status !== 'checking') {
+        proceed();
+        return;
+      }
+      appStore.addNotification({
+        title: '剧本保存结果待核实',
+        message: pendingScriptSaveVerification?.status === 'checking'
+          ? '只读核实正在进行，请稍候完成后再离开。'
+          : '请先只读核实服务器状态；核实完成前不能离开当前发布记录。',
+        type: 'warning',
+      });
       stay();
       return;
     }
@@ -251,7 +267,7 @@ export default function PublishingDetail() {
       return;
     }
     proceed();
-  }, [appStore, hasPendingScriptSaveForCurrentRecord, hasUnsavedScript, saving]);
+  }, [appStore, pendingScriptSaveAccessRevoked, pendingScriptSaveVerification?.status, hasPendingScriptSaveForCurrentRecord, hasUnsavedScript, saving]);
   useRouteNavigationGuard(Boolean(saving || hasPendingScriptSaveForCurrentRecord || hasUnsavedScript), handleRouteNavigationAttempt);
 
   useEffect(() => {
@@ -291,7 +307,7 @@ export default function PublishingDetail() {
         }
       } catch (error) {
         if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) {
-          addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '获取数据失败', message: getUserFacingErrorMessage(error, '暂时无法读取发布详情，请稍后重试。'), type: 'error' });
         }
       } finally {
         if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) setLoading(false);
@@ -307,7 +323,7 @@ export default function PublishingDetail() {
   const verifyPendingScriptSave = useCallback(async (pending: PublishingScriptSaveVerification): Promise<boolean> => {
     if (scriptSaveVerificationInFlightRef.current) return false;
     scriptSaveVerificationInFlightRef.current = true;
-    setPendingScriptSaveVerification({ ...pending, status: 'checking', readError: null });
+    setPendingScriptSaveVerification({ ...pending, status: 'checking' });
     try {
       const [current, versions] = await Promise.all([
         getPublishingById(pending.publishingId) as Promise<PublishingDetailData>,
@@ -339,6 +355,7 @@ export default function PublishingDetail() {
 
       removePublishingScriptSaveVerification(pending.userId, pending.publishingId);
       setPendingScriptSaveVerification(null);
+      setPendingScriptSaveAccessRevoked(false);
       setData(current);
       setArchiveSyncPending(current.published_archive_script_sync_pending === true);
       setScriptVersions(versions);
@@ -375,18 +392,38 @@ export default function PublishingDetail() {
       if ((error as { status?: unknown } | null)?.status === 404) {
         removePublishingScriptSaveVerification(pending.userId, pending.publishingId);
         setPendingScriptSaveVerification(null);
+        setPendingScriptSaveAccessRevoked(false);
         setData(null);
         setLoading(false);
         addNotification({ title: '发布记录已不存在', message: '服务器没有找到这条发布记录；未重复提交剧本保存。', type: 'warning' });
         return false;
       }
-      const readError = error instanceof Error ? error.message : '读取失败';
+      if ((error as { status?: unknown } | null)?.status === 403) {
+        setPendingScriptSaveAccessRevoked(true);
+        scriptVersionRequestSequenceRef.current += 1;
+        setData(null);
+        setLoading(false);
+        setScriptVersions([]);
+        setScriptVersionsLoadError(false);
+        setScriptContent('');
+        setEditMode(false);
+        setArchiveSyncPending(false);
+        setPendingScriptSaveVerification({
+          ...pending,
+          status: 'uncertain',
+          readError: '当前账号已无权读取这条发布记录或剧本历史。待核实编号和草稿仅保存在当前标签页会话；权限恢复后重新打开此详情并只读核实。离开详情不会重新提交，但请勿关闭标签页，以免丢失恢复信息。',
+        });
+        addNotification({ title: '无权核实剧本保存结果', message: '已隐藏当前详情并保留本标签页中的待核实草稿；权限恢复后可重新打开并只读核实。请勿关闭标签页。', type: 'warning' });
+        return false;
+      }
+      setPendingScriptSaveAccessRevoked(false);
+      const readError = getUserFacingErrorMessage(error, '');
       setScriptContent(pending.scriptContent);
       setEditMode(true);
       setPendingScriptSaveVerification({
         ...pending,
         status: 'uncertain',
-        readError: `剧本保存结果尚未确认，当前内容和版本历史也无法读取（${readError}）。请只读核实，不要重复保存。`,
+        readError: `剧本保存结果尚未确认，当前内容和版本历史暂时无法读取${readError ? `（${readError}）` : ''}。请只读核实，不要重复保存。`,
       });
       addNotification({ title: '剧本保存结果待确认', message: '服务器状态暂时无法读取；当前发布详情已锁定写入，请先只读核实。', type: 'warning' });
       return false;
@@ -441,7 +478,9 @@ export default function PublishingDetail() {
       const storageKey = publishingScriptSaveVerificationKey(authUserId, requestedPublishingId);
       if (!storageKey) throw new Error('无法保存本次请求的恢复编号');
       try {
-        sessionStorage.setItem(storageKey, JSON.stringify(pending));
+        const serialized = JSON.stringify(pending);
+        sessionStorage.setItem(storageKey, serialized);
+        if (sessionStorage.getItem(storageKey) !== serialized) throw new Error('恢复信息回读不一致');
       } catch {
         throw new Error('浏览器无法保存异常恢复信息；本次没有发送保存请求');
       }
@@ -496,7 +535,7 @@ export default function PublishingDetail() {
         if (isDefinitivePublishingScriptSaveRejection(error)) {
           removePublishingScriptSaveVerification(authUserId, requestedPublishingId);
           setPendingScriptSaveVerification(null);
-          addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '保存失败', message: getUserFacingErrorMessage(error, '发布剧本保存失败，请检查后重试。'), type: 'error' });
           return false;
         } else {
           return await verifyPendingScriptSave(pending);
@@ -509,7 +548,7 @@ export default function PublishingDetail() {
       }
       addNotification({
         title: requestStarted ? '保存结果待核实' : '剧本未提交',
-        message: error instanceof Error ? error.message : '保存剧本失败',
+        message: getUserFacingErrorMessage(error, requestStarted ? '剧本保存结果暂时无法确认，请先只读核实。' : '发布剧本未保存，请检查后重试。'),
         type: requestStarted ? 'warning' : 'error',
       });
       return false;
@@ -532,7 +571,7 @@ export default function PublishingDetail() {
         type: 'success',
       });
     } catch (error) {
-      appStore.addNotification({ title: '归档仍待同步', message: (error as Error).message, type: 'warning' });
+      appStore.addNotification({ title: '归档仍待同步', message: getUserFacingErrorMessage(error, '发布归档暂时无法同步，请稍后重试。'), type: 'warning' });
     } finally {
       archiveSyncRetryInFlightRef.current = false;
       setArchiveSyncRetrying(false);
@@ -568,6 +607,31 @@ export default function PublishingDetail() {
   }
 
   if (!data) {
+    if (hasPendingScriptSaveForCurrentRecord && pendingScriptSaveVerification) {
+      return (
+        <PageShell className="space-y-4">
+          <div role="alert" className="rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast">
+            {pendingScriptSaveVerification.readError || `发布记录「${pendingScriptSaveVerification.title}」的保存结果仍待核实；本机恢复编号和草稿已保留。`}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <ActionButton
+              type="button"
+              disabled={saving || pendingScriptSaveVerification.status === 'checking'}
+              onClick={() => void verifyPendingScriptSave(pendingScriptSaveVerification)}
+              className="min-h-10 px-3 py-2"
+            >
+              {pendingScriptSaveVerification.status === 'checking' ? '正在核实…' : '只读核实保存状态'}
+            </ActionButton>
+            {pendingScriptSaveAccessRevoked ? (
+              <ActionButton type="button" variant="ghost" onClick={() => navigate('/publishing')} className="min-h-10 justify-start px-0">
+                <ChevronLeft className="h-5 w-5" />
+                返回发布管理
+              </ActionButton>
+            ) : null}
+          </div>
+        </PageShell>
+      );
+    }
     return (
       <PageShell>
       <div className="flex items-center justify-center h-64">
@@ -621,10 +685,10 @@ export default function PublishingDetail() {
 
       {/* 标题卡片 */}
       <div className={`${styles.card} p-6`}>
-        <h1 className={`text-2xl font-bold ${styles.textPrimary} flex items-center gap-2`}>
+        <PageHeading className={`text-2xl font-bold ${styles.textPrimary} flex items-center gap-2`}>
           <Send className="w-6 h-6 text-studio-primary" />
           {data.topic_title}
-        </h1>
+        </PageHeading>
         <p className={`${styles.textSecondary} mt-1`}>发布管理详情 · 关联选题 #{data.topic_id}</p>
         <p className={`mt-1 text-xs ${styles.textSecondary}`}>
           {workflowScriptSourceLabel(data.script_content, data.script_source_version, data.production?.version)}
@@ -804,10 +868,10 @@ export default function PublishingDetail() {
                 <span className={`text-xs ${styles.textSecondary} w-16 shrink-0 pt-0.5`}>操作人</span>
                 <span className={`text-sm ${styles.textPrimary}`}>{data.production.operator_name || '-'}</span>
               </div>
-              {!editMode && sourceProductionId && sourceVersion && (
+              {!editMode && hasPermission('production:view') && sourceSnapshotHref && sourceProductionId && sourceVersion && (
                 <button
                   type="button"
-                  onClick={() => navigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
+                  onClick={() => navigate(sourceSnapshotHref, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
                   className="xmt-btn xmt-btn-secondary min-h-10 px-3 py-2 text-xs"
                 >
                   查看引用创作版本 {sourceVersion}
@@ -878,6 +942,7 @@ export default function PublishingDetail() {
             <div className="min-h-[calc(100vh-22rem)] overflow-hidden bg-[var(--editor-bg)]">
               <ContentEditor
                 writingGoalKey={`publishing:${id}`}
+                ariaLabel="发布剧本正文"
                 value={scriptContent}
                 onChange={setScriptContent}
                 readOnly={hasPendingScriptSaveForCurrentRecord}
@@ -930,12 +995,12 @@ export default function PublishingDetail() {
               <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">
                 <p className="text-sm font-medium text-studio-text-primary">{version.is_baseline ? '历史原稿（时间未记录）' : `${version.version} · ${version.change_type === 'major' ? '大版本' : '小版本'}`}</p>
                 <p className="mt-1 text-xs text-studio-text-secondary">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</p>
-                {Number(version.source_production_id) > 0 && version.source_production_version ? (
+                {hasPermission('production:view') && productionSourceSnapshotHref(version.source_production_id, version.source_production_version) ? (
                   <ActionButton
                     type="button"
                     variant="ghost"
                     disabled={editMode || saving}
-                    onClick={() => navigate(`/production/${version.source_production_id}?version=${encodeURIComponent(version.source_production_version!)}`, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
+                    onClick={() => navigate(productionSourceSnapshotHref(version.source_production_id, version.source_production_version)!, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
                     className="mt-2 min-h-10 justify-start px-2 text-xs font-medium text-studio-cyan-contrast hover:bg-studio-surface-soft focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
                   >
                     来源创作稿：{version.source_production_version} · 查看
@@ -944,7 +1009,7 @@ export default function PublishingDetail() {
                   <p className="mt-2 text-xs text-studio-text-secondary">该版本的创作来源未记录</p>
                 )}
                 <details className="mt-2">
-                  <summary className="min-h-8 cursor-pointer py-1 text-xs font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
+                  <summary className="min-h-10 cursor-pointer py-1 text-xs font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
                   <div className="editor-content-preview tiptap mt-2 max-h-80 overflow-auto rounded-lg border border-studio-border-soft bg-studio-surface-soft p-4 text-sm leading-relaxed text-studio-text-primary" dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(version.content)) }} />
                 </details>
               </li>

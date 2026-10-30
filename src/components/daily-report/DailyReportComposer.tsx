@@ -55,7 +55,7 @@ export default function DailyReportComposer({ status = 'draft', canEdit = true, 
           return (
             <label key={field.key} className="block">
               <span className="mb-2 block text-sm font-semibold text-studio-text-primary">{field.title}</span>
-              <DailyReportRichSection value={item?.contentMd || ''} onChange={(value) => update(field.key, value)} disabled={readonly || interactionLocked} placeholder={field.placeholder} />
+              <DailyReportRichSection name={`daily-report-${field.key}`} value={item?.contentMd || ''} onChange={(value) => update(field.key, value)} disabled={readonly || interactionLocked} placeholder={field.placeholder} />
             </label>
           );
         })}

@@ -15,6 +15,38 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import { getRoleDisplayName } from '../lib/roles';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
+import {
+  clearDesktopPasswordChangeRecovery,
+  createDesktopPasswordChangeRecoveryRequestId,
+  persistDesktopPasswordChangeRecovery,
+  readDesktopPasswordChangeRecovery,
+  type PendingDesktopPasswordChangeRecovery,
+} from '../lib/desktopPasswordChangeRecovery';
+import {
+  clearDesktopProfileRecovery,
+  createDesktopProfileRecoveryRequestId,
+  persistDesktopProfileRecovery,
+  readDesktopProfileRecovery,
+  type DesktopProfileAuthMode,
+  type DesktopProfileFields,
+  type PendingDesktopProfileRecovery,
+} from './desktopProfileRecovery';
+import {
+  clearSystemSettingsRecovery,
+  createSystemSettingsRecoveryRequestId,
+  persistSystemSettingsRecovery,
+  readSystemSettingsRecovery,
+  type PendingSystemSettingsRecovery,
+} from './systemSettingsRecovery';
+import {
+  clearNotificationPreferenceRecovery,
+  createNotificationPreferenceRecoveryRequestId,
+  persistNotificationPreferenceRecovery,
+  readNotificationPreferenceRecovery,
+  type NotificationPreferenceDraft,
+  type PendingNotificationPreferenceRecovery,
+} from './notificationPreferenceRecovery';
 import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactBitsAppearancePanel';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
@@ -88,20 +120,21 @@ const tabMeta = {
 type TabKey = keyof typeof tabMeta;
 type BackupDeleteRecoveryMarker = { version: 1; actorId: number; name: string };
 type NotificationPreferenceRecovery =
-  | { kind: 'unknown'; draft: NotificationPreference[]; message: string }
-  | { kind: 'conflict'; draft: NotificationPreference[]; currentPreferences: NotificationPreference[] };
+  | { kind: 'unknown'; marker: PendingNotificationPreferenceRecovery; draft: NotificationPreferenceDraft[]; message: string }
+  | { kind: 'conflict'; marker: PendingNotificationPreferenceRecovery; draft: NotificationPreferenceDraft[]; currentPreferences: NotificationPreference[] }
+  | { kind: 'blocked'; marker: PendingNotificationPreferenceRecovery | null; message: string };
 type SystemSettingsRecovery =
-  | { kind: 'unknown'; patch: Partial<ManagedSystemSettings>; successMessage: string; message: string }
-  | { kind: 'conflict'; patch: Partial<ManagedSystemSettings>; successMessage: string; currentSettings: ManagedSystemSettings };
-type ProfileFields = { name: string; email: string };
+  | { kind: 'unknown'; marker: PendingSystemSettingsRecovery; patch: Partial<ManagedSystemSettings>; successMessage: string; message: string }
+  | { kind: 'conflict'; marker: PendingSystemSettingsRecovery; patch: Partial<ManagedSystemSettings>; successMessage: string; currentSettings: ManagedSystemSettings }
+  | { kind: 'blocked'; marker: PendingSystemSettingsRecovery | null; message: string };
 type ProfileRecovery = {
   kind: 'unknown' | 'unchanged' | 'conflict';
-  actorId: number;
-  token: string;
-  authMode: 'legacy' | 'v1-web';
-  draft: ProfileFields;
-  before: ProfileFields;
+  marker: PendingDesktopProfileRecovery;
   currentUser?: Awaited<ReturnType<typeof getMe>>;
+  message: string;
+} | {
+  kind: 'blocked';
+  marker: PendingDesktopProfileRecovery | null;
   message: string;
 };
 
@@ -111,11 +144,11 @@ function notificationPreferenceFingerprint(preferences: NotificationPreference[]
     .sort((left, right) => `${left.channel}:${left.event_type}`.localeCompare(`${right.channel}:${right.event_type}`)));
 }
 
-function normalizeProfileFields(value: ProfileFields): ProfileFields {
+function normalizeProfileFields(value: DesktopProfileFields): DesktopProfileFields {
   return { name: value.name.trim(), email: value.email.trim() };
 }
 
-function sameProfileFields(left: ProfileFields, right: ProfileFields) {
+function sameProfileFields(left: DesktopProfileFields, right: DesktopProfileFields) {
   const normalizedLeft = normalizeProfileFields(left);
   const normalizedRight = normalizeProfileFields(right);
   return normalizedLeft.name === normalizedRight.name && normalizedLeft.email === normalizedRight.email;
@@ -183,6 +216,34 @@ function clearBackupDeleteRecovery(marker: BackupDeleteRecoveryMarker): boolean 
   }
 }
 
+export function BrandLogoPicker({
+  disabled,
+  onChange,
+  buttonClassName,
+}: {
+  disabled: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  buttonClassName: string;
+}) {
+  return (
+    <label
+      aria-disabled={disabled}
+      className={`rounded-lg px-4 py-2 ${buttonClassName} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-studio-focus-ring`}
+    >
+      选择品牌 Logo 图片
+      <input
+        id="settings-brand-logo-file"
+        type="file"
+        aria-label="选择品牌 Logo 图片"
+        accept="image/*"
+        onChange={onChange}
+        disabled={disabled}
+        className="sr-only"
+      />
+    </label>
+  );
+}
+
 export default function NotificationSettings() {
   const styles = useThemeStyles();
   const authStore = useAuthStore();
@@ -193,6 +254,10 @@ export default function NotificationSettings() {
   const { hasPermission } = usePermission();
   const canManageDatabase = hasPermission('system:backup');
   const canManageSystem = hasPermission('system:settings');
+  const notificationPreferenceActorId = Number(authStore.user?.id);
+  const passwordRecoveryActorId = Number(authStore.user?.id);
+  const systemSettingsActorId = Number(authStore.user?.id);
+  const profileRecoveryActorId = Number(authStore.user?.id);
   const setGlobalSystemSettings = useAppStore((state) => state.setSystemSettings);
 
   const [requestedTab, setActiveTab] = useState<TabKey>(() => {
@@ -212,6 +277,12 @@ export default function NotificationSettings() {
   const [notifyLoadError, setNotifyLoadError] = useState('');
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyRecovery, setNotifyRecovery] = useState<NotificationPreferenceRecovery | null>(null);
+  const [notifyRecoveryHydratedActorId, setNotifyRecoveryHydratedActorId] = useState<number | null>(null);
+  const [notifyRecoveryStorageAvailable, setNotifyRecoveryStorageAvailable] = useState(false);
+  const notifyRecoveryStorageReady = Number.isSafeInteger(notificationPreferenceActorId)
+    && notificationPreferenceActorId > 0
+    && notifyRecoveryHydratedActorId === notificationPreferenceActorId
+    && notifyRecoveryStorageAvailable;
   const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
   const [navigationGuardNotice, setNavigationGuardNotice] = useState('');
   const notifySaveLockRef = useRef(false);
@@ -221,6 +292,14 @@ export default function NotificationSettings() {
   const [profileEmail, setProfileEmail] = useState(authStore.user?.email || '');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileRecovery, setProfileRecovery] = useState<ProfileRecovery | null>(null);
+  const [profileRecoveryHydration, setProfileRecoveryHydration] = useState<{ actorId: number; authMode: DesktopProfileAuthMode } | null>(null);
+  const [profileRecoveryStorageAvailable, setProfileRecoveryStorageAvailable] = useState(false);
+  const [profileRecoveryNotice, setProfileRecoveryNotice] = useState('');
+  const profileRecoveryStorageReady = Number.isSafeInteger(profileRecoveryActorId)
+    && profileRecoveryActorId > 0
+    && profileRecoveryHydration?.actorId === profileRecoveryActorId
+    && profileRecoveryHydration.authMode === authStore.authMode
+    && profileRecoveryStorageAvailable;
   const profileSaveLockRef = useRef(false);
 
   const [oldPassword, setOldPassword] = useState('');
@@ -233,6 +312,14 @@ export default function NotificationSettings() {
   const passwordSaveLockRef = useRef(false);
   const [passwordOutcomeUnknown, setPasswordOutcomeUnknown] = useState(false);
   const passwordOutcomeUnknownRef = useRef(false);
+  const [passwordOutcomeMessage, setPasswordOutcomeMessage] = useState('密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。');
+  const [passwordRecoveryHydratedActorId, setPasswordRecoveryHydratedActorId] = useState<number | null>(null);
+  const [passwordRecoveryStorageAvailable, setPasswordRecoveryStorageAvailable] = useState(false);
+  const [passwordRecoveryMarker, setPasswordRecoveryMarker] = useState<PendingDesktopPasswordChangeRecovery | null>(null);
+  const passwordRecoveryReady = Number.isSafeInteger(passwordRecoveryActorId)
+    && passwordRecoveryActorId > 0
+    && passwordRecoveryHydratedActorId === passwordRecoveryActorId
+    && passwordRecoveryStorageAvailable;
 
   const [systemSettings, setSystemSettings] = useState<ManagedSystemSettings>(defaultSystemSettings);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
@@ -240,6 +327,14 @@ export default function NotificationSettings() {
   const [systemSettingsError, setSystemSettingsError] = useState('');
   const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
   const [systemSettingsRecovery, setSystemSettingsRecovery] = useState<SystemSettingsRecovery | null>(null);
+  const [systemSettingsRecoveryHydratedActorId, setSystemSettingsRecoveryHydratedActorId] = useState<number | null>(null);
+  const [systemSettingsRecoveryStorageAvailable, setSystemSettingsRecoveryStorageAvailable] = useState(false);
+  const [systemSettingsRecoveryResume, setSystemSettingsRecoveryResume] = useState<PendingSystemSettingsRecovery | null>(null);
+  const systemSettingsRecoveryStorageReady = canManageSystem
+    && Number.isSafeInteger(systemSettingsActorId)
+    && systemSettingsActorId > 0
+    && systemSettingsRecoveryHydratedActorId === systemSettingsActorId
+    && systemSettingsRecoveryStorageAvailable;
   const systemSettingsSaveLockRef = useRef(false);
   const [fontSize, setFontSize] = useState(appStore.fontSize);
   const [appearanceTheme, setAppearanceTheme] = useState<'light' | 'dark'>(appStore.theme);
@@ -317,7 +412,7 @@ export default function NotificationSettings() {
       if (Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
       setBackupDeleteRecovery(marker);
       setBackupDeleteCandidate(null);
-      setBackupError((error as Error).message || '备份列表暂时无法读取。');
+      setBackupError(getUserFacingErrorMessage(error, '备份列表暂时无法读取，请检查连接后重试。'));
       setBackupFeedback(`删除结果仍待核实；暂时无法读取备份清单。恢复记录已按当前账号和文件名保存，请只读核实，暂不要重复删除。`);
     } finally {
       backupDeleteVerificationLocksRef.current.delete(operationKey);
@@ -330,14 +425,28 @@ export default function NotificationSettings() {
 
   useEffect(() => {
     void fetchNotificationData();
-  }, []);
+    // This effect tracks the active account; the fetch helper is intentionally not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStore.user?.id, token]);
 
   useEffect(() => () => logoReaderRef.current?.abort(), []);
 
   useEffect(() => {
+    if (profileRecovery) return;
     setProfileName(authStore.user?.name || '');
     setProfileEmail(authStore.user?.email || '');
-  }, [authStore.user?.email, authStore.user?.name]);
+  }, [authStore.user?.email, authStore.user?.name, profileRecovery]);
+
+  useEffect(() => {
+    refreshProfileRecoveryFromStorage(true);
+    // The account and auth mode determine which pending profile write may be resumed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileRecoveryActorId, authStore.authMode]);
+
+  useEffect(() => {
+    refreshPasswordRecoveryFromStorage();
+    // The active actor ID is the only dependency that changes which storage record is read.
+  }, [passwordRecoveryActorId]);
 
   useEffect(() => {
     setAppearanceTheme(appStore.theme);
@@ -351,6 +460,48 @@ export default function NotificationSettings() {
 
     void fetchSystemSettings();
   }, [canManageSystem]);
+
+  useEffect(() => {
+    if (!canManageSystem) {
+      setSystemSettingsRecovery(null);
+      setSystemSettingsRecoveryStorageAvailable(false);
+      setSystemSettingsRecoveryHydratedActorId(systemSettingsActorId);
+      setSystemSettingsRecoveryResume(null);
+      return;
+    }
+
+    const stored = readSystemSettingsRecovery(systemSettingsActorId);
+    setSystemSettingsRecoveryHydratedActorId(systemSettingsActorId);
+    setSystemSettingsRecoveryStorageAvailable(stored.state === 'none' || stored.state === 'valid');
+    if (stored.state === 'valid') {
+      const { recovery } = stored;
+      setSystemSettingsRecovery({
+        kind: 'unknown',
+        marker: recovery,
+        patch: recovery.patch,
+        successMessage: recovery.successMessage,
+        message: '发现一项尚未核实的系统设置保存。系统将只读核实；确认前请勿重复保存。',
+      });
+      setActiveTab(recovery.patch.login ? 'login' : recovery.patch.branding ? 'branding' : 'system');
+      setSystemSettingsRecoveryResume(recovery);
+      return;
+    }
+
+    setSystemSettingsRecoveryResume(null);
+    if (stored.state === 'invalid' || stored.state === 'unavailable') {
+      setSystemSettingsRecovery({
+        kind: 'blocked',
+        marker: null,
+        message: stored.state === 'invalid'
+          ? '本机系统设置恢复记录无法安全读取；为避免重复覆盖，设置保存已暂停。请重新读取恢复记录。'
+          : '浏览器暂时无法读取系统设置恢复记录；为避免重复覆盖，设置保存已暂停。请检查浏览器存储后重试读取。',
+      });
+      setActiveTab('system');
+      return;
+    }
+
+    setSystemSettingsRecovery(null);
+  }, [canManageSystem, systemSettingsActorId]);
 
   useEffect(() => {
     if (validBackupActorId) {
@@ -379,27 +530,59 @@ export default function NotificationSettings() {
   }, [activeTab, canManageDatabase, validBackupActorId, verifyBackupDelete]);
 
   async function fetchNotificationData() {
+    const currentAuth = useAuthStore.getState();
+    const requestActorId = Number(currentAuth.user?.id);
+    const requestToken = currentAuth.token;
+    const storedRecovery = readNotificationPreferenceRecovery(requestActorId);
+    setNotifyRecoveryHydratedActorId(requestActorId);
+    setNotifyRecoveryStorageAvailable(storedRecovery.state === 'none' || storedRecovery.state === 'valid');
+    const recoveryMarker = storedRecovery.state === 'valid' ? storedRecovery.recovery : null;
+    if (recoveryMarker) {
+      setNotifyRecovery({
+        kind: 'unknown',
+        marker: recoveryMarker,
+        draft: recoveryMarker.draft,
+        message: '发现一项尚未核实的通知偏好保存。系统将只读核实；确认前请勿重复保存。',
+      });
+    } else if (storedRecovery.state === 'invalid' || storedRecovery.state === 'unavailable') {
+      setNotifyRecovery({
+        kind: 'blocked',
+        marker: null,
+        message: storedRecovery.state === 'invalid'
+          ? '本机通知偏好恢复记录无法安全读取；为避免重复保存，普通保存已暂停。请重新读取恢复记录。'
+          : '浏览器暂时无法读取通知偏好恢复记录；为避免重复保存，普通保存已暂停。请检查浏览器存储后重试读取。',
+      });
+    } else {
+      setNotifyRecovery(null);
+    }
     setNotifyLoading(true);
     setNotifyLoaded(false);
     setNotifyLoadError('');
-    if (!token) {
+    if (!requestToken) {
       setNotifyLoadError('登录状态已失效，请重新登录后再加载通知偏好。');
       setNotifyLoading(false);
       return;
     }
 
     try {
-      const data = await getNotificationSettings(token);
+      const data = await getNotificationSettings(requestToken);
+      if (Number(useAuthStore.getState().user?.id) !== requestActorId) return;
       setPreferences(data.preferences);
       setSavedPreferences(data.preferences);
       setChannels(data.channels);
       setEvents(data.events);
       setNotifyLoaded(true);
+      if (recoveryMarker) {
+        const result = await verifyNotificationPreferences(requestToken, recoveryMarker.draft);
+        if (Number(useAuthStore.getState().user?.id) !== requestActorId) return;
+        applyNotificationSaveResult(result, recoveryMarker);
+      }
     } catch (error) {
+      if (Number(useAuthStore.getState().user?.id) !== requestActorId) return;
       emitClientLog({ event: 'settings.notification_preferences_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
-      setNotifyLoadError((error as Error).message || '通知偏好加载失败，请重试。');
+      setNotifyLoadError(getUserFacingErrorMessage(error, '通知偏好暂时无法加载，请检查连接后重试。'));
     } finally {
-      setNotifyLoading(false);
+      if (Number(useAuthStore.getState().user?.id) === requestActorId) setNotifyLoading(false);
     }
   }
 
@@ -414,7 +597,7 @@ export default function NotificationSettings() {
       applyDocumentBranding(settings);
       setSystemSettingsLoaded(true);
     } catch (error) {
-      setSystemSettingsError((error as Error).message || '系统配置加载失败，请重试。');
+      setSystemSettingsError(getUserFacingErrorMessage(error, '系统配置暂时无法加载，请检查连接后重试。'));
     } finally {
       setSystemSettingsLoading(false);
     }
@@ -426,7 +609,7 @@ export default function NotificationSettings() {
   }
 
   function handleTogglePreference(channelId: string, eventId: string) {
-    if (notifySaving || notifyRecovery) return;
+    if (notifySaving || notifyRecovery || !notifyRecoveryStorageReady) return;
     setPreferences((current) => {
       const existing = current.find((item) => item.channel === channelId && item.event_type === eventId);
       if (!existing) {
@@ -443,9 +626,17 @@ export default function NotificationSettings() {
 
   function applyNotificationSaveResult(
     result: Awaited<ReturnType<typeof saveNotificationPreferences>>,
-    draft: NotificationPreference[],
+    marker: PendingNotificationPreferenceRecovery,
   ) {
     if (result.kind === 'saved') {
+      if (!clearNotificationPreferenceRecovery(marker)) {
+        setNotifyRecovery({
+          kind: 'blocked',
+          marker,
+          message: '服务器已确认通知偏好保存，但本机恢复记录未能清除。设置保持锁定，请只读重新核实。',
+        });
+        return;
+      }
       setPreferences(result.preferences);
       setSavedPreferences(result.preferences);
       setNotifyRecovery(null);
@@ -457,28 +648,78 @@ export default function NotificationSettings() {
       return;
     }
     if (result.kind === 'rejected') {
+      if (!clearNotificationPreferenceRecovery(marker)) {
+        setNotifyRecovery({
+          kind: 'blocked',
+          marker,
+          message: '服务器已拒绝本次通知偏好保存，但本机恢复记录未能清除。设置保持锁定，请重新读取恢复记录。',
+        });
+        return;
+      }
+      setNotifyRecovery(null);
       appStore.addNotification({ title: '保存失败', message: result.message, type: 'error' });
       return;
     }
     if (result.kind === 'conflict') {
-      setNotifyRecovery({ kind: 'conflict', draft, currentPreferences: result.currentPreferences });
+      setNotifyRecovery({ kind: 'conflict', marker, draft: marker.draft, currentPreferences: result.currentPreferences });
       return;
     }
-    setNotifyRecovery({ kind: 'unknown', draft, message: result.message });
+    setNotifyRecovery({ kind: 'unknown', marker, draft: marker.draft, message: result.message });
   }
 
   async function handleSaveNotifications(confirmOverwrite = false) {
+    const currentConflict = notifyRecovery?.kind === 'conflict' ? notifyRecovery : null;
     if (!token || !notifyLoaded || notifyLoading || notifyLoadError || notifySaveLockRef.current
-      || (notifyRecovery && !confirmOverwrite)) {
+      || !notifyRecoveryStorageReady
+      || (notifyRecovery && (!confirmOverwrite || notifyRecovery.kind !== 'conflict'))) {
       return;
     }
 
-    const draft = (notifyRecovery?.draft ?? preferences).map((preference) => ({ ...preference }));
+    const draft: NotificationPreferenceDraft[] = (currentConflict?.draft ?? preferences).map((preference) => ({
+      channel: preference.channel,
+      event_type: preference.event_type,
+      enabled: preference.enabled,
+      config: preference.config ?? null,
+    }));
+    const actorId = Number(useAuthStore.getState().user?.id);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0 || actorId !== notificationPreferenceActorId) {
+      setNotifyRecovery({ kind: 'blocked', marker: currentConflict?.marker ?? null, message: '当前账号无法确认；通知偏好未发送。请重新读取页面后再试。' });
+      return;
+    }
+    let marker: PendingNotificationPreferenceRecovery;
+    try {
+      marker = currentConflict?.marker ?? {
+        version: 1,
+        actorId,
+        requestId: createNotificationPreferenceRecoveryRequestId(),
+        draft,
+      };
+    } catch (error) {
+      appStore.addNotification({ title: '设置未发送', message: getUserFacingErrorMessage(error, '通知偏好恢复编号无法创建；设置未发送。'), type: 'error' });
+      return;
+    }
+    if (!persistNotificationPreferenceRecovery(marker)) {
+      setNotifyRecovery({
+        kind: 'blocked',
+        marker: currentConflict?.marker ?? null,
+        message: '本机恢复信息未能可靠保存；通知偏好未发送。请检查浏览器存储后重新读取恢复记录。',
+      });
+      return;
+    }
     notifySaveLockRef.current = true;
     setNotifySaving(true);
     try {
-      const result = await saveNotificationPreferences(token, draft);
-      applyNotificationSaveResult(result, draft);
+      const result = await saveNotificationPreferences(token, marker.draft);
+      if (Number(useAuthStore.getState().user?.id) !== actorId) return;
+      applyNotificationSaveResult(result, marker);
+    } catch (error) {
+      if (Number(useAuthStore.getState().user?.id) !== actorId) return;
+      setNotifyRecovery({
+        kind: 'unknown',
+        marker,
+        draft: marker.draft,
+        message: getUserFacingErrorMessage(error, '通知偏好保存结果尚未核实；当前修改已保留。请只读重新核实，确认前不要重复保存。'),
+      });
     } finally {
       notifySaveLockRef.current = false;
       setNotifySaving(false);
@@ -486,13 +727,14 @@ export default function NotificationSettings() {
   }
 
   async function verifyNotificationRecovery() {
-    if (!token || !notifyRecovery || notifySaveLockRef.current) return;
+    if (!token || !notifyRecovery || notifyRecovery.kind === 'blocked' || notifySaveLockRef.current) return;
     const recovery = notifyRecovery;
     notifySaveLockRef.current = true;
     setNotifySaving(true);
     try {
       const result = await verifyNotificationPreferences(token, recovery.draft);
-      applyNotificationSaveResult(result, recovery.draft);
+      if (Number(useAuthStore.getState().user?.id) !== recovery.marker.actorId) return;
+      applyNotificationSaveResult(result, recovery.marker);
     } finally {
       notifySaveLockRef.current = false;
       setNotifySaving(false);
@@ -501,69 +743,165 @@ export default function NotificationSettings() {
 
   function restoreCurrentNotificationPreferences() {
     if (notifyRecovery?.kind !== 'conflict') return;
+    if (!clearNotificationPreferenceRecovery(notifyRecovery.marker)) {
+      setNotifyRecovery({
+        kind: 'blocked',
+        marker: notifyRecovery.marker,
+        message: '本机恢复记录未能清除；通知偏好仍保持锁定。请只读重新核实。',
+      });
+      return;
+    }
     setPreferences(notifyRecovery.currentPreferences);
     setSavedPreferences(notifyRecovery.currentPreferences);
     setNotifyRecovery(null);
     appStore.addNotification({ title: '已载入服务器设置', message: '页面现在显示服务器当前保存的通知偏好。', type: 'info' });
   }
 
-  function saveProfileFromServer(profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorAuthMode: 'legacy' | 'v1-web') {
+  function saveProfileFromServer(profile: Awaited<ReturnType<typeof getMe>>, marker: PendingDesktopProfileRecovery) {
     const currentAuth = useAuthStore.getState();
     const currentToken = currentAuth.token;
-    if (Number(profile.id) !== actorId || Number(currentAuth.user?.id) !== actorId || currentAuth.authMode !== actorAuthMode || !currentToken) return false;
+    if (Number(profile.id) !== marker.actorId || Number(currentAuth.user?.id) !== marker.actorId
+      || currentAuth.authMode !== marker.authMode || !currentToken) return false;
+
+    if (!clearDesktopProfileRecovery(marker)) {
+      currentAuth.login(profile, currentToken);
+      setProfileName(profile.name);
+      setProfileEmail(profile.email ?? '');
+      setProfileRecovery({
+        kind: 'blocked',
+        marker,
+        message: '服务器已确认个人资料已更新，但本机恢复记录未能清除。保存仍保持锁定，请只读重新核实。',
+      });
+      return false;
+    }
+
     currentAuth.login(profile, currentToken);
     setProfileName(profile.name);
     setProfileEmail(profile.email ?? '');
     setProfileRecovery(null);
+    setProfileRecoveryNotice('');
     return true;
   }
 
-  async function verifyProfileSnapshot(recovery: ProfileRecovery) {
+  async function verifyProfileSnapshot(marker: PendingDesktopProfileRecovery) {
+    const requestAuth = useAuthStore.getState();
+    if (Number(requestAuth.user?.id) !== marker.actorId || requestAuth.authMode !== marker.authMode) return;
+    if (!requestAuth.token) {
+      setProfileRecovery({
+        kind: 'unknown',
+        marker,
+        message: '当前登录状态无法核实个人资料保存结果。草稿已保留，请重新登录同一账号后只读核实。',
+      });
+      return;
+    }
     try {
-      const currentProfile = await getMe(recovery.token);
-      if (Number(currentProfile.id) !== recovery.actorId) {
+      const currentProfile = await getMe(requestAuth.token);
+      const currentAuth = useAuthStore.getState();
+      if (Number(currentAuth.user?.id) !== marker.actorId || currentAuth.authMode !== marker.authMode) return;
+      if (Number(currentProfile.id) !== marker.actorId) {
         setProfileRecovery({
-          ...recovery,
           kind: 'unknown',
-          currentUser: undefined,
+          marker,
           message: '个人资料结果尚未核实：当前会话返回了其他账号资料。草稿已保留，请保持页面并只读重核。',
         });
         return;
       }
 
       const currentFields = normalizeProfileFields({ name: currentProfile.name, email: currentProfile.email ?? '' });
-      if (sameProfileFields(currentFields, recovery.draft)) {
-        if (!saveProfileFromServer(currentProfile, recovery.actorId, recovery.authMode)) return;
+      if (sameProfileFields(currentFields, marker.draft)) {
+        if (!saveProfileFromServer(currentProfile, marker)) return;
         appStore.addNotification({ title: '保存结果已核实', message: '已核实个人资料已更新。', type: 'success' });
         return;
       }
 
-      const unchanged = sameProfileFields(currentFields, recovery.before);
+      const unchanged = sameProfileFields(currentFields, marker.before);
       setProfileRecovery({
-        ...recovery,
         kind: unchanged ? 'unchanged' : 'conflict',
+        marker,
         currentUser: currentProfile,
         message: unchanged
           ? '服务器仍是本次编辑前的资料。系统没有自动重发；确认后可明确重新保存。'
           : '服务器资料与本次编辑前及提交内容均不同。为避免覆盖其他修改，普通保存已暂停。',
       });
     } catch {
+      const currentAuth = useAuthStore.getState();
+      if (Number(currentAuth.user?.id) !== marker.actorId || currentAuth.authMode !== marker.authMode) return;
       setProfileRecovery({
-        ...recovery,
         kind: 'unknown',
-        currentUser: undefined,
+        marker,
         message: '个人资料保存结果尚未核实。页面中的修改已保留；请只读重新核实，确认前不要重复保存。',
       });
     }
   }
 
+  function refreshProfileRecoveryFromStorage(verify = false) {
+    const currentAuth = useAuthStore.getState();
+    const actorId = Number(currentAuth.user?.id);
+    const stored = readDesktopProfileRecovery(actorId);
+    setProfileRecoveryHydration({ actorId, authMode: currentAuth.authMode });
+    setProfileRecoveryStorageAvailable(stored.state === 'none' || stored.state === 'valid');
+    setProfileRecoveryNotice('');
+
+    if (stored.state === 'none') {
+      setProfileRecovery(null);
+      return;
+    }
+    if (stored.state === 'invalid' || stored.state === 'unavailable') {
+      setProfileRecovery({
+        kind: 'blocked',
+        marker: null,
+        message: stored.state === 'invalid'
+          ? '本机个人资料恢复记录无法安全读取；为避免重复保存，资料修改已暂停。请重新读取恢复记录。'
+          : '浏览器暂时无法读取个人资料恢复记录；为避免重复保存，资料修改已暂停。请检查浏览器存储后重试。',
+      });
+      setActiveTab('profile');
+      return;
+    }
+
+    const marker = stored.recovery;
+    if (marker.authMode !== currentAuth.authMode || !currentAuth.token) {
+      setProfileRecovery({
+        kind: 'blocked',
+        marker,
+        message: marker.authMode !== currentAuth.authMode
+          ? '待核实资料记录属于另一种登录方式。请使用原登录方式重新登录后只读核实，资料修改保持锁定。'
+          : '当前登录状态无法核实个人资料保存结果。请重新登录同一账号后只读核实，资料修改保持锁定。',
+      });
+      setProfileName(marker.draft.name);
+      setProfileEmail(marker.draft.email);
+      setActiveTab('profile');
+      return;
+    }
+
+    const recovery: ProfileRecovery = {
+      kind: 'unknown',
+      marker,
+      message: '发现一项尚未核实的个人资料保存。系统将只读核实；确认前请勿重复保存。',
+    };
+    setProfileRecovery(recovery);
+    setProfileName(marker.draft.name);
+    setProfileEmail(marker.draft.email);
+    setActiveTab('profile');
+    if (!verify) return;
+    profileSaveLockRef.current = true;
+    setProfileSaving(true);
+    void verifyProfileSnapshot(marker).finally(() => {
+      profileSaveLockRef.current = false;
+      setProfileSaving(false);
+    });
+  }
+
   async function verifyProfileRecovery() {
-    if (!profileRecovery || profileSaveLockRef.current) return;
-    const recovery = profileRecovery;
+    if (profileSaveLockRef.current) return;
+    if (!profileRecovery || !profileRecovery.marker) {
+      refreshProfileRecoveryFromStorage(true);
+      return;
+    }
+    const marker = profileRecovery.marker;
     profileSaveLockRef.current = true;
     setProfileSaving(true);
     try {
-      await verifyProfileSnapshot(recovery);
+      await verifyProfileSnapshot(marker);
     } finally {
       profileSaveLockRef.current = false;
       setProfileSaving(false);
@@ -572,49 +910,99 @@ export default function NotificationSettings() {
 
   async function handleSaveProfile(confirmOverwrite = false) {
     const recovery = profileRecovery;
+    const confirmableRecovery = recovery?.kind === 'unchanged' || recovery?.kind === 'conflict' ? recovery : null;
     const currentAuth = useAuthStore.getState();
     const currentUser = currentAuth.user;
     const actorToken = currentAuth.token;
-    if (!currentUser || !actorToken || profileSaveLockRef.current || (recovery && !confirmOverwrite)) return;
+    if (!currentUser || !actorToken || !profileRecoveryStorageReady || profileSaveLockRef.current
+      || (recovery && (!confirmOverwrite || !confirmableRecovery))) return;
+    if (confirmOverwrite && !confirmableRecovery?.currentUser) return;
 
     const actorId = Number(currentUser.id);
-    if (!Number.isSafeInteger(actorId) || actorId <= 0) return;
-    const draft = normalizeProfileFields(confirmOverwrite && recovery ? recovery.draft : { name: profileName, email: profileEmail });
-    const before = normalizeProfileFields(confirmOverwrite && recovery?.currentUser
-      ? { name: recovery.currentUser.name, email: recovery.currentUser.email ?? '' }
+    if (!Number.isSafeInteger(actorId) || actorId <= 0 || actorId !== profileRecoveryActorId) return;
+    const draft = normalizeProfileFields(confirmOverwrite && confirmableRecovery ? confirmableRecovery.marker.draft : { name: profileName, email: profileEmail });
+    const before = normalizeProfileFields(confirmOverwrite && confirmableRecovery?.currentUser
+      ? { name: confirmableRecovery.currentUser.name, email: confirmableRecovery.currentUser.email ?? '' }
       : { name: currentUser.name, email: currentUser.email ?? '' });
-    const snapshot: ProfileRecovery = {
-      kind: 'unknown',
-      actorId,
-      token: actorToken,
-      authMode: currentAuth.authMode,
-      draft,
-      before,
-      message: '个人资料保存结果尚未核实，正在只读核实；核实前不会再次提交。',
-    };
+    let marker: PendingDesktopProfileRecovery;
+    try {
+      marker = {
+        version: 1,
+        actorId,
+        authMode: currentAuth.authMode,
+        requestId: createDesktopProfileRecoveryRequestId(),
+        before,
+        draft,
+      };
+    } catch (error) {
+      setProfileRecoveryNotice(getUserFacingErrorMessage(error, '本机个人资料恢复编号无法创建；个人资料未发送。'));
+      return;
+    }
 
+    if (!persistDesktopProfileRecovery(marker, undefined, confirmOverwrite && confirmableRecovery ? confirmableRecovery.marker.requestId : undefined)) {
+      const stored = readDesktopProfileRecovery(actorId);
+      if (stored.state === 'valid') {
+        setProfileRecovery({ kind: 'blocked', marker: stored.recovery, message: '本机个人资料恢复记录与本次修改不一致；为避免重复保存，资料修改已暂停。请只读核实。' });
+      } else if (stored.state === 'invalid' || stored.state === 'unavailable') {
+        setProfileRecoveryStorageAvailable(false);
+        setProfileRecovery({
+          kind: 'blocked',
+          marker: null,
+          message: stored.state === 'invalid'
+            ? '本机个人资料恢复记录无法安全读取；个人资料未发送，修改已暂停。请重新读取恢复记录。'
+            : '浏览器无法可靠保存个人资料恢复记录；个人资料未发送，请检查浏览器存储后重试。',
+        });
+      } else {
+        setProfileRecoveryNotice('本机恢复记录未能逐项保存并核对；个人资料未发送。请检查浏览器存储后重试。');
+      }
+      return;
+    }
+
+    const pendingRecovery: ProfileRecovery = {
+      kind: 'unknown',
+      marker,
+      message: '个人资料正在保存；如果结果不明，系统会先只读核实，核实前不会再次提交。',
+    };
     profileSaveLockRef.current = true;
     setProfileSaving(true);
+    setProfileRecoveryNotice('');
+    setProfileRecovery(pendingRecovery);
     try {
       const profile = await updateMyProfile(draft);
-      if (!saveProfileFromServer(profile, actorId, currentAuth.authMode)) return;
+      const latestAuth = useAuthStore.getState();
+      if (Number(latestAuth.user?.id) !== actorId || latestAuth.authMode !== marker.authMode) return;
+      if (!saveProfileFromServer(profile, marker)) return;
       appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
     } catch (error) {
+      const latestAuth = useAuthStore.getState();
+      if (Number(latestAuth.user?.id) !== actorId || latestAuth.authMode !== marker.authMode) return;
       const status = error instanceof AuthRequestError ? error.status : null;
       const definitelyRejected = status !== null && status >= 400 && status < 500
         && ![408, 425, 429].includes(status);
       if (definitelyRejected) {
-        setProfileRecovery(null);
-        appStore.addNotification({
-          title: '保存失败',
-          message: error instanceof Error ? error.message : '更新个人资料失败。',
-          type: 'error',
-        });
+        if (clearDesktopProfileRecovery(marker)) {
+          setProfileRecovery(null);
+          appStore.addNotification({
+            title: '保存失败',
+            message: getUserFacingErrorMessage(error, '个人资料保存失败，请检查后重试。'),
+            type: 'error',
+          });
+        } else {
+          setProfileRecovery({
+            kind: 'blocked',
+            marker,
+            message: '服务器已拒绝本次个人资料保存，但本机恢复记录未能清除。资料修改仍保持锁定，请只读重新核实。',
+          });
+        }
         return;
       }
 
-      setProfileRecovery(snapshot);
-      await verifyProfileSnapshot(snapshot);
+      setProfileRecovery({
+        kind: 'unknown',
+        marker,
+        message: getUserFacingErrorMessage(error, '个人资料保存结果尚未核实；当前修改已保留。请只读重新核实，确认前不要重复保存。'),
+      });
+      await verifyProfileSnapshot(marker);
     } finally {
       profileSaveLockRef.current = false;
       setProfileSaving(false);
@@ -622,13 +1010,41 @@ export default function NotificationSettings() {
   }
 
   function restoreCurrentProfile() {
-    if (!profileRecovery?.currentUser) return;
-    if (!saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.authMode)) return;
+    if (!profileRecovery || profileRecovery.kind === 'blocked' || !profileRecovery.currentUser) return;
+    if (!saveProfileFromServer(profileRecovery.currentUser, profileRecovery.marker)) return;
     appStore.addNotification({ title: '已载入服务器资料', message: '页面现在显示服务器当前保存的姓名和邮箱。', type: 'info' });
   }
 
+  function refreshPasswordRecoveryFromStorage() {
+    const actorId = Number(useAuthStore.getState().user?.id);
+    const stored = readDesktopPasswordChangeRecovery(actorId);
+    setPasswordRecoveryHydratedActorId(actorId);
+    setPasswordRecoveryStorageAvailable(stored.state === 'none' || stored.state === 'valid');
+    if (stored.state === 'valid') {
+      setPasswordRecoveryMarker(stored.recovery);
+      passwordOutcomeUnknownRef.current = true;
+      setPasswordOutcomeUnknown(true);
+      setPasswordOutcomeMessage('发现一项尚未核实的密码修改。为避免重复提交，密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。');
+      setActiveTab('password');
+      return;
+    }
+    setPasswordRecoveryMarker(null);
+    if (stored.state === 'none') {
+      passwordOutcomeUnknownRef.current = false;
+      setPasswordOutcomeUnknown(false);
+      setPasswordOutcomeMessage('密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。');
+      return;
+    }
+    passwordOutcomeUnknownRef.current = true;
+    setPasswordOutcomeUnknown(true);
+    setPasswordOutcomeMessage(stored.state === 'invalid'
+      ? '本机密码修改恢复记录无法安全读取。为避免重复修改，密码表单已锁定；请重新读取恢复记录或退出后尝试使用新密码登录。'
+      : '浏览器暂时无法读取密码修改恢复记录。为避免重复修改，密码表单已锁定；请检查浏览器存储后重试读取。');
+    setActiveTab('password');
+  }
+
   async function handleChangePassword() {
-    if (passwordSaveLockRef.current || passwordOutcomeUnknownRef.current) {
+    if (passwordSaveLockRef.current || passwordOutcomeUnknownRef.current || !passwordRecoveryReady) {
       return;
     }
     if (!oldPassword) {
@@ -643,6 +1059,28 @@ export default function NotificationSettings() {
       appStore.addNotification({ title: '修改失败', message: '两次输入的新密码不一致', type: 'error' });
       return;
     }
+
+    const actorId = Number(useAuthStore.getState().user?.id);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0 || actorId !== passwordRecoveryActorId) {
+      appStore.addNotification({ title: '修改未发送', message: '当前账号无法确认；密码修改请求未发送，请重新登录后再试。', type: 'error' });
+      return;
+    }
+    let marker: PendingDesktopPasswordChangeRecovery;
+    try {
+      marker = {
+        version: 1,
+        actorId,
+        requestId: createDesktopPasswordChangeRecoveryRequestId(),
+      };
+    } catch (error) {
+      appStore.addNotification({ title: '修改未发送', message: getUserFacingErrorMessage(error, '密码恢复编号无法创建；修改请求未发送。'), type: 'error' });
+      return;
+    }
+    if (!persistDesktopPasswordChangeRecovery(marker)) {
+      appStore.addNotification({ title: '修改未发送', message: '本机恢复信息未能可靠保存；密码修改请求未发送。请检查浏览器存储后重试。', type: 'error' });
+      return;
+    }
+    setPasswordRecoveryMarker(marker);
 
     passwordSaveLockRef.current = true;
     setPwdSaving(true);
@@ -674,6 +1112,7 @@ export default function NotificationSettings() {
       } catch {
         passwordOutcomeUnknownRef.current = true;
         setPasswordOutcomeUnknown(true);
+        setPasswordOutcomeMessage('密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。');
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -695,12 +1134,24 @@ export default function NotificationSettings() {
           || response.status === 429
           || (response.status === 401 && message === '旧密码错误');
         if (definitelyRejected) {
+          if (!clearDesktopPasswordChangeRecovery(marker)) {
+            passwordOutcomeUnknownRef.current = true;
+            setPasswordOutcomeUnknown(true);
+            setPasswordOutcomeMessage('服务器已拒绝本次密码修改，但本机恢复记录未能清除。为避免重复处理，密码表单已锁定；请退出并重新登录后继续。');
+            setOldPassword('');
+            setNewPassword('');
+            setConfirmPassword('');
+            appStore.addNotification({ title: '状态待处理', message: '密码修改已被服务器拒绝，但本机恢复记录仍在；请退出并重新登录后继续。', type: 'error' });
+            return;
+          }
+          setPasswordRecoveryMarker(null);
           appStore.addNotification({ title: '修改失败', message, type: 'error' });
           return;
         }
 
         passwordOutcomeUnknownRef.current = true;
         setPasswordOutcomeUnknown(true);
+        setPasswordOutcomeMessage('密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。');
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -712,6 +1163,18 @@ export default function NotificationSettings() {
         return;
       }
 
+      if (!clearDesktopPasswordChangeRecovery(marker)) {
+        passwordOutcomeUnknownRef.current = true;
+        setPasswordOutcomeUnknown(true);
+        setPasswordOutcomeMessage('服务器已确认密码修改，但本机恢复记录未能清除。为避免重复处理，密码表单已锁定；请退出并重新登录后继续。');
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        appStore.addNotification({ title: '状态待处理', message: '服务器已确认密码修改，但本机恢复记录仍在；请退出并重新登录后继续。', type: 'error' });
+        return;
+      }
+
+      setPasswordRecoveryMarker(null);
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -740,23 +1203,75 @@ export default function NotificationSettings() {
 
   function applySystemSettingsSaveResult(
     result: Awaited<ReturnType<typeof updateSystemSettings>>,
-    patch: Partial<ManagedSystemSettings>,
-    successMessage: string,
+    marker: PendingSystemSettingsRecovery,
   ) {
+    const { patch, successMessage } = marker;
     if (result.kind === 'saved') {
+      if (!clearSystemSettingsRecovery(marker)) {
+        setSystemSettingsRecovery({
+          kind: 'unknown',
+          marker,
+          patch,
+          successMessage,
+          message: '服务器已确认系统设置保存，但本机恢复记录未能清除。设置仍保持锁定，请只读重新核实。',
+        });
+        return;
+      }
       applySystemSettings(result.settings, successMessage, result.recovered);
       return;
     }
     if (result.kind === 'rejected') {
+      if (!clearSystemSettingsRecovery(marker)) {
+        setSystemSettingsRecovery({
+          kind: 'blocked',
+          marker,
+          message: '服务器已拒绝本次设置，但本机恢复记录未能清除。设置保持锁定，请重新读取恢复记录。',
+        });
+        return;
+      }
       setSystemSettingsRecovery(null);
       appStore.addNotification({ title: '保存失败', message: result.message, type: 'error' });
       return;
     }
     if (result.kind === 'conflict') {
-      setSystemSettingsRecovery({ kind: 'conflict', patch, successMessage, currentSettings: result.currentSettings });
+      setSystemSettingsRecovery({ kind: 'conflict', marker, patch, successMessage, currentSettings: result.currentSettings });
       return;
     }
-    setSystemSettingsRecovery({ kind: 'unknown', patch, successMessage, message: result.message });
+    setSystemSettingsRecovery({ kind: 'unknown', marker, patch, successMessage, message: result.message });
+  }
+
+  function refreshSystemSettingsRecoveryFromStorage() {
+    const actorId = Number(useAuthStore.getState().user?.id);
+    const stored = readSystemSettingsRecovery(actorId);
+    setSystemSettingsRecoveryHydratedActorId(actorId);
+    setSystemSettingsRecoveryStorageAvailable(stored.state === 'none' || stored.state === 'valid');
+    if (stored.state === 'none') {
+      setSystemSettingsRecovery(null);
+      setSystemSettingsRecoveryResume(null);
+      return;
+    }
+    if (stored.state === 'valid') {
+      const { recovery } = stored;
+      setSystemSettingsRecovery({
+        kind: 'unknown',
+        marker: recovery,
+        patch: recovery.patch,
+        successMessage: recovery.successMessage,
+        message: '发现一项尚未核实的系统设置保存。系统将只读核实；确认前请勿重复保存。',
+      });
+      setActiveTab(recovery.patch.login ? 'login' : recovery.patch.branding ? 'branding' : 'system');
+      setSystemSettingsRecoveryResume(recovery);
+      return;
+    }
+    setSystemSettingsRecoveryResume(null);
+    setSystemSettingsRecovery({
+      kind: 'blocked',
+      marker: null,
+      message: stored.state === 'invalid'
+        ? '本机系统设置恢复记录无法安全读取；为避免重复覆盖，设置保存已暂停。请重新读取恢复记录。'
+        : '浏览器暂时无法读取系统设置恢复记录；为避免重复覆盖，设置保存已暂停。请检查浏览器存储后重试读取。',
+    });
+    setActiveTab('system');
   }
 
   async function handleSaveSystemSection(
@@ -765,45 +1280,101 @@ export default function NotificationSettings() {
     confirmOverwrite = false,
   ) {
     if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving
-      || systemSettingsSaveLockRef.current || (systemSettingsRecovery && !confirmOverwrite)) return;
-    const selectedPatch = confirmOverwrite && systemSettingsRecovery
+      || systemSettingsSaveLockRef.current || !systemSettingsRecoveryStorageReady
+      || (systemSettingsRecovery && (!confirmOverwrite || systemSettingsRecovery.kind !== 'conflict'))) return;
+    const currentRecovery = systemSettingsRecovery?.kind === 'conflict' ? systemSettingsRecovery : null;
+    const selectedPatch = confirmOverwrite && currentRecovery
       ? {
-        ...(systemSettingsRecovery.patch.system ? { system: { ...systemSettingsRecovery.patch.system } } : {}),
-        ...(systemSettingsRecovery.patch.branding ? { branding: { ...systemSettingsRecovery.patch.branding } } : {}),
-        ...(systemSettingsRecovery.patch.login ? { login: { ...systemSettingsRecovery.patch.login } } : {}),
+        ...(currentRecovery.patch.system ? { system: { ...currentRecovery.patch.system } } : {}),
+        ...(currentRecovery.patch.branding ? { branding: { ...currentRecovery.patch.branding } } : {}),
+        ...(currentRecovery.patch.login ? { login: { ...currentRecovery.patch.login } } : {}),
       }
       : patch;
-    const selectedSuccessMessage = confirmOverwrite && systemSettingsRecovery
-      ? systemSettingsRecovery.successMessage
+    const selectedSuccessMessage = confirmOverwrite && currentRecovery
+      ? currentRecovery.successMessage
       : successMessage;
+    if (!Number.isSafeInteger(systemSettingsActorId) || systemSettingsActorId <= 0
+      || Number(useAuthStore.getState().user?.id) !== systemSettingsActorId) {
+      appStore.addNotification({ title: '设置未发送', message: '当前账号无法确认；系统设置未发送。请重新读取页面后再试。', type: 'error' });
+      return;
+    }
+    let marker: PendingSystemSettingsRecovery;
+    try {
+      marker = currentRecovery?.marker ?? {
+        version: 1,
+        actorId: systemSettingsActorId,
+        requestId: createSystemSettingsRecoveryRequestId(),
+        patch: selectedPatch,
+        successMessage: selectedSuccessMessage,
+      };
+    } catch (error) {
+      appStore.addNotification({ title: '设置未发送', message: getUserFacingErrorMessage(error, '本机恢复编号无法创建；系统设置未发送。'), type: 'error' });
+      return;
+    }
     systemSettingsSaveLockRef.current = true;
     setSystemSettingsSaving(true);
     try {
-      const result = await updateSystemSettings(selectedPatch);
-      applySystemSettingsSaveResult(result, selectedPatch, selectedSuccessMessage);
+      if (!persistSystemSettingsRecovery(marker)) {
+        refreshSystemSettingsRecoveryFromStorage();
+        if (readSystemSettingsRecovery(systemSettingsActorId).state === 'none') {
+          appStore.addNotification({ title: '设置未发送', message: '本机恢复信息未能可靠保存；系统设置未发送。请检查浏览器存储后重试。', type: 'error' });
+        }
+        return;
+      }
+      setSystemSettingsRecovery({
+        kind: 'unknown',
+        marker,
+        patch: marker.patch,
+        successMessage: marker.successMessage,
+        message: '系统设置正在保存；如果结果不明，页面会先只读核实，请勿重复保存。',
+      });
+      const result = await updateSystemSettings(marker.patch);
+      if (Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
+      applySystemSettingsSaveResult(result, marker);
     } finally {
       systemSettingsSaveLockRef.current = false;
       setSystemSettingsSaving(false);
     }
   }
 
-  async function verifySystemSettingsRecovery() {
-    if (!systemSettingsRecovery || systemSettingsSaveLockRef.current) return;
-    const recovery = systemSettingsRecovery;
+  async function verifySystemSettingsRecovery(markerOverride?: PendingSystemSettingsRecovery) {
+    const recovery = systemSettingsRecovery?.kind === 'blocked' ? null : systemSettingsRecovery;
+    const marker = markerOverride ?? recovery?.marker;
+    if (!marker || systemSettingsSaveLockRef.current || Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
     systemSettingsSaveLockRef.current = true;
     setSystemSettingsSaving(true);
     try {
-      const result = await verifySystemSettingsUpdate(recovery.patch);
-      applySystemSettingsSaveResult(result, recovery.patch, recovery.successMessage);
+      const result = await verifySystemSettingsUpdate(marker.patch);
+      if (Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
+      applySystemSettingsSaveResult(result, marker);
     } finally {
       systemSettingsSaveLockRef.current = false;
       setSystemSettingsSaving(false);
     }
   }
+
+  useEffect(() => {
+    if (!systemSettingsRecoveryResume || systemSettingsRecoveryResume.actorId !== systemSettingsActorId) return;
+    const recovery = systemSettingsRecoveryResume;
+    setSystemSettingsRecoveryResume(null);
+    void verifySystemSettingsRecovery(recovery);
+  // The resume token changes only when storage hydration finds a pending write; use the current handler once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemSettingsRecoveryResume, systemSettingsActorId]);
 
   function restoreCurrentSystemSettings() {
     if (systemSettingsRecovery?.kind !== 'conflict') return;
     const recovery = systemSettingsRecovery;
+    if (!clearSystemSettingsRecovery(recovery.marker)) {
+      setSystemSettingsRecovery({
+        kind: 'unknown',
+        marker: recovery.marker,
+        patch: recovery.patch,
+        successMessage: recovery.successMessage,
+        message: '服务器设置已读到，但本机恢复记录尚未清除。设置仍保持锁定，请只读重新核实。',
+      });
+      return;
+    }
     const restoreSubmittedFields = <T extends object>(local: T, server: T, submitted: Partial<T> | undefined): T => {
       if (!submitted) return local;
       const restoredFields = Object.fromEntries(
@@ -896,7 +1467,7 @@ export default function NotificationSettings() {
       setBackupFeedback('');
       return true;
     } catch (error) {
-      setBackupError((error as Error).message || '备份列表加载失败，请重试。');
+      setBackupError(getUserFacingErrorMessage(error, '备份列表暂时无法加载，请检查连接后重试。'));
       return false;
     } finally {
       setBackupLoading(false);
@@ -995,7 +1566,7 @@ export default function NotificationSettings() {
       await downloadBackup(name);
       appStore.addNotification({ title: '下载成功', message: '备份文件已开始下载', type: 'success' });
     } catch (error) {
-      appStore.addNotification({ title: '下载失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({ title: '下载失败', message: getUserFacingErrorMessage(error, '备份文件暂时无法下载，请检查连接后重试。'), type: 'error' });
     }
   }
 
@@ -1037,7 +1608,7 @@ export default function NotificationSettings() {
         await verifyBackupDelete(recovery);
       } else if (clearBackupDeleteRecovery(recovery)) {
         setBackupDeleteRecovery(null);
-        appStore.addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+        appStore.addNotification({ title: '删除失败', message: getUserFacingErrorMessage(error, '备份删除请求被拒绝，请检查权限和文件状态后重试。'), type: 'error' });
       } else {
         setBackupDeleteRecovery(recovery);
         setBackupDeleteCandidate(null);
@@ -1053,14 +1624,18 @@ export default function NotificationSettings() {
     label: string,
     value: string,
     onChange: (value: string) => void,
-    type = 'text',
-    placeholder?: string,
-    disabled = false,
+    type: string,
+    placeholder: string | undefined,
+    disabled: boolean,
+    field: { id: string; name: string; autoComplete?: string },
   ) {
     return (
       <div>
-        <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>{label}</label>
+        <label htmlFor={field.id} className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>{label}</label>
         <input
+          id={field.id}
+          name={field.name}
+          autoComplete={field.autoComplete}
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -1072,10 +1647,11 @@ export default function NotificationSettings() {
     );
   }
 
-  const systemSettingsLocked = systemSettingsSaving || Boolean(systemSettingsRecovery);
+  const systemSettingsLocked = systemSettingsSaving || Boolean(systemSettingsRecovery) || !systemSettingsRecoveryStorageReady;
 
-  function renderSystemInput(label: string, value: string, onChange: (value: string) => void) {
-    return renderInput(label, value, onChange, 'text', undefined, systemSettingsLocked);
+  function renderSystemInput(fieldName: string, label: string, value: string, onChange: (value: string) => void) {
+    const fieldId = `settings-${fieldName.replace(/\./g, '-')}`;
+    return renderInput(label, value, onChange, 'text', undefined, systemSettingsLocked, { id: fieldId, name: fieldName });
   }
 
   return (
@@ -1127,18 +1703,26 @@ export default function NotificationSettings() {
         <GlassPanel className="min-w-0 flex-1 overflow-visible p-4 sm:p-6">
           {systemSettingsRecovery && ['system', 'branding', 'login'].includes(activeTab) ? (
             <div
-              role={systemSettingsRecovery.kind === 'unknown' ? 'alert' : 'status'}
+              role={systemSettingsRecovery.kind === 'unknown' || systemSettingsRecovery.kind === 'blocked' ? 'alert' : 'status'}
               className={`mb-5 space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
             >
               <p>
                 {systemSettingsRecovery.kind === 'unknown'
                   ? systemSettingsRecovery.message
-                  : '服务器当前系统设置与本次提交内容不同。为避免自动覆盖，普通保存已暂停。'}
+                  : systemSettingsRecovery.kind === 'blocked'
+                    ? systemSettingsRecovery.message
+                    : '服务器当前系统设置与本次提交内容不同。为避免自动覆盖，普通保存已暂停。'}
               </p>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => void verifySystemSettingsRecovery()} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
-                  {systemSettingsSaving ? '正在核实…' : '只读重新核实'}
-                </button>
+                {systemSettingsRecovery.kind === 'blocked' ? (
+                  <button type="button" onClick={refreshSystemSettingsRecoveryFromStorage} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
+                    重新读取恢复记录
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => void verifySystemSettingsRecovery()} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
+                    {systemSettingsSaving ? '正在核实…' : '只读重新核实'}
+                  </button>
+                )}
                 {systemSettingsRecovery.kind === 'conflict' ? (
                   <>
                     <button type="button" onClick={restoreCurrentSystemSettings} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
@@ -1175,7 +1759,7 @@ export default function NotificationSettings() {
                 </div>
                 <button
                   onClick={() => void handleSaveNotifications()}
-                  disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError) || Boolean(notifyRecovery)}
+                  disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError) || !notifyRecoveryStorageReady || Boolean(notifyRecovery)}
                   className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
                 >
                   {notifySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1185,16 +1769,22 @@ export default function NotificationSettings() {
 
               {notifyRecovery ? (
                 <div
-                  role={notifyRecovery.kind === 'unknown' ? 'alert' : 'status'}
+                  role={notifyRecovery.kind === 'unknown' || notifyRecovery.kind === 'blocked' ? 'alert' : 'status'}
                   className={`space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
                 >
                   <p>
                     {notifyRecovery.kind === 'unknown'
                       ? notifyRecovery.message
-                      : '服务器当前通知偏好与本页设置不同。为避免覆盖其他设备的更新，系统没有自动重复保存。'}
+                      : notifyRecovery.kind === 'blocked'
+                        ? notifyRecovery.message
+                        : '服务器当前通知偏好与本页设置不同。为避免覆盖其他设备的更新，系统没有自动重复保存。'}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {notifyRecovery.kind === 'unknown' ? (
+                    {notifyRecovery.kind === 'blocked' ? (
+                      <button type="button" onClick={() => void fetchNotificationData()} disabled={notifySaving} className="xmt-btn xmt-btn-secondary">
+                        {notifySaving ? '正在读取…' : '重新读取恢复记录'}
+                      </button>
+                    ) : notifyRecovery.kind === 'unknown' ? (
                       <button type="button" onClick={() => void verifyNotificationRecovery()} disabled={notifySaving} className="xmt-btn xmt-btn-secondary">
                         {notifySaving ? '正在核实…' : '只读重新核实'}
                       </button>
@@ -1292,21 +1882,27 @@ export default function NotificationSettings() {
                               <p className={`font-medium ${styles.textPrimary}`}>{event.name}</p>
                               <p className={`mt-1 text-xs ${styles.textSecondary}`}>{event.description}</p>
                             </td>
-                            {channels.map((channel) => (
-                              <td key={`${event.id}-${channel.id}`} className="px-6 py-4">
-                                <button
-                                  onClick={() => handleTogglePreference(channel.id, event.id)}
-                                  disabled={notifySaving || Boolean(notifyRecovery)}
-                                  className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
-                                    isEnabled(channel.id, event.id)
-                                      ? 'bg-studio-success/10 text-studio-success-contrast'
-                                      : `${styles.bgTertiary} ${styles.textSecondary}`
-                                  }`}
-                                >
-                                  {isEnabled(channel.id, event.id) ? '已启用' : '已关闭'}
-                                </button>
-                              </td>
-                            ))}
+                            {channels.map((channel) => {
+                              const enabled = isEnabled(channel.id, event.id);
+                              return (
+                                <td key={`${event.id}-${channel.id}`} className="px-6 py-4">
+                                  <button
+                                    type="button"
+                                    aria-label={`${event.name}，${channel.name}`}
+                                    aria-pressed={enabled}
+                                    onClick={() => handleTogglePreference(channel.id, event.id)}
+                                    disabled={notifySaving || Boolean(notifyRecovery) || !notifyRecoveryStorageReady}
+                                    className={`xmt-btn whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
+                                      enabled
+                                        ? 'bg-studio-success/10 text-studio-success-contrast'
+                                        : `${styles.bgTertiary} ${styles.textSecondary}`
+                                    }`}
+                                  >
+                                    {enabled ? '已启用' : '已关闭'}
+                                  </button>
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
@@ -1326,20 +1922,20 @@ export default function NotificationSettings() {
 
               {profileRecovery ? (
                 <div
-                  role={profileRecovery.kind === 'unknown' ? 'alert' : 'status'}
+                  role={profileRecovery.kind === 'unknown' || profileRecovery.kind === 'blocked' ? 'alert' : 'status'}
                   className={`space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
                 >
                   <p>{profileRecovery.message}</p>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => void verifyProfileRecovery()} disabled={profileSaving} className="xmt-btn xmt-btn-secondary">
-                      {profileSaving ? '正在核实…' : '只读重新核实'}
+                      {profileSaving ? '正在核实…' : profileRecovery.kind === 'blocked' && !profileRecovery.marker ? '重新读取恢复记录' : '只读重新核实'}
                     </button>
-                    {profileRecovery.currentUser ? (
+                    {profileRecovery.kind !== 'blocked' && profileRecovery.currentUser ? (
                       <button type="button" onClick={restoreCurrentProfile} disabled={profileSaving} className="xmt-btn xmt-btn-secondary">
                         载入服务器资料
                       </button>
                     ) : null}
-                    {profileRecovery.kind !== 'unknown' ? (
+                    {profileRecovery.kind === 'unchanged' || profileRecovery.kind === 'conflict' ? (
                       <button type="button" onClick={() => void handleSaveProfile(true)} disabled={profileSaving} className="xmt-btn xmt-btn-primary">
                         {profileRecovery.kind === 'conflict' ? '确认覆盖服务器资料' : '确认重新保存'}
                       </button>
@@ -1348,14 +1944,19 @@ export default function NotificationSettings() {
                 </div>
               ) : null}
 
+              {profileRecoveryNotice ? <p role="alert" className={`text-sm ${styles.textPrimary}`}>{profileRecoveryNotice}</p> : null}
+              {!profileRecoveryStorageReady && Number.isSafeInteger(profileRecoveryActorId) && profileRecoveryActorId > 0 && !profileRecovery ? (
+                <p role="status" className={`text-sm ${styles.textMuted}`}>正在读取本机个人资料恢复记录…</p>
+              ) : null}
+
               <div className="grid gap-5 md:max-w-xl">
-                {renderInput('姓名', profileName, setProfileName, 'text', undefined, profileSaving || Boolean(profileRecovery))}
-                {renderInput('邮箱', profileEmail, setProfileEmail, 'email', undefined, profileSaving || Boolean(profileRecovery))}
+                {renderInput('姓名', profileName, setProfileName, 'text', undefined, profileSaving || Boolean(profileRecovery) || !profileRecoveryStorageReady, { id: 'settings-profile-name', name: 'name', autoComplete: 'name' })}
+                {renderInput('邮箱', profileEmail, setProfileEmail, 'email', undefined, profileSaving || Boolean(profileRecovery) || !profileRecoveryStorageReady, { id: 'settings-profile-email', name: 'email', autoComplete: 'email' })}
               </div>
 
               <button
                 onClick={() => void handleSaveProfile()}
-                disabled={profileSaving || Boolean(profileRecovery)}
+                disabled={profileSaving || Boolean(profileRecovery) || !profileRecoveryStorageReady}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1373,28 +1974,28 @@ export default function NotificationSettings() {
 
               <div className="grid gap-5 md:max-w-xl">
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>当前密码</label>
+                  <label htmlFor="settings-current-password" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>当前密码</label>
                   <div className="relative">
-                    <input type={showOldPwd ? 'text' : 'password'} value={oldPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setOldPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
-                    <button type="button" onClick={() => setShowOldPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
+                    <input id="settings-current-password" type={showOldPwd ? 'text' : 'password'} value={oldPassword} disabled={pwdSaving || passwordOutcomeUnknown || !passwordRecoveryReady} onChange={(event) => setOldPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
+                    <button type="button" aria-controls="settings-current-password" aria-label={showOldPwd ? '隐藏当前密码' : '显示当前密码'} aria-pressed={showOldPwd} onClick={() => setShowOldPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showOldPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>新密码</label>
+                  <label htmlFor="settings-new-password" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>新密码</label>
                   <div className="relative">
-                    <input type={showNewPwd ? 'text' : 'password'} value={newPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setNewPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
-                    <button type="button" onClick={() => setShowNewPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
+                    <input id="settings-new-password" type={showNewPwd ? 'text' : 'password'} value={newPassword} disabled={pwdSaving || passwordOutcomeUnknown || !passwordRecoveryReady} onChange={(event) => setNewPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
+                    <button type="button" aria-controls="settings-new-password" aria-label={showNewPwd ? '隐藏新密码' : '显示新密码'} aria-pressed={showNewPwd} onClick={() => setShowNewPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showNewPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>确认新密码</label>
+                  <label htmlFor="settings-confirm-password" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>确认新密码</label>
                   <div className="relative">
-                    <input type={showConfirmPwd ? 'text' : 'password'} value={confirmPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setConfirmPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
-                    <button type="button" onClick={() => setShowConfirmPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
+                    <input id="settings-confirm-password" type={showConfirmPwd ? 'text' : 'password'} value={confirmPassword} disabled={pwdSaving || passwordOutcomeUnknown || !passwordRecoveryReady} onChange={(event) => setConfirmPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
+                    <button type="button" aria-controls="settings-confirm-password" aria-label={showConfirmPwd ? '隐藏确认新密码' : '显示确认新密码'} aria-pressed={showConfirmPwd} onClick={() => setShowConfirmPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showConfirmPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
@@ -1402,14 +2003,19 @@ export default function NotificationSettings() {
               </div>
 
               {passwordOutcomeUnknown ? (
-                <div data-testid="password-outcome-unknown" role="alert" className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
-                  密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。
+                <div data-testid="password-outcome-unknown" role="alert" className="space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
+                  <p>{passwordOutcomeMessage}</p>
+                  {!passwordRecoveryMarker ? (
+                    <button type="button" onClick={refreshPasswordRecoveryFromStorage} disabled={pwdSaving} className="xmt-btn xmt-btn-secondary">
+                      重新读取恢复记录
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
               <button
                 onClick={handleChangePassword}
-                disabled={pwdSaving || passwordOutcomeUnknown}
+                disabled={pwdSaving || passwordOutcomeUnknown || !passwordRecoveryReady}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {pwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
@@ -1444,14 +2050,24 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <button onClick={() => setAppearanceTheme('light')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
+                <button
+                  type="button"
+                  aria-pressed={appearanceTheme === 'light'}
+                  onClick={() => setAppearanceTheme('light')}
+                  className={`xmt-btn xmt-btn-secondary w-full justify-start gap-3 rounded-xl px-4 py-3 text-left ${appearanceTheme === 'light' ? 'border-studio-primary bg-studio-primary/10 ring-2 ring-studio-primary/20' : styles.border}`}
+                >
                   <Sun className="h-5 w-5 text-studio-amber" />
                   <div className="text-left">
                     <p className={`text-sm font-medium ${styles.textPrimary}`}>浅色模式</p>
                     <p className={`text-xs ${styles.textMuted}`}>适合明亮办公环境</p>
                   </div>
                 </button>
-                <button onClick={() => setAppearanceTheme('dark')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
+                <button
+                  type="button"
+                  aria-pressed={appearanceTheme === 'dark'}
+                  onClick={() => setAppearanceTheme('dark')}
+                  className={`xmt-btn xmt-btn-secondary w-full justify-start gap-3 rounded-xl px-4 py-3 text-left ${appearanceTheme === 'dark' ? 'border-studio-primary bg-studio-primary/10 ring-2 ring-studio-primary/20' : styles.border}`}
+                >
                   <Moon className="h-5 w-5 text-studio-primary" />
                   <div className="text-left">
                     <p className={`text-sm font-medium ${styles.textPrimary}`}>深色模式</p>
@@ -1479,8 +2095,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderSystemInput('系统名称', systemSettings.system.name, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, name: value } })))}
-                {renderSystemInput('页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
+                {renderSystemInput('system.name', '系统名称', systemSettings.system.name, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, name: value } })))}
+                {renderSystemInput('system.browserTitle', '页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
               </div>
 
               <div className="max-w-xl">
@@ -1503,8 +2119,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderSystemInput('系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
-                {renderSystemInput('系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
+                {renderSystemInput('system.icon', '系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
+                {renderSystemInput('system.description', '系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
               </div>
 
               <button
@@ -1527,8 +2143,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderSystemInput('品牌名称', systemSettings.branding.brandName, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandName: value } })))}
-                {renderSystemInput('品牌展示文案', systemSettings.branding.brandDescription, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandDescription: value } })))}
+                {renderSystemInput('branding.brandName', '品牌名称', systemSettings.branding.brandName, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandName: value } })))}
+                {renderSystemInput('branding.brandDescription', '品牌展示文案', systemSettings.branding.brandDescription, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandDescription: value } })))}
               </div>
 
               <div>
@@ -1542,10 +2158,7 @@ export default function NotificationSettings() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <label aria-disabled={systemSettingsLocked} className={`rounded-lg px-4 py-2 ${styles.buttonPrimary} ${systemSettingsLocked ? 'pointer-events-none cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-                      选择图片
-                      <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={systemSettingsLocked} className="hidden" />
-                    </label>
+                    <BrandLogoPicker disabled={systemSettingsLocked} onChange={handleLogoUpload} buttonClassName={styles.buttonPrimary} />
                     {systemSettings.branding.logo && (
                       <button
                         onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
@@ -1579,18 +2192,18 @@ export default function NotificationSettings() {
 
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>登录页布局</label>
-                  <select value={systemSettings.login.layout} disabled={systemSettingsLocked} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                  <label htmlFor="settings-login-layout" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>登录页布局</label>
+                  <select id="settings-login-layout" name="login.layout" value={systemSettings.login.layout} disabled={systemSettingsLocked} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="style1">样式一（暗色经典）</option>
                     <option value="style2">样式二（金色聚焦）</option>
                     <option value="style3">样式三（双栏对比）</option>
                   </select>
                 </div>
-                {renderSystemInput('欢迎标题', systemSettings.login.welcomeTitle, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeTitle: value } })))}
+                {renderSystemInput('login.welcomeTitle', '欢迎标题', systemSettings.login.welcomeTitle, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeTitle: value } })))}
               </div>
 
               <div className="grid gap-6">
-                {renderSystemInput('欢迎说明', systemSettings.login.welcomeMessage, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeMessage: value } })))}
+                {renderSystemInput('login.welcomeMessage', '欢迎说明', systemSettings.login.welcomeMessage, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeMessage: value } })))}
               </div>
 
               <button

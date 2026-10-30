@@ -1,10 +1,12 @@
 import { ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import GlassPanel from '@/components/studio/GlassPanel';
 import { formatBeijingTime } from '@/lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '@/utils/editorTheme';
 import { sanitizeHtml } from '@/utils/sanitizeHtml';
 import { getPlatformLabel } from '@/platform/platform-labels';
-import { getSafeArchiveHttpUrl, type PublishedArchiveSnapshot } from './parseLegacyPublishedArchive';
+import { productionSourceSnapshotHref } from '@/lib/productionSourceSnapshot';
+import { getSafeArchiveHttpUrl, type ArchiveScriptSourceSnapshot, type PublishedArchiveSnapshot } from './parseLegacyPublishedArchive';
 
 const metricLabels = [
   { field: 'views', label: '播放' },
@@ -44,7 +46,95 @@ function MetricValue({ value }: { value?: number }) {
   return <span>{typeof value === 'number' ? value.toLocaleString('zh-CN') : '—'}</span>;
 }
 
-function PublishedRecordCard({ record }: { record: PublishedArchiveSnapshot['publishedRecords'][number] }) {
+function PublishedRecordScriptSource({
+  record,
+  topicId,
+  snapshots,
+  canViewProduction,
+}: {
+  record: PublishedArchiveSnapshot['publishedRecords'][number];
+  topicId?: number;
+  snapshots: ArchiveScriptSourceSnapshot[];
+  canViewProduction: boolean;
+}) {
+  const source = record.scriptSource;
+  if (source === undefined) {
+    return <div className="border-t border-studio-border-soft pt-3 text-sm" data-testid="legacy-record-script-source">
+      <p className="text-studio-text-muted">此旧版归档未记录该发布记录的创作稿来源；不根据当前稿件推断。</p>
+    </div>;
+  }
+  if (!source) {
+    return <div className="border-t border-studio-border-soft pt-3 text-sm" data-testid="legacy-record-script-source" role="status">
+      <p className="text-studio-text-muted">创作稿来源记录无效，已隐藏来源内容。</p>
+    </div>;
+  }
+
+  const hasCompleteReference = (source.state === 'derived' || source.state === 'inherited')
+    && Number.isSafeInteger(source.productionId)
+    && Number(source.productionId) > 0
+    && Boolean(source.version?.trim());
+  const belongsToArchiveTopic = Number.isSafeInteger(topicId) && source.topicId === topicId;
+  const validReference = hasCompleteReference && belongsToArchiveTopic;
+  const crossTopicSource = validReference && source.sourceTopicId !== undefined && source.sourceTopicId !== topicId;
+  if (hasCompleteReference && !belongsToArchiveTopic) {
+    return <div className="border-t border-studio-border-soft pt-3 text-sm" data-testid="legacy-record-script-source" role="alert">
+      <p className="text-studio-coral-contrast">来源选题与当前归档不一致，已隐藏来源内容。</p>
+    </div>;
+  }
+
+  const matchingSnapshots = validReference
+    && !crossTopicSource
+    ? snapshots.filter((snapshot) => snapshot.topicId === source.topicId
+      && snapshot.productionId === source.productionId
+      && snapshot.version === source.version)
+    : [];
+  const exactSnapshot = matchingSnapshots.length === 1 ? matchingSnapshots[0] : undefined;
+  const sourceStateLabel = source.state === 'derived'
+    ? '衍生自创作稿'
+    : source.state === 'inherited'
+      ? '沿用创作稿'
+      : source.state === 'unavailable'
+        ? '来源版本当前不可用'
+        : source.state === 'unrecorded'
+          ? '来源未记录；不根据当前稿件推断'
+          : '未记录独立剧本来源';
+  const recordLabel = `${displayPlatform(record.platform)}发布记录${record.publishingId ? ` #${record.publishingId}` : ''}`;
+
+  return <div className="min-w-0 space-y-2 border-t border-studio-border-soft pt-3 text-sm" data-testid="legacy-record-script-source">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-studio-text-muted">剧本来源：{sourceStateLabel}</span>
+      {validReference ? <span className="text-xs text-studio-text-muted">创作稿 #{source.productionId} · {source.version}</span> : null}
+      {validReference && canViewProduction && productionSourceSnapshotHref(source.productionId, source.version) ? <Link
+        to={productionSourceSnapshotHref(source.productionId, source.version)!}
+        state={{ mobileReturnTo: '/asset-center/published-archives' }}
+        className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-studio-cyan-contrast"
+        aria-label={`查看${recordLabel}来源创作稿 ${source.version}`}
+      >查看来源创作稿 <ExternalLink className="h-3.5 w-3.5" /></Link> : null}
+      {validReference && !canViewProduction ? <span className="text-xs text-studio-text-muted">打开原稿需要创作稿查看权限</span> : null}
+    </div>
+    {crossTopicSource ? <p className="text-xs text-studio-coral-contrast" role="status">来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限。</p> : null}
+    {validReference && !crossTopicSource && exactSnapshot ? <details data-testid="legacy-record-source-body">
+      <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium text-studio-text-secondary">查看归档保存的来源正文</summary>
+      {exactSnapshot.content.trim() ? <div
+        className="editor-content-preview prose prose-sm mt-2 max-w-none break-words rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 text-studio-text-secondary"
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(exactSnapshot.content)) }}
+      /> : <p className="mt-2 text-sm text-studio-text-muted">该创作版本的归档正文为空。</p>}
+    </details> : null}
+    {validReference && !crossTopicSource && !exactSnapshot ? <p className="text-xs text-studio-text-muted">归档中没有唯一匹配的来源正文快照；正文已隐藏。</p> : null}
+  </div>;
+}
+
+function PublishedRecordCard({
+  record,
+  topicId,
+  sourceSnapshots,
+  canViewProduction,
+}: {
+  record: PublishedArchiveSnapshot['publishedRecords'][number];
+  topicId?: number;
+  sourceSnapshots: ArchiveScriptSourceSnapshot[];
+  canViewProduction: boolean;
+}) {
   const url = getSafeArchiveHttpUrl(record.url);
   return <GlassPanel className="min-w-0 space-y-4 p-4" data-testid="legacy-published-record">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -63,11 +153,12 @@ function PublishedRecordCard({ record }: { record: PublishedArchiveSnapshot['pub
         </div>
       ))}
     </div>
+    <PublishedRecordScriptSource record={record} topicId={topicId} snapshots={sourceSnapshots} canViewProduction={canViewProduction} />
     {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-studio-cyan-contrast">打开发布链接 <ExternalLink className="h-3.5 w-3.5" /></a> : null}
   </GlassPanel>;
 }
 
-export function LegacyPublishedArchiveSnapshotView({ snapshot }: { snapshot: PublishedArchiveSnapshot }) {
+export function LegacyPublishedArchiveSnapshotView({ snapshot, canViewProduction = false }: { snapshot: PublishedArchiveSnapshot; canViewProduction?: boolean }) {
   const scriptHtml = snapshot.script?.content
     ? sanitizeHtml(normalizeLegacyEditorHtmlTheme(snapshot.script.content))
     : '';
@@ -106,7 +197,13 @@ export function LegacyPublishedArchiveSnapshotView({ snapshot }: { snapshot: Pub
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
         {snapshot.publishedRecords.map((record, index) => (
-          <PublishedRecordCard key={record.publishingId || `${record.platform}-${record.publishTime || index}`} record={record} />
+          <PublishedRecordCard
+            key={record.publishingId || `${record.platform}-${record.publishTime || index}`}
+            record={record}
+            topicId={snapshot.topic?.id}
+            sourceSnapshots={snapshot.scriptSourceSnapshots}
+            canViewProduction={canViewProduction}
+          />
         ))}
       </div>
     </section>

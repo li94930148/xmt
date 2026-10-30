@@ -144,6 +144,7 @@ export default function RetroCreateDialog({
     || recovery?.status === 'submitting'
     || recovery?.status === 'storage_error'
     || (recovery?.status === 'not_found' && !canRetryRecovery);
+  const canClose = !loading && recovery?.status !== 'submitting';
   const primaryLabel = recovery?.status === 'checking'
     ? '正在核实...'
     : recovery?.status === 'submitting'
@@ -163,10 +164,13 @@ export default function RetroCreateDialog({
       onClose={onClose}
       size="lg"
       title="新建复盘"
+      closeOnOverlayClick={canClose}
+      closeOnEscape={canClose}
+      showCloseButton={canClose}
       description="创建后进入详情页，再生成指标快照、填写结论和行动项。"
       footer={
         <div className="flex justify-end gap-3">
-          <ActionButton variant="ghost" onClick={onClose}>{recovery ? '稍后处理' : '取消'}</ActionButton>
+          <ActionButton variant="ghost" onClick={onClose} disabled={!canClose}>{recovery ? '稍后处理' : '取消'}</ActionButton>
           <ActionButton variant="primary" onClick={primaryAction} disabled={primaryDisabled}>
             {!recovery ? <Plus className="h-4 w-4" /> : null}
             {primaryLabel}

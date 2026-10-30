@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import { getProduction, getProductionById, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
@@ -12,6 +13,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 const PAGE_SIZE = 20;
 const PRODUCTION_CREATE_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -531,7 +533,7 @@ export default function Production() {
         return;
       }
 
-      const readError = error instanceof Error ? error.message : '只读读取失败';
+      const readError = getUserFacingErrorMessage(error, '暂时无法读取服务器上的创作记录。');
       const uncertain = {
         ...pending,
         status: 'uncertain' as const,
@@ -578,15 +580,16 @@ export default function Production() {
             type: 'warning',
           });
         } catch (storageError) {
+          const recoveryError = getUserFacingErrorMessage(storageError, '本机无法安全保存创作恢复信息。');
           setPendingCreateVerification({
             ...pending,
             status: 'uncertain',
-            readError: `服务器暂未找到创作记录，但恢复信息无法保存（${storageError instanceof Error ? storageError.message : '存储不可用'}）；请先只读核实，不要重新创建。`,
+            readError: `服务器暂未找到创作记录，但恢复信息无法保存（${recoveryError}）；请先只读核实，不要重新创建。`,
           });
         }
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const readError = getUserFacingErrorMessage(error, '暂时无法核实创作记录创建结果。');
       setPendingCreateVerification({
         ...pending,
         status: 'uncertain',
@@ -623,11 +626,12 @@ export default function Production() {
       try {
         persistPendingProductionCreateVerification({ ...pending, status: 'uncertain' });
       } catch (storageError) {
+        const recoveryError = getUserFacingErrorMessage(storageError, '本机无法安全保存创作恢复信息。');
         if (pendingCreateVerification?.clientRequestId === pending.clientRequestId) {
-          setPendingCreateVerification({ ...pending, status: 'ready', readError: storageError instanceof Error ? storageError.message : '恢复信息保存失败' });
+          setPendingCreateVerification({ ...pending, status: 'ready', readError: recoveryError });
         } else {
           setShowCreateModal(true);
-          addNotification({ title: '创建未发送', message: storageError instanceof Error ? storageError.message : '恢复信息保存失败，请检查后重试。', type: 'error' });
+          addNotification({ title: '创建未发送', message: `本机无法安全保存创作恢复信息；本次没有发送创建请求。${recoveryError}`, type: 'error' });
         }
         return;
       }
@@ -650,7 +654,7 @@ export default function Production() {
             status: pending.payload.status,
           });
           setShowCreateModal(true);
-          addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '创建失败', message: getUserFacingErrorMessage(error, '创作创建失败，请检查权限或选题状态后重试。'), type: 'error' });
         } else {
           await resolvePendingProductionCreate(checking);
         }
@@ -878,7 +882,7 @@ export default function Production() {
       } catch (error) {
         addNotification({
           title: '更新未发送',
-          message: error instanceof Error ? error.message : '创作恢复状态无法保存；本次没有发送修改。',
+          message: getUserFacingErrorMessage(error, '创作恢复状态无法安全保存；本次没有发送修改。'),
           type: 'error',
         });
         return;
@@ -899,7 +903,7 @@ export default function Production() {
         if (isDefinitiveProductionUpdateRejection(error)) {
           removeStoredProductionUpdateVerification(pending.userId, pending.id);
           setPendingUpdateVerification(null);
-          addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '更新失败', message: getUserFacingErrorMessage(error, '创作更新失败，请检查权限或当前记录后重试。'), type: 'error' });
           return;
         }
         const uncertain = { ...pending, status: 'checking' as const, readError: null };
@@ -920,7 +924,7 @@ export default function Production() {
     } catch (error) {
       removeStoredProductionUpdateVerification(pending.userId, pending.id);
       setPendingUpdateVerification(null);
-      addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '更新失败', message: getUserFacingErrorMessage(error, '创作更新失败，请检查权限或当前记录后重试。'), type: 'error' });
       return;
     } finally {
       saveInFlightRef.current = false;
@@ -1026,7 +1030,7 @@ export default function Production() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className={`text-2xl font-bold tracking-tight ${styles.textPrimary}`}>创作管理</h1>
+          <PageHeading className={`text-2xl font-bold tracking-tight ${styles.textPrimary}`}>创作管理</PageHeading>
           <p className={`${styles.textSecondary} mt-1 text-sm`}>管理创作内容的版本和审核</p>
         </div>
         <button
@@ -1189,10 +1193,10 @@ export default function Production() {
                     <td className="px-6 py-4">
                       <button 
                         onClick={() => navigate(`/production/${production.id}`)}
-                        className="flex items-center gap-2 text-studio-primary hover:text-studio-primary"
+                        className="flex items-center gap-2 text-studio-primary transition-colors hover:text-studio-primary-contrast focus-visible:text-studio-primary-contrast"
                       >
                         <FileText className="w-4 h-4" />
-                        <span className={`${styles.textPrimary} font-medium`}>{production.topic_title}</span>
+                        <span className="font-medium">{production.topic_title}</span>
                       </button>
                     </td>
                     <td className={`px-6 py-4 ${styles.textSecondary}`}>{production.version}</td>
@@ -1274,8 +1278,11 @@ export default function Production() {
         >
             <div className="space-y-4">
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>关联选题 *</label>
+                <label htmlFor="production-create-topic" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>关联选题 <span aria-hidden="true">*</span></label>
                 <select
+                  id="production-create-topic"
+                  name="topic_id"
+                  required
                   value={formData.topic_id}
                   onChange={(e) => setFormData({ ...formData, topic_id: e.target.value })}
                   className={`w-full px-4 py-2 ${styles.bgInput} border ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
@@ -1288,8 +1295,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>版本</label>
+                <label htmlFor="production-create-version" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>版本</label>
                 <input
+                  id="production-create-version"
+                  name="version"
                   type="text"
                   value={formData.version}
                   onChange={(e) => setFormData({ ...formData, version: e.target.value })}
@@ -1299,8 +1308,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>内容描述</label>
+                <label htmlFor="production-create-content" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>内容描述</label>
                 <textarea
+                  id="production-create-content"
+                  name="content"
                   ref={createTextareaRef}
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
@@ -1317,8 +1328,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>状态</label>
+                <label htmlFor="production-create-status" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>状态</label>
                 <select
+                  id="production-create-status"
+                  name="status"
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                   className={`w-full px-4 py-2 ${styles.bgInput} border ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
@@ -1366,8 +1379,11 @@ export default function Production() {
         >
             <div className="space-y-4">
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>关联选题 *</label>
+                <label htmlFor="production-edit-topic" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>关联选题 <span aria-hidden="true">*</span></label>
                 <select
+                  id="production-edit-topic"
+                  name="topic_id"
+                  required
                   value={formData.topic_id}
                   onChange={(e) => setFormData({ ...formData, topic_id: e.target.value })}
                   className={`w-full px-4 py-2 ${styles.bgInput} border ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
@@ -1380,8 +1396,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>版本</label>
+                <label htmlFor="production-edit-version" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>版本</label>
                 <input
+                  id="production-edit-version"
+                  name="version"
                   type="text"
                   value={formData.version}
                   onChange={(e) => setFormData({ ...formData, version: e.target.value })}
@@ -1391,8 +1409,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>内容描述</label>
+                <label htmlFor="production-edit-content" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>内容描述</label>
                 <textarea
+                  id="production-edit-content"
+                  name="content"
                   ref={editTextareaRef}
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
@@ -1409,8 +1429,10 @@ export default function Production() {
               </div>
               
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>状态</label>
+                <label htmlFor="production-edit-status" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>状态</label>
                 <select
+                  id="production-edit-status"
+                  name="status"
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                   className={`w-full px-4 py-2 ${styles.bgInput} border ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}

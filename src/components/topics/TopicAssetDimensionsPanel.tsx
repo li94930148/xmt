@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Plus, RefreshCw, X } from 'lucide-react';
 import {
   addContentTopicDimension,
@@ -11,12 +11,21 @@ import {
   type ContentTopicDimension,
   type TopicDimensionMutationIntent,
 } from '@/api/resourceCenter';
+import {
+  clearPendingTopicDimensionMutation,
+  persistPendingTopicDimensionMutation,
+  readPendingTopicDimensionMutation,
+  type PendingTopicDimensionMutation,
+} from '@/components/topics/topicAssetDimensionRecovery';
+import { useAuthStore } from '@/store';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 const dimensionTypes = Object.keys(CONTENT_ASSET_DIMENSION_LABELS) as ContentAssetDimensionType[];
-type PendingDimensionMutation = TopicDimensionMutationIntent | { kind: 'remove'; dimension: ContentTopicDimension };
 
 export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topicId: number; canManage: boolean }) {
+  const userId = useAuthStore((state) => state.user?.id);
   const [dimensions, setDimensions] = useState<ContentTopicDimension[]>([]);
+  const [dimensionsLoaded, setDimensionsLoaded] = useState(false);
   const [dimensionType, setDimensionType] = useState<ContentAssetDimensionType>('city');
   const [dimensionValue, setDimensionValue] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,36 +33,74 @@ export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topi
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-  const [pendingMutation, setPendingMutation] = useState<PendingDimensionMutation | null>(null);
+  const [pendingMutation, setPendingMutation] = useState<PendingTopicDimensionMutation | null>(null);
   const [recoveryChecking, setRecoveryChecking] = useState(false);
   const mutationInFlightRef = useRef(false);
-  const pendingMutationRef = useRef<PendingDimensionMutation | null>(null);
+  const pendingMutationRef = useRef<PendingTopicDimensionMutation | null>(null);
+  const requestSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
+  const contextRef = useRef({ topicId, userId });
+  contextRef.current = { topicId, userId };
   const mutationLocked = saving || pendingMutation !== null;
 
+  const isContextCurrent = useCallback((requestedUserId: number | undefined, requestedTopicId: number) => (
+    mountedRef.current
+    && contextRef.current.topicId === requestedTopicId
+    && contextRef.current.userId === requestedUserId
+    && useAuthStore.getState().user?.id === requestedUserId
+  ), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestSequenceRef.current += 1;
+    };
+  }, []);
+
   const load = useCallback(async () => {
+    const requestedUserId = userId;
+    const requestedTopicId = topicId;
+    const requestId = ++requestSequenceRef.current;
+    const isCurrent = () => requestId === requestSequenceRef.current && isContextCurrent(requestedUserId, requestedTopicId);
     setLoading(true);
     setLoadError(null);
-    try {
-      const response = await getContentTopicDimensions(topicId);
-      setDimensions(response.data);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : '未知错误');
-    } finally {
-      setLoading(false);
-    }
-  }, [topicId]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const verifyMutationOutcome = useCallback(async (mutation: PendingDimensionMutation) => {
-    setRecoveryChecking(true);
     setActionError(null);
     try {
-      const intent: TopicDimensionMutationIntent = mutation.kind === 'remove' && 'dimension' in mutation
-        ? { kind: 'remove', dimensionId: mutation.dimension.id }
-        : mutation;
-      const response = await reconcileContentTopicDimensionMutation(topicId, intent);
+      const response = await getContentTopicDimensions(requestedTopicId);
+      if (!isCurrent()) return;
       setDimensions(response.data);
+      setDimensionsLoaded(true);
+    } catch (error) {
+      if (!isCurrent()) return;
+      setLoadError(getUserFacingErrorMessage(error, '内容维度暂时无法读取，请稍后重试。'));
+      setDimensionsLoaded(false);
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [isContextCurrent, topicId, userId]);
+
+  const verifyMutationOutcome = useCallback(async (
+    mutation: PendingTopicDimensionMutation,
+    requestedUserId: number | undefined = userId,
+    requestedTopicId: number = topicId,
+  ) => {
+    if (!isContextCurrent(requestedUserId, requestedTopicId)) return;
+    const requestId = ++requestSequenceRef.current;
+    const isCurrent = () => requestId === requestSequenceRef.current && isContextCurrent(requestedUserId, requestedTopicId);
+    const intent: TopicDimensionMutationIntent = mutation.kind === 'add'
+      ? mutation
+      : { kind: 'remove', dimensionId: mutation.dimensionId };
+    setLoading(true);
+    setRecoveryChecking(true);
+    setLoadError(null);
+    setActionError(null);
+    try {
+      const response = await reconcileContentTopicDimensionMutation(requestedTopicId, intent);
+      if (!isCurrent()) return;
+      setDimensions(response.data);
+      setDimensionsLoaded(true);
+      clearPendingTopicDimensionMutation(requestedUserId, requestedTopicId);
       pendingMutationRef.current = null;
       setPendingMutation(null);
       mutationInFlightRef.current = false;
@@ -69,62 +116,141 @@ export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topi
           : '只读核实发现该维度当前已不存在，列表已同步；无法确认是否由刚才的操作移除。');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '未知错误';
-      setActionError(`操作结果暂不明确；只读核实失败：${message}`);
+      if (isCurrent()) {
+        const message = getUserFacingErrorMessage(error, '暂时无法读取内容维度；稍后可以再次只读核实。');
+        setActionError(`操作结果暂不明确；只读核实失败：${message}`);
+      }
     } finally {
-      setRecoveryChecking(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setRecoveryChecking(false);
+      }
     }
-  }, [topicId]);
+  }, [isContextCurrent, topicId, userId]);
 
-  const retainUnknownMutation = async (mutation: PendingDimensionMutation, error: unknown) => {
-    if (!isTopicDimensionWriteOutcomeUnknown(error)) {
-      setActionError(error instanceof Error ? error.message : '请求失败，请重试');
-      return;
+  useLayoutEffect(() => {
+    const storedMutation = readPendingTopicDimensionMutation(userId, topicId);
+    pendingMutationRef.current = storedMutation;
+    mutationInFlightRef.current = storedMutation !== null;
+    setPendingMutation(storedMutation);
+    setDimensions([]);
+    setDimensionsLoaded(false);
+    setLoading(true);
+    setLoadError(null);
+    setActionError(null);
+    setActionNotice(null);
+    if (storedMutation) {
+      void verifyMutationOutcome(storedMutation, userId, topicId);
+    } else {
+      void load();
     }
-    pendingMutationRef.current = mutation;
-    setPendingMutation(mutation);
-    const message = error instanceof Error ? error.message : '连接中断';
-    setActionError(`操作结果暂不明确（${message}）；正在只读核实，未自动重放。`);
-    await verifyMutationOutcome(mutation);
-  };
+  }, [load, topicId, userId, verifyMutationOutcome]);
 
   const addDimension = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const value = dimensionValue.trim();
     if (!value || mutationInFlightRef.current) return;
+    const requestedUserId = userId;
+    const requestedTopicId = topicId;
+    const mutation: PendingTopicDimensionMutation = { kind: 'add', type: dimensionType, value };
     mutationInFlightRef.current = true;
     setSaving(true);
     setActionError(null);
     setActionNotice(null);
     try {
-      const response = await addContentTopicDimension(topicId, dimensionType, value);
-      const saved = response.data ?? { id: response.id, type: dimensionType, value };
-      setDimensions((current) => current.some((item) => item.id === saved.id) ? current : [...current, saved]);
-      setDimensionValue('');
-      setActionNotice(`${CONTENT_ASSET_DIMENSION_LABELS[dimensionType]}“${value}”已登记。`);
+      persistPendingTopicDimensionMutation(requestedUserId, requestedTopicId, mutation);
     } catch (error) {
-      await retainUnknownMutation({ kind: 'add', type: dimensionType, value }, error);
+      mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        setActionError(getUserFacingErrorMessage(error, '恢复信息无法安全保存；本次没有发送维度操作。'));
+        setSaving(false);
+      }
+      return;
+    }
+    pendingMutationRef.current = mutation;
+    if (isContextCurrent(requestedUserId, requestedTopicId)) setPendingMutation(mutation);
+    try {
+      const response = await addContentTopicDimension(requestedTopicId, dimensionType, value);
+      clearPendingTopicDimensionMutation(requestedUserId, requestedTopicId);
+      pendingMutationRef.current = null;
+      mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        const saved = response.data ?? { id: response.id, type: dimensionType, value };
+        setDimensions((current) => current.some((item) => item.id === saved.id) ? current : [...current, saved]);
+        setDimensionsLoaded(true);
+        setPendingMutation(null);
+        setDimensionValue('');
+        setActionNotice(`${CONTENT_ASSET_DIMENSION_LABELS[dimensionType]}“${value}”已登记。`);
+      }
+    } catch (error) {
+      if (!isTopicDimensionWriteOutcomeUnknown(error)) {
+        clearPendingTopicDimensionMutation(requestedUserId, requestedTopicId);
+        pendingMutationRef.current = null;
+        mutationInFlightRef.current = false;
+        if (isContextCurrent(requestedUserId, requestedTopicId)) {
+          setPendingMutation(null);
+          setActionError(getUserFacingErrorMessage(error, '内容维度操作失败，请检查当前内容后重试。'));
+        }
+      } else if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        const message = getUserFacingErrorMessage(error, '连接暂时不可用');
+        setActionError(`操作结果暂不明确（${message}）；正在只读核实，未自动重放。`);
+        await verifyMutationOutcome(mutation, requestedUserId, requestedTopicId);
+      }
     } finally {
-      setSaving(false);
-      if (!pendingMutationRef.current) mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) setSaving(false);
     }
   };
 
   const removeDimension = async (dimension: ContentTopicDimension) => {
     if (mutationInFlightRef.current) return;
+    const requestedUserId = userId;
+    const requestedTopicId = topicId;
+    const mutation: PendingTopicDimensionMutation = {
+      kind: 'remove', dimensionId: dimension.id, type: dimension.type, value: dimension.value,
+    };
     mutationInFlightRef.current = true;
     setSaving(true);
     setActionError(null);
     setActionNotice(null);
     try {
-      await removeContentTopicDimension(topicId, dimension.id);
-      setDimensions((current) => current.filter((item) => item.id !== dimension.id));
-      setActionNotice('内容维度已移除。');
+      persistPendingTopicDimensionMutation(requestedUserId, requestedTopicId, mutation);
     } catch (error) {
-      await retainUnknownMutation({ kind: 'remove', dimension }, error);
+      mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        setActionError(getUserFacingErrorMessage(error, '恢复信息无法安全保存；本次没有发送维度操作。'));
+        setSaving(false);
+      }
+      return;
+    }
+    pendingMutationRef.current = mutation;
+    if (isContextCurrent(requestedUserId, requestedTopicId)) setPendingMutation(mutation);
+    try {
+      await removeContentTopicDimension(requestedTopicId, dimension.id);
+      clearPendingTopicDimensionMutation(requestedUserId, requestedTopicId);
+      pendingMutationRef.current = null;
+      mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        setDimensions((current) => current.filter((item) => item.id !== dimension.id));
+        setDimensionsLoaded(true);
+        setPendingMutation(null);
+        setActionNotice('内容维度已移除。');
+      }
+    } catch (error) {
+      if (!isTopicDimensionWriteOutcomeUnknown(error)) {
+        clearPendingTopicDimensionMutation(requestedUserId, requestedTopicId);
+        pendingMutationRef.current = null;
+        mutationInFlightRef.current = false;
+        if (isContextCurrent(requestedUserId, requestedTopicId)) {
+          setPendingMutation(null);
+          setActionError(getUserFacingErrorMessage(error, '内容维度操作失败，请检查当前内容后重试。'));
+        }
+      } else if (isContextCurrent(requestedUserId, requestedTopicId)) {
+        const message = getUserFacingErrorMessage(error, '连接暂时不可用');
+        setActionError(`操作结果暂不明确（${message}）；正在只读核实，未自动重放。`);
+        await verifyMutationOutcome(mutation, requestedUserId, requestedTopicId);
+      }
     } finally {
-      setSaving(false);
-      if (!pendingMutationRef.current) mutationInFlightRef.current = false;
+      if (isContextCurrent(requestedUserId, requestedTopicId)) setSaving(false);
     }
   };
 
@@ -138,11 +264,13 @@ export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topi
         {!canManage ? <span className="text-xs text-studio-text-secondary">只读</span> : null}
       </div>
 
-      {loading ? <p role="status" className="mt-3 text-sm text-studio-text-muted">正在读取内容维度…</p> : loadError ? (
+      {loading ? <p role="status" className="mt-3 text-sm text-studio-text-muted">{pendingMutation ? '正在只读核实待处理维度…' : '正在读取内容维度…'}</p> : loadError ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-studio-danger">
           <p role="alert">内容维度读取失败：{loadError}</p>
-          <button type="button" onClick={() => void load()} className="xmt-btn-secondary inline-flex min-h-9 items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" />重试</button>
+          <button type="button" onClick={() => void load()} className="xmt-btn-secondary inline-flex min-h-10 items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" />重试</button>
         </div>
+      ) : !dimensionsLoaded ? (
+        <p role="status" className="mt-3 text-sm text-studio-text-secondary">当前内容维度列表尚未同步，请先完成只读核实。</p>
       ) : (
         <>
           <div aria-label="已登记内容维度" className="mt-3 flex flex-wrap gap-2">
@@ -156,7 +284,7 @@ export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topi
                     disabled={mutationLocked}
                     aria-label={`移除${CONTENT_ASSET_DIMENSION_LABELS[dimension.type]}：${dimension.value}`}
                     onClick={() => void removeDimension(dimension)}
-                    className="shrink-0 rounded-full text-studio-text-muted hover:text-studio-danger disabled:opacity-40"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-studio-text-muted hover:text-studio-danger disabled:opacity-40"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -195,23 +323,24 @@ export default function TopicAssetDimensionsPanel({ topicId, canManage }: { topi
               </button>
             </form>
           ) : null}
-          {pendingMutation ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-studio-danger">
-              <p role="alert">操作结果暂不明确；写入已锁定，不会自动重放。请先只读核实当前状态。</p>
-              <button
-                type="button"
-                disabled={recoveryChecking}
-                onClick={() => void verifyMutationOutcome(pendingMutation)}
-                className="xmt-btn-secondary inline-flex min-h-9 items-center gap-1.5 disabled:opacity-50"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />{recoveryChecking ? '核实中…' : '只读核实当前状态'}
-              </button>
-            </div>
-          ) : null}
-          {actionError ? <p role="alert" className="mt-2 text-xs text-studio-danger">{actionError}</p> : null}
-          {actionNotice ? <p role="status" className="mt-2 text-xs text-studio-success-contrast">{actionNotice}</p> : null}
         </>
       )}
+
+      {pendingMutation ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-studio-danger">
+          <p role="alert">操作结果暂不明确；写入已锁定，不会自动重放。请先只读核实当前状态。</p>
+          <button
+            type="button"
+            disabled={recoveryChecking}
+            onClick={() => void verifyMutationOutcome(pendingMutation)}
+            className="xmt-btn-secondary inline-flex min-h-10 items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />{recoveryChecking ? '核实中…' : '只读核实当前状态'}
+          </button>
+        </div>
+      ) : null}
+      {actionError ? <p role="alert" className="mt-2 text-xs text-studio-danger">{actionError}</p> : null}
+      {actionNotice ? <p role="status" className="mt-2 text-xs text-studio-success-contrast">{actionNotice}</p> : null}
     </section>
   );
 }

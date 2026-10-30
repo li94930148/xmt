@@ -32,6 +32,7 @@ export default {
           'border-strong': studioColor('border-active', 'var(--xmt-border-active-alpha)'),
           text: studioColor('text-primary'),
           danger: studioColor('coral'),
+          'danger-contrast': studioColor('coral-contrast'),
           emerald: studioColor('success'),
           'app-bg': studioColor('app-bg'),
           'app-bg-soft': studioColor('app-bg-soft'),
@@ -132,6 +133,7 @@ export default {
       boxShadow: {
         'glow-primary': 'var(--xmt-glow-primary)',
         'glow-cyan': 'var(--xmt-glow-cyan)',
+        'glow-coral': 'var(--xmt-glow-coral)',
         'card': 'var(--xmt-card-shadow)',
         'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
         'glass-dark': '0 8px 32px 0 rgba(0, 0, 0, 0.37)',

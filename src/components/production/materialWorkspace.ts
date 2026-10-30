@@ -1,10 +1,34 @@
 import { buildResourceReferenceHtml, type ResourceReference } from './resourceReference';
+import { userSafeDraftKey } from '@/platform/safe-draft';
 
 export const DEFAULT_MATERIAL_WORKSPACE_HEIGHT = 360;
 export const MIN_MATERIAL_WORKSPACE_HEIGHT = 240;
 
 export function materialWorkspaceStorageKey(userId: number) {
   return `xmt:production-materials-height:v1:user:${userId}`;
+}
+
+export type ProductionMaterialRecoveryDraft = {
+  version: 1;
+  productionId: number;
+  contentHtml: string;
+  baselineContentHtml: string;
+  baselineRevision: number;
+};
+
+export function productionMaterialDraftStorageKey(userId: number, productionId: number) {
+  return userSafeDraftKey(userId, `production-material:${productionId}:v1`);
+}
+
+export function isProductionMaterialRecoveryDraft(value: unknown, productionId: number): value is ProductionMaterialRecoveryDraft {
+  if (!value || typeof value !== 'object') return false;
+  const draft = value as Record<string, unknown>;
+  return draft.version === 1
+    && draft.productionId === productionId
+    && typeof draft.contentHtml === 'string'
+    && typeof draft.baselineContentHtml === 'string'
+    && Number.isSafeInteger(draft.baselineRevision)
+    && Number(draft.baselineRevision) >= 0;
 }
 
 export function clampMaterialWorkspaceHeight(value: number, viewportHeight: number) {

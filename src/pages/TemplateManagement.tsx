@@ -3,6 +3,7 @@ import { FileText } from 'lucide-react';
 import { createTemplate, deleteTemplate, getTemplateMutationStatus, getTemplates, TemplateMutationHttpError, updateTemplate, type ManagedTemplate } from '../api/templates';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell } from '../components/studio';
 import { ConfirmModal, LoadingState } from '../components/common';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { useAuthStore } from '../store';
 import {
   markTopicTemplateMutationRecoveryRejected,
@@ -306,7 +307,7 @@ export default function TemplateManagement() {
     } catch (error) {
       if (!isCurrentRecovery(recovery, isActive)) return null;
       setRecoveryState('unavailable');
-      setRecoveryError(error instanceof Error ? error.message : '暂时无法核实模板操作结果');
+      setRecoveryError(getUserFacingErrorMessage(error, '暂时无法核实模板操作结果，请检查连接后重试。'));
       return 'unavailable';
     }
   }, [clearRecovery, completeProcessedRecovery, finishMissingTarget, readCurrentTemplates, releaseRejectedRecovery]);
@@ -444,11 +445,11 @@ export default function TemplateManagement() {
         void readCurrentTemplates();
       } else if (apiError?.status === 409) {
         setRecoveryState('conflict');
-        setRecoveryError(apiError.message || '模板请求编号发生冲突。所有模板写操作保持锁定，只能只读核实。');
+        setRecoveryError(getUserFacingErrorMessage(apiError, '模板请求编号发生冲突。所有模板写操作保持锁定，只能只读核实。'));
       } else if (code === 'TOPIC_TEMPLATE_MUTATION_TARGET_MISSING') {
         await finishMissingTarget(recovery);
       } else if (apiError && [400, 401, 403, 404, 422].includes(apiError.status)) {
-        releaseRejectedRecovery(recovery, apiError.message || `${mutationLabel(recovery.operation)}被服务器拒绝，原表单内容已保留。`);
+        releaseRejectedRecovery(recovery, getUserFacingErrorMessage(apiError, `${mutationLabel(recovery.operation)}被服务器拒绝，原表单内容已保留。`));
       } else {
         await verifyRecovery(recovery);
       }
@@ -528,7 +529,7 @@ export default function TemplateManagement() {
       setRecovery(recovery, 'submitting');
       await executeMutation(recovery, false, true);
     } catch (error) {
-      setRecoveryError(error instanceof Error ? error.message : '无法准备安全请求，因此没有发送操作。');
+      setRecoveryError(getUserFacingErrorMessage(error, '无法准备安全请求，因此没有发送操作。请检查浏览器后重试。'));
       setNotice('无法安全提交模板操作；原表单内容已保留。');
     } finally {
       if (generation === mutationGenerationRef.current) {
@@ -593,7 +594,7 @@ export default function TemplateManagement() {
       setRecovery(recovery, 'submitting');
       await executeMutation(recovery, false, true);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '无法准备安全删除请求；模板未删除。');
+      setNotice(getUserFacingErrorMessage(error, '无法准备安全删除请求；模板未删除。请检查浏览器后重试。'));
     } finally {
       if (generation === mutationGenerationRef.current) {
         operationLockRef.current = false;

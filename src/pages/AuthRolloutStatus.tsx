@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { getAuthRolloutStatus, type AuthRolloutStatusData } from '@/api/authRollout';
 import { GlassPanel, PageHeader, PageShell, StatusPill } from '@/components/studio';
+import { getAuthRolloutModeLabel, getExistingLoginReadiness } from './authRolloutPresentation';
 
 type Check = { label: string; description: string; ready: boolean };
 type RiskEvent = AuthRolloutStatusData['risk']['events'][number];
@@ -86,8 +87,9 @@ export default function AuthRolloutStatus() {
     const externalEnabled = external.some((item) => item.enabled);
     const externalHealthy = external.some((item) => item.enabled && item.healthy);
     const socketReady = data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval;
+    const loginReadiness = getExistingLoginReadiness(data.runtime.effectiveRolloutMode, data.rollout.mode, data.rollout.percentage);
     const checks: Check[] = [
-      { label: '保留现有登录方式', ready: data.runtime.effectiveRolloutMode === 'legacy' || data.rollout.mode === 'allowlist', description: data.runtime.effectiveRolloutMode === 'legacy' ? '准备完成前，正式账号继续使用现有登录方式。' : '当前仅允许指定试用名单，不会自动扩大到其他账号。' },
+      { label: '保留现有登录方式', ...loginReadiness },
       { label: '外部监控已确认', ready: externalReady, description: externalReady ? '监控系统已确认收到新数据；开始试用前，还需确认告警有人接收。' : !externalEnabled ? '尚未启用外部监控。请先完成监控配置并确认看板有新数据。' : !externalHealthy ? '外部监控暂不可用。请先恢复监控服务，再扩大试用范围。' : '监控系统还没有确认收到新数据。请先确认监控看板有最新记录。' },
       { label: '实时协作服务衔接', ready: socketReady, description: socketReady ? `实时协作已通过单独审批，目前有 ${data.socketBridge.socketV1EligibleUserCount} 个账号符合接入条件。` : !data.socketBridge.socketBridgeApproval ? '实时协作尚未完成单独审批。开始小范围试用前，请先确定 2–3 个内部测试账号和回退安排。' : '实时协作已获批，但尚未启用。暂不扩大新版登录方式的试用范围。' },
       { label: '登录安全检查', ready: data.risk.status === 'healthy', description: data.risk.status === 'healthy' ? '近期未发现需要暂停试用的安全异常。' : `发现 ${data.risk.events.length} 项安全异常，请先处理后再扩大试用。` },
@@ -132,7 +134,7 @@ export default function AuthRolloutStatus() {
       <GlassPanel className="p-6">
         <h2 className="text-base font-semibold text-studio-text-primary">当前运行概况</h2>
         <dl className="mt-5 space-y-4 text-sm">
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">当前登录方式</dt><dd className="font-semibold text-studio-text-primary">{data.runtime.effectiveRolloutMode === 'legacy' ? '现有登录方式' : '小范围试用新版登录'}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">当前登录方式</dt><dd className="font-semibold text-studio-text-primary">{getAuthRolloutModeLabel(data.runtime.effectiveRolloutMode, data.rollout.percentage)}</dd></div>
           <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">试用账号</dt><dd className="font-semibold text-studio-text-primary">{data.rollout.allowlistCount} 人</dd></div>
           <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">近 60 分钟登录次数</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.login}</dd></div>
           <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">登录续期失败率</dt><dd className="font-semibold text-studio-text-primary">{(hour.refreshFailureRate * 100).toFixed(1)}%</dd></div>

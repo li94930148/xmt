@@ -14,6 +14,8 @@ const React = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { flushSync } = await import('react-dom');
 const BaseModal = (await import('../../src/components/common/BaseModal')).default;
+const ConfirmModal = (await import('../../src/components/common/ConfirmModal')).default;
+const FormModal = (await import('../../src/components/common/FormModal')).default;
 const DailyReportDetailDrawer = (await import('../../src/components/daily-report/DailyReportDetailDrawer')).default;
 let parentCloseRequests = 0;
 
@@ -68,6 +70,32 @@ function DailyReportDrawerHarness() {
   return React.createElement(React.Fragment, null,
     React.createElement('button', { id: 'drawer-opener', onClick: () => setOpen(true) }, '打开日报详情'),
     React.createElement(DailyReportDetailDrawer, { report: open ? drawerReport : null, onClose: () => setOpen(false) }));
+}
+
+function FormModalHarness({ locked = false, initiallyOpen = false }: { locked?: boolean; initiallyOpen?: boolean }) {
+  const [open, setOpen] = React.useState(initiallyOpen);
+  return React.createElement(React.Fragment, null,
+    React.createElement('button', { id: 'form-modal-opener', onClick: () => setOpen(true) }, '打开表单弹窗'),
+    React.createElement(FormModal, {
+      open,
+      locked,
+      title: '制作计划',
+      onCancel: () => setOpen(false),
+    }, React.createElement('input', { 'aria-label': '拍摄地点' })));
+}
+
+function ConfirmModalHarness({ loading = false, initiallyOpen = false }: { loading?: boolean; initiallyOpen?: boolean }) {
+  const [open, setOpen] = React.useState(initiallyOpen);
+  return React.createElement(React.Fragment, null,
+    React.createElement('button', { id: 'confirm-modal-opener', onClick: () => setOpen(true) }, '打开确认弹窗'),
+    React.createElement(ConfirmModal, {
+      open,
+      title: '确认删除',
+      description: '此操作无法撤销。',
+      loading,
+      onCancel: () => setOpen(false),
+      onConfirm: () => undefined,
+    }));
 }
 
 async function renderHarness() {
@@ -203,5 +231,62 @@ test('日报详情抽屉复用模态语义、焦点圈定、Escape 关闭与触�
     assert.equal(document.activeElement, opener, 'closing returns focus to the control that opened the drawer');
   } finally {
     flushSync(() => root.unmount());
+  }
+});
+
+test('FormModal 支持 Escape 关闭，并在写入锁定期间保持打开', async () => {
+  document.body.innerHTML = '<div id="form-modal-app-root"></div>';
+  const mount = document.getElementById('form-modal-app-root')!;
+  const root = createRoot(mount);
+  flushSync(() => root.render(React.createElement(FormModalHarness)));
+
+  try {
+    const opener = document.getElementById('form-modal-opener')!;
+    opener.focus();
+    click(opener);
+    assert.equal(document.querySelector('[role="dialog"]')?.getAttribute('aria-modal'), 'true');
+    flushSync(() => pressKey('Escape'));
+    assert.equal(document.querySelector('[role="dialog"]'), null, 'Escape closes an unlocked form modal');
+    assert.equal(document.activeElement, opener, 'closing restores focus to the form modal trigger');
+  } finally {
+    flushSync(() => root.unmount());
+  }
+
+  document.body.innerHTML = '<div id="locked-form-modal-app-root"></div>';
+  const lockedRoot = createRoot(document.getElementById('locked-form-modal-app-root')!);
+  flushSync(() => lockedRoot.render(React.createElement(FormModalHarness, { locked: true, initiallyOpen: true })));
+  try {
+    flushSync(() => pressKey('Escape'));
+    assert.ok(document.querySelector('[role="dialog"]'), 'Escape cannot close a form modal while its mutation is locked');
+  } finally {
+    flushSync(() => lockedRoot.unmount());
+  }
+});
+
+test('ConfirmModal 支持 Escape 取消，并在处理中保持打开', async () => {
+  document.body.innerHTML = '<div id="confirm-modal-app-root"></div>';
+  const mount = document.getElementById('confirm-modal-app-root')!;
+  const root = createRoot(mount);
+  flushSync(() => root.render(React.createElement(ConfirmModalHarness)));
+
+  try {
+    const opener = document.getElementById('confirm-modal-opener')!;
+    opener.focus();
+    click(opener);
+    flushSync(() => pressKey('Escape'));
+    assert.equal(document.querySelector('[role="dialog"]'), null, 'Escape cancels an idle confirmation');
+    assert.equal(document.activeElement, opener, 'canceling restores focus to the confirmation trigger');
+  } finally {
+    flushSync(() => root.unmount());
+  }
+
+  document.body.innerHTML = '<div id="loading-confirm-modal-app-root"></div>';
+  const loadingRoot = createRoot(document.getElementById('loading-confirm-modal-app-root')!);
+  flushSync(() => loadingRoot.render(React.createElement(ConfirmModalHarness, { loading: true, initiallyOpen: true })));
+  try {
+    flushSync(() => pressKey('Escape'));
+    assert.ok(document.querySelector('[role="dialog"]'), 'Escape cannot close a confirmation while its action is processing');
+  } finally {
+    flushSync(() => loadingRoot.unmount());
   }
 });

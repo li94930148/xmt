@@ -231,6 +231,9 @@ export default function AddTopic() {
         
         <div className="flex flex-wrap items-center gap-2">
           <button
+            type="button"
+            aria-label="预览模式"
+            aria-pressed={showPreview}
             onClick={() => setShowPreview(!showPreview)}
             className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-lg transition-colors ${
               showPreview 
@@ -296,9 +299,14 @@ export default function AddTopic() {
             </div>
             <div className="p-6 space-y-6">
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>选题标题 *</label>
+                <label htmlFor="topic-title" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>
+                  选题标题 <span aria-hidden="true">*</span>
+                </label>
                 <input
+                  id="topic-title"
+                  name="title"
                   type="text"
+                  required
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   className={`w-full px-4 py-3 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing} text-lg`}
@@ -308,8 +316,10 @@ export default function AddTopic() {
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>发布平台</label>
+                  <label htmlFor="topic-platform" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>发布平台</label>
                   <input
+                    id="topic-platform"
+                    name="platform"
                     type="text"
                     value={formData.platform}
                     onChange={(e) => setFormData({ ...formData, platform: e.target.value })}
@@ -318,8 +328,10 @@ export default function AddTopic() {
                   />
                 </div>
                 <div>
-                  <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>截止日期</label>
+                  <label htmlFor="topic-deadline" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>截止日期</label>
                   <input
+                    id="topic-deadline"
+                    name="deadline"
                     type="date"
                     value={formData.deadline}
                     onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
@@ -327,8 +339,10 @@ export default function AddTopic() {
                   />
                 </div>
                 <div>
-                  <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>负责人</label>
+                  <label htmlFor="topic-assignee" className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>负责人</label>
                   <select
+                    id="topic-assignee"
+                    name="assignee_id"
                     value={formData.assignee_id}
                     onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
                     disabled={usersLoadState === 'loading'}
@@ -367,8 +381,10 @@ export default function AddTopic() {
             </div>
             <div className="p-6 space-y-6">
               <div>
-                <label className={`block ${styles.textSecondary} text-sm mb-2`}>项目背景</label>
+                <label htmlFor="topic-project-background" className={`block ${styles.textSecondary} text-sm mb-2`}>项目背景</label>
                 <textarea
+                  id="topic-project-background"
+                  name="projectBackground"
                   value={formData.projectBackground}
                   onChange={(e) => setFormData({ ...formData, projectBackground: e.target.value })}
                   rows={6}
@@ -378,8 +394,10 @@ export default function AddTopic() {
               </div>
 
               <div>
-                <label className={`block ${styles.textSecondary} text-sm mb-2`}>目标受众</label>
+                <label htmlFor="topic-target-audience" className={`block ${styles.textSecondary} text-sm mb-2`}>目标受众</label>
                 <textarea
+                  id="topic-target-audience"
+                  name="targetAudience"
                   value={formData.targetAudience}
                   onChange={(e) => setFormData({ ...formData, targetAudience: e.target.value })}
                   rows={3}
@@ -404,6 +422,7 @@ export default function AddTopic() {
               ) : (
                 <ContentEditor
                   writingGoalKey="topic:new"
+                  ariaLabel="选题大纲"
                   value={formData.outline}
                   onChange={(value) => setFormData({ ...formData, outline: value })}
                   placeholder="请填写大纲内容..."

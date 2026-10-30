@@ -29,8 +29,28 @@ export type DouyinHealth={score:number;level:'excellent'|'healthy'|'watch'|'risk
 export type DouyinDashboardData = {topic_suggestions?:CreatorTopicSuggestions;account:Record<string,unknown>;metrics:{fans_count:number|null;fans_observed_on?:string|null;works_count:number;play_count:number;interaction_count:number;interaction_rate:number;share_rate:number;viral_works_count:number};health:DouyinHealth;growth_7d:{fans:number|null;plays:number|null;interactions:number|null;collected_at?:string|null;observed_through_date?:string|null}|null;growth_30d:{fans:number|null;plays:number|null;interactions:number|null}|null;top_works:DouyinWork[];snapshot_count:number;snapshot_start_date:string|null;data_status:'ready'|'partial';data_source:string;official_snapshot_at?:string|null;last_success_at:string|null;missing_fields:string[];warnings:string[];access_level:'view'|'manage';metric_sources:Record<string,string>;formulas:Record<string,string>};
 export type DouyinWorkDetailData = {work:DouyinWork;snapshots:Array<{snapshot_time:string;play_count:number;like_count:number;comment_count:number;share_count:number;collect_count:number;completion_rate:number;interaction_rate:number}>;analysis:{viral_tag:string;content_category:string;content:Record<string,unknown>;ai:Record<string,unknown>}|null;performance:DouyinWorkPerformance;baselines:Record<string,number>;formulas:Record<string,string>;metric_sources:string[];review?:{score:number;level:DouyinWorkPerformance['level'];is_viral:boolean;viral_reasons:string[];snapshot_delta:Record<string,number>|null;snapshot_count:number;evidence_only:boolean}};
 export type DouyinTrendData = {period:'7d'|'30d'|'90d';snapshots:Array<{snapshot_date:string;fans_count:number|null;works_count:number;play_count:number;like_count:number;comment_count:number;share_count:number;interaction_count:number;tracked_interaction_rate:number}>;source:'douyin_daily_snapshots'|'creator_official_daily_metrics';metric_semantics:'cumulative_snapshot'|'daily_flow';data_status:'ready'|'partial';snapshot_start_date:string|null;missing_fields:string[];note:string};
-export const getDouyinDashboard=(accountUid?:string,signal?:AbortSignal)=>creatorJson<DouyinDashboardData>(`/douyin/dashboard${accountUid?`?account_id=${encodeURIComponent(accountUid)}`:''}`,{signal});
+export const getDouyinDashboard=(accountUid?:string,signal?:AbortSignal,cache:RequestCache='default')=>creatorJson<DouyinDashboardData>(`/douyin/dashboard${accountUid?`?account_id=${encodeURIComponent(accountUid)}`:''}`,{signal,cache});
 export const submitCreatorTopicSuggestionFeedback=(accountUid:string,suggestionId:string,evidenceId:string,outcome:CreatorTopicSuggestionOutcome)=>creatorJson<{feedback:CreatorTopicSuggestionFeedback}>(`/douyin/suggestions/${encodeURIComponent(suggestionId)}/feedback`,{method:'POST',body:JSON.stringify({account_id:accountUid,evidence_id:evidenceId,outcome})});
+export type CreatorTopicSuggestionFeedbackVerification=
+  | {status:'saved';feedback:CreatorTopicSuggestionFeedback}
+  | {status:'not_recorded'}
+  | {status:'changed'};
+export async function verifyCreatorTopicSuggestionFeedback(
+  accountUid:string,
+  suggestionId:string,
+  evidenceId:string,
+  outcome:CreatorTopicSuggestionOutcome,
+):Promise<CreatorTopicSuggestionFeedbackVerification>{
+  const dashboard=await getDouyinDashboard(accountUid,undefined,'no-store');
+  const suggestions=dashboard.topic_suggestions;
+  if(suggestions?.account_uid!==accountUid)return {status:'changed'};
+  const item=suggestions.items.find(value=>value.id===suggestionId&&value.evidence_id===evidenceId);
+  if(!item)return {status:'changed'};
+  const feedback=item.feedback??{my_outcome:null,adopted_count:0,not_adopted_count:0};
+  if(feedback.my_outcome===outcome)return {status:'saved',feedback};
+  if(feedback.my_outcome===null)return {status:'not_recorded'};
+  return {status:'changed'};
+}
 export const getDouyinWorks=(sort='latest',limit=20,cursor?:string)=>creatorJson<DouyinWorksPage>(`/douyin/works?sort=${encodeURIComponent(sort)}&limit=${Math.min(100,Math.max(1,limit))}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
 export async function getDouyinManagedCover(id:number,signal?:AbortSignal,accountUid?:string){const response=await fetch(`/api/creator-agent/douyin/works/${encodeURIComponent(id)}/cover${accountUid?`?account_id=${encodeURIComponent(accountUid)}`:''}`,{headers:authHeaders(),signal});if(!response.ok)throw new Error('托管封面不可用');return response.blob();}
 export const getDouyinWorkDetail=(id:string)=>creatorJson<DouyinWorkDetailData>(`/douyin/works/${encodeURIComponent(id)}`);

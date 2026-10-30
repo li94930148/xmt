@@ -97,6 +97,13 @@ const ContentEditorRuntime = forwardRef<ContentEditorRuntimeHandle, ContentEdito
       scheduleSave: (content, revision) => {
         if (saveStrategy === 'autosave') coordinator.scheduleSave(content, revision);
       },
+      getRevisions: () => coordinator.getRevisions(),
+      confirmPersistedContent: (content) => saveStrategy === 'autosave'
+        ? coordinator.confirmPersistedContent(content)
+        : false,
+      discardPendingSaves: () => saveStrategy === 'autosave'
+        ? coordinator.discardPendingSaves()
+        : false,
       manualSave: (content, revision) => dispatchManualSave(saveStrategy, manualSaveController, content, revision),
       flush: (options) => coordinator.flush(options),
       gracefulDispose: (options) => saveStrategy === 'autosave'
@@ -129,7 +136,7 @@ const ContentEditorRuntime = forwardRef<ContentEditorRuntimeHandle, ContentEdito
         onDisposed?.(handle);
         void handle.destroy();
       };
-    }, [handle, onDisposed, onReady]);
+    }, [coordinator, handle, onDisposed, onReady]);
 
     const context: ContentEditorRuntimeContext = {
       documentId: adapter.documentId,

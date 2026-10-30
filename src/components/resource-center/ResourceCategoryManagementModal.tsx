@@ -5,6 +5,7 @@ import { BaseModal, ConfirmModal } from '@/components/common';
 import ActionButton from '@/components/studio/ActionButton';
 import { useResourceCategoryMutationRecovery } from '@/hooks/useResourceCategoryMutationRecovery';
 import { useAuthStore } from '@/store';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 interface ResourceCategoryManagementModalProps {
   open: boolean;
@@ -94,7 +95,7 @@ export default function ResourceCategoryManagementModal({
       setRefreshError('');
       return true;
     } catch (cause) {
-      setRefreshError(cause instanceof Error ? cause.message : '读取分类失败');
+      setRefreshError(getUserFacingErrorMessage(cause, '分类暂时无法读取，请检查连接后重试。'));
       return false;
     }
   }, [libraryType, onCategoriesChange]);
@@ -179,6 +180,7 @@ export default function ResourceCategoryManagementModal({
       description="可创建分类、调整上级关系或删除空分类。含有资料或子分类的分类不能删除。"
       size="lg"
       closeOnOverlayClick={!busy && !blocksClose}
+      closeOnEscape={!busy && !blocksClose}
       showCloseButton={!busy && !blocksClose}
     >
       <div className="space-y-5">

@@ -115,6 +115,8 @@ let userListReads = 0;
 let writes = 0;
 let holdNextActivityLogRead = false;
 let releaseHeldActivityLogRead: (() => void) | null = null;
+const activityLogPagesToHold = new Set<number>();
+const heldActivityLogPageResponses = new Map<number, () => void>();
 const app = express();
 app.post('/__qa/hold-next-activity-log-read', (_req, res) => {
   holdNextActivityLogRead = true;
@@ -124,6 +126,18 @@ app.post('/__qa/release-held-activity-log-read', (_req, res) => {
   if (!releaseHeldActivityLogRead) return res.status(409).json({ message: '没有等待释放的活动日志读取' });
   const release = releaseHeldActivityLogRead;
   releaseHeldActivityLogRead = null;
+  release();
+  return res.json({ ok: true });
+});
+app.post('/__qa/hold-activity-log-page/:page', (req, res) => {
+  activityLogPagesToHold.add(Number(req.params.page));
+  return res.json({ ok: true });
+});
+app.post('/__qa/release-activity-log-page/:page', (req, res) => {
+  const page = Number(req.params.page);
+  const release = heldActivityLogPageResponses.get(page);
+  if (!release) return res.status(409).json({ message: `第 ${page} 页没有等待释放的活动日志读取` });
+  heldActivityLogPageResponses.delete(page);
   release();
   return res.json({ ok: true });
 });
@@ -138,6 +152,11 @@ app.get('/__qa/loaded', (req, res) => {
   failNextUserListRead = false;
   res.type('html').send(fixturePage(req.query.theme === 'dark' ? 'dark' : 'light'));
 });
+app.get('/__qa/empty', (_req, res) => {
+  failNextActivityLogRead = false;
+  failNextUserListRead = false;
+  res.type('html').send(fixturePage('light', '/activity?activity_empty=1'));
+});
 app.get('/__qa/action-matrix', (req, res) => {
   failNextActivityLogRead = false;
   failNextUserListRead = false;
@@ -151,12 +170,19 @@ app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => 
 app.get('/api/users/activity-logs', (req, res) => {
   activityLogReads += 1;
   const page = Number(req.query.page || 1);
-  const response = req.get('referer')?.includes('activity_matrix=1')
+  const referer = req.get('referer') || '';
+  const response = referer.includes('activity_empty=1')
+    ? { data: [], total: 0, page: 1, limit: Number(req.query.limit || 20) }
+    : referer.includes('activity_matrix=1')
     ? { data: logRecordsForActionMatrix(), total: actionMatrix.length, page: 1, limit: Number(req.query.limit || 20) }
     : { data: [logRecordForPage(page)], total: 41, page, limit: Number(req.query.limit || 20) };
   if (holdNextActivityLogRead) {
     holdNextActivityLogRead = false;
     releaseHeldActivityLogRead = () => res.json(response);
+    return;
+  }
+  if (activityLogPagesToHold.delete(page)) {
+    heldActivityLogPageResponses.set(page, () => res.json(response));
     return;
   }
   if (failNextActivityLogRead) {
@@ -231,6 +257,7 @@ try {
   await page.getByRole('alert').getByText(/活动日志暂时无法读取/).waitFor();
   await page.getByRole('status').getByText(/成员筛选暂不可用/).waitFor();
   assert.equal(await page.getByText('暂无活动记录', { exact: true }).count(), 0, 'an initial log read failure is not shown as an empty log');
+  assert.equal(await page.getByText(/已加载第 \d+\/\d+ 页，共 \d+ 条记录。/).count(), 0, 'an initial read failure does not announce a successful page');
   assert.equal(activityLogReads, 1, 'the initial activity-log failure makes one GET');
 
   await page.setViewportSize({ width: 320, height: 844 });
@@ -273,11 +300,13 @@ try {
   await page.getByRole('button', { name: '重新加载日志', exact: true }).click();
   const activityLogLoadingStatus = page.getByRole('status').getByText('正在加载活动日志…', { exact: true });
   await activityLogLoadingStatus.waitFor();
+  assert.equal(await page.getByText(/已加载第 \d+\/\d+ 页，共 \d+ 条记录。/).count(), 0, 'the pending retry keeps the loading announcement without announcing success early');
   assert.equal(activityLogReads, 2, 'the pending retry performs one activity-log GET');
   await page.request.post(`${base}/__qa/release-held-activity-log-read`);
   await recoveredActivityLogRead;
   await page.getByText(logRecord.target, { exact: true }).waitFor();
   await activityLogLoadingStatus.waitFor({ state: 'hidden' });
+  await page.getByRole('status').getByText('已加载第 1/3 页，共 41 条记录。', { exact: true }).waitFor();
   assert.equal(activityLogReads, 2, 'the log recovery control performs one additional GET');
   assert.equal(writes, 0, 'read recovery does not issue any write');
   const createBadgeColors = await readActivityBadgeColors(page);
@@ -327,10 +356,12 @@ try {
   await page.getByRole('alert').getByText(/仍显示最近一次成功读取的记录/).waitFor();
   await page.getByText(logRecord.target, { exact: true }).waitFor();
   assert.equal(await page.getByText('暂无活动记录', { exact: true }).count(), 0, 'a refresh failure preserves previously loaded log records');
+  assert.equal(await page.getByText(/已加载第 \d+\/\d+ 页，共 \d+ 条记录。/).count(), 0, 'a failed refresh clears the prior success announcement and does not announce the failed read');
   assert.equal(activityLogReads, 3, 'filter refresh failure performs one GET');
+  const filteredRetryReads = activityLogReads;
   await page.getByRole('button', { name: '重新加载日志', exact: true }).click();
-  await page.getByText(logRecord.target, { exact: true }).waitFor();
-  assert.equal(activityLogReads, 4, 'retrying the filtered log view performs one additional GET');
+  await page.getByRole('status').getByText('已加载第 1/3 页，共 41 条记录。', { exact: true }).waitFor();
+  assert.equal(activityLogReads, filteredRetryReads + 1, 'retrying the filtered log view performs exactly one additional GET');
   assert.equal(userListReads, 2, 'activity-log retries do not repeat the member-list read');
   assert.equal(writes, 0, 'all recovery actions remain read-only');
   assert.equal(expectedHttpErrors.length, 3, 'the browser records only the three intentionally injected read failures');
@@ -355,23 +386,87 @@ try {
 
   const currentPageButtons = page.locator('button[aria-current="page"]');
   assert.equal(await currentPageButtons.count(), 1, 'exactly one page button exposes the current-page state');
-  assert.equal(await page.getByRole('button', { name: '1', exact: true }).getAttribute('aria-current'), 'page', 'the initial page is identified as current');
+  assert.equal(await page.getByRole('button', { name: '第 1 页', exact: true }).getAttribute('aria-current'), 'page', 'the initial page is named and identified as current');
+  await page.request.post(`${base}/__qa/hold-next-activity-log-read`);
+  const readsBeforePageTwo = activityLogReads;
+  const pageTwoRead = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users/activity-logs') && response.status() === 200);
   await page.getByRole('button', { name: '下一页', exact: true }).focus();
   await page.keyboard.press('Enter');
+  await activityLogLoadingStatus.waitFor();
+  assert.equal(await page.getByText(/已加载第 \d+\/\d+ 页，共 \d+ 条记录。/).count(), 0, 'page navigation keeps announcing loading until its read succeeds');
+  assert.equal(activityLogReads, readsBeforePageTwo + 1, 'moving to page two makes exactly one GET');
+  await page.request.post(`${base}/__qa/release-held-activity-log-read`);
+  await pageTwoRead;
   await page.getByText(logRecordForPage(2).target, { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '2', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of next page updates the current-page state');
+  await page.getByRole('status').getByText('已加载第 2/3 页，共 41 条记录。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '第 2 页', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of next page updates the named current-page state');
   assert.equal(await currentPageButtons.count(), 1, 'page two remains the only current page');
 
-  await page.getByRole('button', { name: '3', exact: true }).focus();
+  await page.request.post(`${base}/__qa/fail-next-activity-log-read`);
+  const readsBeforePageThreeFailure = activityLogReads;
+  await page.getByRole('button', { name: '第 3 页', exact: true }).focus();
   await page.keyboard.press('Enter');
+  await page.getByRole('alert').getByText(/仍显示最近一次成功读取的记录/).waitFor();
+  assert.equal(await page.getByText(/已加载第 \d+\/\d+ 页，共 \d+ 条记录。/).count(), 0, 'a failed page-three read does not announce the requested page as loaded');
+  assert.equal(activityLogReads, readsBeforePageThreeFailure + 1, 'the failed page-three attempt performs one GET');
+  const pageThreeRetryReads = activityLogReads;
+  await page.getByRole('button', { name: '重新加载日志', exact: true }).click();
   await page.getByText(logRecordForPage(3).target, { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '3', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of a numbered page updates the current-page state');
+  await page.getByRole('status').getByText('已加载第 3/3 页，共 41 条记录。', { exact: true }).waitFor();
+  assert.equal(activityLogReads, pageThreeRetryReads + 1, 'retrying page three performs exactly one GET');
+  assert.equal(await page.getByRole('button', { name: '第 3 页', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of a numbered page updates the named current-page state');
   assert.equal(await currentPageButtons.count(), 1, 'page three remains the only current page');
 
+  await page.request.post(`${base}/__qa/hold-activity-log-page/2`);
+  const readsBeforeOutOfOrderPages = activityLogReads;
+  const delayedPageTwoRequest = page.waitForRequest((request) => request.method() === 'GET'
+    && request.url().includes('/api/users/activity-logs')
+    && new URL(request.url()).searchParams.get('page') === '2');
+  const delayedPageTwoResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users/activity-logs')
+    && new URL(response.url()).searchParams.get('page') === '2'
+    && response.status() === 200);
+  await page.getByRole('button', { name: '上一页', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await delayedPageTwoRequest;
+  await activityLogLoadingStatus.waitFor();
+
+  await page.request.post(`${base}/__qa/hold-activity-log-page/3`);
+  const currentPageThreeRequest = page.waitForRequest((request) => request.method() === 'GET'
+    && request.url().includes('/api/users/activity-logs')
+    && new URL(request.url()).searchParams.get('page') === '3');
+  const currentPageThreeResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users/activity-logs')
+    && new URL(response.url()).searchParams.get('page') === '3'
+    && response.status() === 200);
+  await page.getByRole('button', { name: '第 3 页', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await currentPageThreeRequest;
+  await activityLogLoadingStatus.waitFor();
+  assert.equal(await page.getByRole('button', { name: '第 3 页', exact: true }).getAttribute('aria-current'), 'page', 'the newest requested page is named and current before its response arrives');
+
+  await page.request.post(`${base}/__qa/release-activity-log-page/2`);
+  await delayedPageTwoResponse;
+  await activityLogLoadingStatus.waitFor();
+  assert.equal(await page.getByText(logRecordForPage(2).target, { exact: true }).count(), 0, 'a late response for the previous page cannot replace the active loading state');
+  assert.equal(await page.getByRole('status').getByText('已加载第 2/3 页，共 41 条记录。', { exact: true }).count(), 0, 'a stale response cannot announce the wrong page as loaded');
+
+  await page.request.post(`${base}/__qa/release-activity-log-page/3`);
+  await currentPageThreeResponse;
+  await page.getByText(logRecordForPage(3).target, { exact: true }).waitFor();
+  await page.getByRole('status').getByText('已加载第 3/3 页，共 41 条记录。', { exact: true }).waitFor();
+  assert.equal(await page.getByText(logRecordForPage(2).target, { exact: true }).count(), 0, 'the latest page remains visible after all out-of-order responses settle');
+  assert.equal(activityLogReads, readsBeforeOutOfOrderPages + 2, 'rapid page changes each issue one read and do not duplicate requests');
+  assert.equal(await currentPageButtons.count(), 1, 'only the latest page remains current after the race');
+
+  const readsBeforePageTwoReturn = activityLogReads;
   await page.getByRole('button', { name: '上一页', exact: true }).focus();
   await page.keyboard.press('Enter');
   await page.getByText(logRecordForPage(2).target, { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '2', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of previous page restores its record and current-page state');
+  await page.getByRole('status').getByText('已加载第 2/3 页，共 41 条记录。', { exact: true }).waitFor();
+  assert.equal(activityLogReads, readsBeforePageTwoReturn + 1, 'returning to page two performs exactly one GET');
+  assert.equal(await page.getByRole('button', { name: '第 2 页', exact: true }).getAttribute('aria-current'), 'page', 'keyboard activation of previous page restores its record and named current-page state');
   assert.equal(await currentPageButtons.count(), 1, 'only one page remains current after moving backward');
   assert.equal(writes, 0, 'keyboard pagination remains read-only');
 
@@ -455,7 +550,7 @@ try {
   assert.equal(await desktopNextPage.evaluate((element) => document.activeElement === element), true, 'the desktop-zoom pagination control receives keyboard focus');
   await page.keyboard.press('Enter');
   await page.getByText(logRecordForPage(3).target, { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '3', exact: true }).getAttribute('aria-current'), 'page', 'keyboard Enter advances the activity-log page at the 819×480 CSS viewport');
+  assert.equal(await page.getByRole('button', { name: '第 3 页', exact: true }).getAttribute('aria-current'), 'page', 'keyboard Enter advances to the named current page at the 819×480 CSS viewport');
   assert.equal(writes, 0, 'the desktop-zoom layout and pagination checks issue no business writes');
 
   for (const width of [320, 390]) {
@@ -529,7 +624,17 @@ try {
     await darkPage.close();
   }
 
-  console.log('Activity-log browser test passed: log and member reads recover independently, initial errors do not masquerade as empty data, stale records remain visible, and retries are read-only.');
+  const emptyPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  await emptyPage.goto(`${base}/__qa/empty`);
+  await emptyPage.getByRole('heading', { name: '活动日志', exact: true }).waitFor();
+  const emptyLogStatus = emptyPage.getByRole('status').filter({ hasText: '暂无活动记录' });
+  await emptyLogStatus.waitFor();
+  assert.equal(await emptyLogStatus.getAttribute('aria-live'), 'polite', 'a successful empty activity-log result is announced politely');
+  assert.equal(await emptyLogStatus.getAttribute('aria-atomic'), 'true', 'the empty activity-log announcement is read as one complete status');
+  assert.equal(await emptyPage.getByRole('alert').count(), 0, 'a successful empty result is not presented as an error');
+  await emptyPage.close();
+
+  console.log('Activity-log browser test passed: log and member reads recover independently, initial errors do not masquerade as empty data, successful empty results are announced, stale records remain visible, and retries are read-only.');
   }
 } finally {
   await browser?.close();

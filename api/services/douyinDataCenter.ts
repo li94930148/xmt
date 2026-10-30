@@ -735,9 +735,31 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
     missing_fields: ['period_daily_metrics'],
     note: '官方逐日数据窗口不完整或核心指标缺失、无效；本周期不提供汇总。',
   };
-  const historyRows = period === '90d' ? await queryAll<Record<string, unknown>>(`SELECT metric_date,metric_code,value_number FROM creator_official_daily_metrics
-    WHERE account_id=? AND source_period='30d' ORDER BY metric_date ASC,id ASC`, [creatorAccountId]) : [];
-  const history90 = period === '90d' && historyRows.length > 0 ? validateOfficialTrend90(historyRows) : null;
+  const trendNow = new Date();
+  const trendDates = period === '90d' ? expectedBeijingTrendDates('90d', trendNow) : [];
+  const hasOfficialHistory = period === '90d'
+    ? await queryOne<{ id: number }>(`SELECT id FROM creator_official_daily_metric_observations
+        WHERE account_id=? AND source_period='30d' LIMIT 1`, [creatorAccountId])
+    : null;
+  const historyRows = period === '90d' && hasOfficialHistory ? await queryAll<Record<string, unknown>>(`
+    SELECT observation.metric_date,observation.metric_code,observation.value_number
+    FROM creator_official_daily_metric_observations observation
+    WHERE observation.account_id=? AND observation.source_period='30d'
+      AND observation.metric_date>=? AND observation.metric_date<?
+      AND julianday(observation.collected_at) IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM creator_official_daily_metric_observations newer
+        WHERE newer.account_id=observation.account_id
+          AND newer.metric_date=observation.metric_date
+          AND newer.source_period=observation.source_period
+          AND newer.metric_code=observation.metric_code
+          AND julianday(newer.collected_at) IS NOT NULL
+          AND (julianday(newer.collected_at)>julianday(observation.collected_at)
+            OR (julianday(newer.collected_at)=julianday(observation.collected_at) AND newer.id>observation.id))
+      )
+    ORDER BY observation.metric_date ASC,observation.metric_code ASC`,
+  [creatorAccountId,trendDates[0],shiftCalendarDate(trendDates[trendDates.length - 1],1)]) : [];
+  const history90 = period === '90d' && hasOfficialHistory ? validateOfficialTrend90(historyRows, trendNow) : null;
   if (history90?.valid === false) return {
     period,
     snapshots: [],
@@ -771,7 +793,7 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
       snapshot_start_date: officialPoints[0]?.metric_date ?? null,
       missing_fields: officialPoints.some(point => !fans.has(point.metric_date)) ? ['fans_count'] : [],
       note: period === '90d'
-        ? '近 90 天按北京时间自然日计算并包含今天；逐日事实来自历次近 30 天官方导出按日期去重。本次校验不代表每个历史批次完整。'
+        ? '近 90 天按北京时间自然日计算并包含今天；逐日指标取已接受官方近 30 天批次中采集时间最新的观测。迁移前已被覆盖的旧批次值无法恢复。'
         : '播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和；粉丝仍使用存在真实值的账号快照。',
     };
   }

@@ -72,6 +72,7 @@ export default function FormModal({
       open={open}
       onClose={handleCancel}
       closeOnOverlayClick={!loading && !locked}
+      closeOnEscape={!loading && !locked}
       showCloseButton={!loading && !locked}
       title={title}
       description={description}

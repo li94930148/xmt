@@ -40,6 +40,7 @@ export default function SimilarTopicReview({
         ? '以下结果来自当前账号可查看的选题，仅作重复创作提醒，不代表内容重复。'
         : '为避免重复，请确认是否仍要继续。检查失败不会阻止你后续提报。'}
       size="md"
+      closeOnEscape
       footer={(
         <div className="flex flex-wrap justify-end gap-2">
           <ActionButton type="button" variant="ghost" onClick={onCancel}>返回修改</ActionButton>

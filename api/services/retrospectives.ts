@@ -893,6 +893,44 @@ export async function getHomeRetrospectiveSummary(user: User | undefined) {
   };
 }
 
+export async function getHomeMyRetroActionSummary(user: User | undefined) {
+  assertAuthenticated(user);
+  const [count, rows] = await Promise.all([
+    queryOne<{ total: number }>(
+      `SELECT COUNT(*) AS total
+       FROM retro_actions
+       WHERE owner_id = ? AND status IN ('todo', 'doing')`,
+      [user.id],
+    ),
+    queryAll<Row>(
+      `SELECT a.id, a.retro_id, a.title, a.due_date, a.status, r.title AS retro_title
+       FROM retro_actions a
+       JOIN retrospectives r ON r.id = a.retro_id
+       WHERE a.owner_id = ? AND a.status IN ('todo', 'doing')
+       ORDER BY CASE a.status WHEN 'todo' THEN 0 ELSE 1 END,
+                CASE WHEN a.due_date IS NULL THEN 1 ELSE 0 END,
+                a.due_date ASC,
+                datetime(a.updated_at) DESC,
+                a.id DESC
+       LIMIT 3`,
+      [user.id],
+    ),
+  ]);
+
+  return {
+    available: true,
+    total: Number(count?.total || 0),
+    tasks: rows.map((row) => ({
+      id: Number(row.id),
+      retro_id: Number(row.retro_id),
+      title: String(row.title || ''),
+      retro_title: String(row.retro_title || ''),
+      due_date: row.due_date === null || row.due_date === undefined ? null : String(row.due_date),
+      status: String(row.status || 'todo'),
+    })),
+  };
+}
+
 export async function listMyRetroActions(user: User | undefined, statusValue?: string) {
   assertAuthenticated(user);
   const params: unknown[] = [user.id];
@@ -1381,6 +1419,16 @@ export async function generateRetrospectiveSnapshot(user: User | undefined, retr
   const capturedAt = beijingNow();
   const snapshots = await buildMetricSnapshots(row);
   await runInTransaction(async (tx) => {
+    const current = await tx.queryOne<{ status: string; version: number }>(
+      'SELECT status,version FROM retrospectives WHERE id = ?',
+      [retroId],
+    );
+    if (!current
+      || String(current.status) !== 'draft'
+      || Number(current.version || 1) !== Number(row.version || 1)) {
+      throw new RetrospectiveServiceError(409, 'RETRO_CHANGED', '复盘状态已变化，请刷新后重试');
+    }
+
     await tx.execute(`DELETE FROM retro_metric_snapshots WHERE retro_id = ?`, [retroId]);
     for (const metric of snapshots) {
       await tx.execute(

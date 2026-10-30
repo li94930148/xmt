@@ -92,6 +92,10 @@ const app = express();
 app.use(express.json());
 app.get('/__qa', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','global-search-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics');</script>`));
 app.get('/__qa/searches', (_req, res) => res.json(requestedSearches));
+app.post('/__qa/searches/reset', (_req, res) => {
+  requestedSearches.splice(0, requestedSearches.length);
+  res.json({ success: true });
+});
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
@@ -99,6 +103,10 @@ app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => 
 app.get('/api/topics', (req, res) => {
   if (typeof req.query.search === 'string') {
     requestedSearches.push('topics');
+    if (req.query.search === 'slow') {
+      setTimeout(() => res.json({ success: true, data: [], pagination: { page: 1, limit: 8, total: 0 } }), 3500);
+      return;
+    }
     return res.json({ success: true, data: [{ id: 901, title: '选题样本 needle' }], pagination: { page: 1, limit: 8, total: 1 } });
   }
   return res.json({ data: [], total: 0, page: 1, limit: 20 });
@@ -106,16 +114,19 @@ app.get('/api/topics', (req, res) => {
 app.get('/api/workflow/production', (req, res) => {
   if (typeof req.query.search === 'string') {
     requestedSearches.push('production');
+    if (req.query.search === 'slow') return res.json({ data: [], total: 0, page: 1, limit: 8 });
     return res.json({ data: [{ id: 902, version: 'v3.0', status: 'draft', topic_title: '稿件 needle' }], total: 1, page: 1, limit: 8 });
   }
   return res.json([]);
 });
-app.get('/api/resource-center/search', (_req, res) => {
+app.get('/api/resource-center/search', (req, res) => {
   requestedSearches.push('resources');
+  if (req.query.keyword === 'slow') return res.json({ data: [], total: 0 });
   return res.json({ data: [{ resource_id: 903, title: '资料 needle', library_type: 'knowledge', category: { name: '创作方法' } }], total: 1 });
 });
-app.get('/api/daily-reports/search', (_req, res) => {
+app.get('/api/daily-reports/search', (req, res) => {
   requestedSearches.push('dailyReports');
+  if (req.query.keyword === 'slow') return res.json({ success: true, data: { reports: [] } });
   return res.json({ success: true, data: { reports: [{ id: 904, reportDate: '2026-09-29', userId: 91, userName: '日报成员', summary: '日报 needle 内容' }] } });
 });
 app.get('/api/daily-reports/me', (_req, res) => res.json({ success: true, data: { reportDate: '2026-09-29', report: null, canCreate: true } }));
@@ -123,6 +134,7 @@ app.get('/api/daily-reports/archive', (req, res) => res.json({ success: true, da
 app.get('/api/retrospectives', (req, res) => {
   if (typeof req.query.keyword === 'string') {
     requestedSearches.push('retrospectives');
+    if (req.query.keyword === 'slow') return res.json({ success: true, data: { retrospectives: [] } });
     return res.json({ success: true, data: { retrospectives: [{ id: 905, title: '复盘 needle', status: 'published' }] } });
   }
   return res.json({ success: true, data: { retrospectives: [] } });
@@ -130,6 +142,7 @@ app.get('/api/retrospectives', (req, res) => {
 app.get('/api/users', (req, res) => {
   if (typeof req.query.search === 'string') {
     requestedSearches.push('users');
+    if (req.query.search === 'slow') return res.json({ data: [], total: 0, page: 1, limit: 8 });
     return res.json({ data: [{ id: 906, name: 'needle 用户', role: 'member' }], total: 1, page: 1, limit: 8 });
   }
   return res.json({ data: [user], total: 1, page: 1, limit: 20 });
@@ -159,44 +172,91 @@ try {
   await page.goto(`${base}/__qa`);
   await page.getByRole('heading', { name: '选题管理' }).waitFor();
   await page.keyboard.press('Meta+k');
-  const search = page.getByRole('textbox', { name: '全局搜索' });
+  const search = page.getByRole('combobox', { name: '全局搜索' });
   await search.waitFor();
   assert.equal(await search.evaluate((element) => document.activeElement === element), true, 'opening the palette moves focus to search');
+  assert.equal(await search.getAttribute('aria-expanded'), 'true', 'the combobox reports the visible page commands');
+  assert.equal(await search.getAttribute('aria-controls'), 'command-palette-results', 'the combobox controls the rendered result list');
+  const initialActiveDescendant = await search.getAttribute('aria-activedescendant');
+  assert.ok(initialActiveDescendant, 'the initially highlighted page command is exposed as the active descendant');
+  assert.equal(await page.evaluate((id) => document.getElementById(id)?.getAttribute('aria-selected') ?? null, initialActiveDescendant), 'true', 'the active page command exposes its selected state');
   await search.fill('n');
   await page.waitForTimeout(350);
+  assert.equal(await search.getAttribute('aria-expanded'), 'false', 'the combobox reports no available options for an unmatched one-character query');
+  assert.equal(await search.getAttribute('aria-activedescendant'), null, 'an empty result list has no active descendant');
+  const resultList = page.locator('#command-palette-results');
+  assert.equal(await resultList.isVisible(), false, 'the controlled listbox is hidden while the combobox is collapsed');
+  assert.equal(await resultList.locator('[role="option"], [role="status"]').count(), 0, 'empty state content is not exposed as a listbox option or child status');
+  assert.equal(await page.locator('#command-palette-empty-state').getAttribute('role'), null, 'the initial typing instruction is not announced as a changing status');
   assert.deepEqual(await page.request.get(`${base}/__qa/searches`).then((response) => response.json()), [], 'a single character must not launch full text requests');
+
+  let releaseSlowSearch: (() => void) | undefined;
+  const slowSearchGate = new Promise<void>((resolve) => { releaseSlowSearch = resolve; });
+  await page.route('**/api/topics?search=slow', async (route) => {
+    await slowSearchGate;
+    await route.continue();
+  });
+  const slowSearchRequest = page.waitForRequest((request) => request.url().includes('/api/topics?search=slow'));
+  await search.fill('slow');
+  await slowSearchRequest;
+  assert.equal(await search.getAttribute('aria-expanded'), 'false', 'the result popup stays collapsed while a search has no options');
+  assert.equal(await search.getAttribute('aria-busy'), 'true', 'the combobox exposes the in-flight search state');
+  assert.equal(await resultList.isVisible(), false, 'the listbox remains hidden while only a loading message is available');
+  assert.equal(await page.locator('#command-palette-empty-state').getAttribute('role'), 'status', 'the loading message is announced outside the listbox');
+  assert.equal(await page.locator('#command-palette-empty-state').textContent(), '正在检索内容…');
+  releaseSlowSearch?.();
+  await page.locator('#command-palette-empty-state').getByText('没有找到匹配结果').waitFor();
+  assert.equal(await search.getAttribute('aria-busy'), null, 'the busy state clears when search finishes');
+  assert.equal(await page.locator('#command-palette-empty-state').getAttribute('role'), 'status', 'the empty search result remains a status outside the hidden listbox');
+  await page.unroute('**/api/topics?search=slow');
+  await page.request.post(`${base}/__qa/searches/reset`);
+
   await search.fill('needle');
-  await page.getByRole('button', { name: /选题样本 needle/ }).waitFor();
+  await page.getByRole('option', { name: /选题样本 needle/ }).waitFor();
   for (const label of ['稿件 needle', '资料 needle', '日报成员 · 2026-09-29', '复盘 needle', 'needle 用户']) {
-    await page.getByRole('button', { name: new RegExp(label) }).waitFor();
+    await page.getByRole('option', { name: new RegExp(label) }).waitFor();
   }
   assert.deepEqual((await page.request.get(`${base}/__qa/searches`).then((response) => response.json())).sort(), ['dailyReports', 'production', 'resources', 'retrospectives', 'topics', 'users'].sort());
+  const results = page.getByRole('listbox', { name: '全局搜索结果' });
   const firstResult = page.locator('[data-index="0"]');
   assert.ok((await firstResult.getAttribute('class'))?.includes('bg-studio-surface-elevated/75'), 'the first result is selected initially');
+  assert.equal(await search.getAttribute('aria-expanded'), 'true', 'the combobox reports an expanded result list');
+  assert.equal(await search.getAttribute('aria-activedescendant'), await firstResult.getAttribute('id'), 'the active descendant matches the initially selected option');
+  assert.equal(await firstResult.getAttribute('aria-selected'), 'true', 'the active option exposes its selected state');
+  assert.equal(await results.locator('[role="option"][aria-selected="true"]').count(), 1, 'exactly one result is selected');
   await search.press('ArrowUp');
   assert.ok((await firstResult.getAttribute('class'))?.includes('bg-studio-surface-elevated/75'), 'ArrowUp stops at the first result');
+  assert.equal(await search.getAttribute('aria-activedescendant'), await firstResult.getAttribute('id'), 'ArrowUp keeps the active descendant at the first option');
   for (let index = 0; index < 5; index += 1) await search.press('ArrowDown');
   const lastResult = page.locator('[data-index="5"]');
   assert.ok((await lastResult.getAttribute('class'))?.includes('bg-studio-surface-elevated/75'), 'ArrowDown reaches the last result');
+  assert.equal(await search.getAttribute('aria-activedescendant'), await lastResult.getAttribute('id'), 'ArrowDown moves the active descendant to the last option');
+  assert.equal(await lastResult.getAttribute('aria-selected'), 'true', 'the last option exposes its selected state');
+  assert.equal(await firstResult.getAttribute('aria-selected'), 'false', 'the previous option is no longer selected');
+  assert.equal(await results.locator('[role="option"][aria-selected="true"]').count(), 1, 'moving selection still leaves exactly one selected option');
   await search.press('ArrowDown');
   assert.ok((await lastResult.getAttribute('class'))?.includes('bg-studio-surface-elevated/75'), 'ArrowDown stops at the last result');
+  assert.equal(await search.getAttribute('aria-activedescendant'), await lastResult.getAttribute('id'), 'ArrowDown at the end retains the last active descendant');
   await search.press('ArrowUp');
   await search.press('ArrowUp');
   const dailyResult = page.locator('[data-index="3"]');
   assert.ok((await dailyResult.getAttribute('class'))?.includes('bg-studio-surface-elevated/75'), 'ArrowUp returns the selection to the fourth result');
+  assert.equal(await search.getAttribute('aria-activedescendant'), await dailyResult.getAttribute('id'), 'the active descendant identifies the result selected for Enter');
+  assert.equal(await dailyResult.getAttribute('aria-selected'), 'true', 'the result selected for Enter exposes its selected state');
+  assert.equal(await search.evaluate((element) => document.activeElement === element), true, 'arrow navigation keeps DOM focus in the combobox');
   await search.press('Enter');
   await page.getByRole('heading', { name: '日报' }).waitFor();
   assert.match(page.url(), /daily-report\/summary\?date=2026-09-29&userId=91/);
   await page.getByText('日报成员', { exact: false }).waitFor();
   const commandLauncher = page.getByRole('button', { name: /搜索稿件、资料、日报、复盘/ });
   await commandLauncher.click();
-  const restoredSearch = page.getByRole('textbox', { name: '全局搜索' });
+  const restoredSearch = page.getByRole('combobox', { name: '全局搜索' });
   await restoredSearch.waitFor();
   await restoredSearch.press('Escape');
   await restoredSearch.waitFor({ state: 'detached' });
   assert.equal(await commandLauncher.evaluate((element) => document.activeElement === element), true, 'closing the palette restores focus to its launcher');
   await page.keyboard.press('Control+k');
-  const controlShortcutSearch = page.getByRole('textbox', { name: '全局搜索' });
+  const controlShortcutSearch = page.getByRole('combobox', { name: '全局搜索' });
   await controlShortcutSearch.waitFor();
   await controlShortcutSearch.press('Escape');
   await controlShortcutSearch.waitFor({ state: 'detached' });
@@ -214,12 +274,12 @@ try {
     await narrowPage.goto(`${base}/__qa`);
     await narrowPage.getByRole('heading', { name: '选题管理' }).waitFor();
     await narrowPage.keyboard.press('Meta+k');
-    const narrowSearch = narrowPage.getByRole('textbox', { name: '全局搜索' });
+    const narrowSearch = narrowPage.getByRole('combobox', { name: '全局搜索' });
     await narrowSearch.waitFor();
     await narrowPage.setViewportSize({ width: 320, height: 812 });
     await assertPaletteResponsiveAndReadable(narrowPage, 320, theme);
     await narrowSearch.fill('needle');
-    await narrowPage.getByRole('button', { name: /选题样本 needle/ }).waitFor();
+    await narrowPage.getByRole('option', { name: /选题样本 needle/ }).waitFor();
     await assertPaletteResponsiveAndReadable(narrowPage, 320, theme);
     assert.deepEqual(narrowErrors, [], `command palette should render without browser errors in ${theme} theme`);
     await narrowContext.close();

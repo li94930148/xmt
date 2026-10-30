@@ -16,8 +16,12 @@ const currentSnapshot = {
   publishing: { publishing_id: 402, platform: 'weixin', status: 'published', publish_time: '2026-09-29 10:00:00' },
   analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 },
   published_records: [
-    { publishing_id: 402, platform: 'weixin', status: 'published', publish_time: '2026-09-29 10:00:00', url: 'https://example.test/weixin/402', analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 } },
-    { publishing_id: 401, platform: 'douyin', status: 'failed', publish_time: '2026-09-28 10:00:00', url: 'javascript:alert(3)', analytics: null },
+    { publishing_id: 402, platform: 'weixin', status: 'published', publish_time: '2026-09-29 10:00:00', url: 'https://example.test/weixin/402', analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 }, script_source: { topic_id: 71, production_id: 801, version: 'v1.0', state: 'derived' } },
+    { publishing_id: 401, platform: 'douyin', status: 'failed', publish_time: '2026-09-28 10:00:00', url: 'javascript:alert(3)', analytics: null, script_source: { topic_id: 71, production_id: 802, version: 'v2.0', state: 'inherited' } },
+  ],
+  script_source_snapshots: [
+    { topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>微信发布来源快照 v1.0</p>' },
+    { topic_id: 71, production_id: 802, version: 'v2.0', content: '<p>抖音发布来源快照 v2.0</p>' },
   ],
   archived_at: '2026-09-29 10:30:00',
 };
@@ -145,6 +149,11 @@ try {
   assert.match(failedStatusClass || '', /text-studio-coral-contrast/);
   assert.doesNotMatch(failedStatusClass || '', /text-studio-success-contrast/);
   assert.equal(await page.getByText('1,200', { exact: true }).count(), 1, 'the first platform keeps its own metric');
+  const weixinSourceCard = page.getByTestId('legacy-published-record').nth(0);
+  const douyinSourceCard = page.getByTestId('legacy-published-record').nth(1);
+  await weixinSourceCard.getByText('微信发布来源快照 v1.0', { exact: true }).waitFor();
+  await douyinSourceCard.getByText('抖音发布来源快照 v2.0', { exact: true }).waitFor();
+  assert.equal(await page.locator('a[href^="/production/"]').count(), 0, 'source manuscript links remain hidden without production:view');
   assert.equal(await page.getByText('危险锚点', { exact: true }).count(), 1, 'sanitization preserves harmless text');
   assert.equal(await page.locator('[onerror]').count(), 0, 'historical HTML event attributes are removed');
   assert.equal(await page.locator('a[href^="javascript:"]').count(), 0, 'unsafe historical HTML links are removed');
@@ -160,18 +169,25 @@ try {
       const bounds = (element: Element | null) => {
         if (!element) return null;
         const rect = element.getBoundingClientRect();
-        return { left: rect.left, right: rect.right, width: rect.width };
+        return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
       };
       return {
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: document.documentElement.clientWidth,
         returnLink: bounds(document.querySelector('[aria-label="返回所属资料库"]')),
+        breadcrumbs: [...document.querySelectorAll('nav[aria-label="面包屑"] a')].map(bounds),
         archive: bounds(document.querySelector('[data-testid="legacy-published-archive-snapshot"]')),
         records: [...document.querySelectorAll('[data-testid="legacy-published-record"]')].map(bounds),
         links: [...document.querySelectorAll('[data-testid="legacy-published-record"] a')].map(bounds),
       };
     });
     assert.ok(layout.documentWidth <= layout.viewportWidth + 1, `the structured ${theme} archive fits a ${width}px viewport`);
+    assert.ok(layout.returnLink && layout.returnLink.width >= 40 && layout.returnLink.height >= 40,
+      `the resource-library return link provides a 40px touch target at ${width}px: ${JSON.stringify(layout.returnLink)}`);
+    for (const [index, breadcrumb] of layout.breadcrumbs.entries()) {
+      assert.ok(breadcrumb && breadcrumb.width >= 40 && breadcrumb.height >= 40,
+        `breadcrumb link ${index + 1} provides a 40px touch target at ${width}px: ${JSON.stringify(breadcrumb)}`);
+    }
     for (const [label, element] of [['return link', layout.returnLink], ['archive snapshot', layout.archive], ...layout.records.map((item, index) => [`published record ${index + 1}`, item] as const), ...layout.links.map((item, index) => [`published link ${index + 1}`, item] as const)] as const) {
       assert.ok(element && element.left >= -1 && element.right <= layout.viewportWidth + 1, `${label} stays inside the ${width}px ${theme} viewport`);
     }

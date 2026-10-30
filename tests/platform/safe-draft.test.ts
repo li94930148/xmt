@@ -4,6 +4,7 @@ import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } 
 const values = new Map<string, string>();
 let storageWritesAvailable = true;
 let storageDeletesAvailable = true;
+let storageDeletesApplied = true;
 Object.defineProperty(globalThis, 'localStorage', {
   value: {
     getItem: (key: string) => values.get(key) ?? null,
@@ -13,7 +14,7 @@ Object.defineProperty(globalThis, 'localStorage', {
     },
     removeItem: (key: string) => {
       if (!storageDeletesAvailable) throw new Error('storage deletion unavailable');
-      values.delete(key);
+      if (storageDeletesApplied) values.delete(key);
     },
   },
   configurable: true,
@@ -39,6 +40,10 @@ storageDeletesAvailable = false;
 assert.equal(clearSafeDraft('daily:2026-08-13'), false, 'deletion failures must be reported without escaping to the caller');
 assert.deepEqual(readSafeDraftValue('daily:2026-08-13'), [{ sectionKey: 'today', contentMd: '完成移动端验证' }], 'a failed deletion preserves the recoverable draft');
 storageDeletesAvailable = true;
+storageDeletesApplied = false;
+assert.equal(clearSafeDraft('daily:2026-08-13'), false, 'a silent no-op deletion must not be reported as successful');
+assert.deepEqual(readSafeDraftValue('daily:2026-08-13'), [{ sectionKey: 'today', contentMd: '完成移动端验证' }], 'a silent no-op preserves the recoverable draft');
+storageDeletesApplied = true;
 assert.equal(clearSafeDraft('daily:2026-08-13'), true, 'deletion can be retried after storage recovers');
 assert.equal(readSafeDraftValue('daily:2026-08-13'), null);
 assert.equal(clearSafeDraft('daily:2026-08-13'), true, 'deleting an absent draft is successful');

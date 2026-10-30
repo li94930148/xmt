@@ -23,6 +23,8 @@ test('查找仅产生视图高亮，替换走正文事务并可撤销', () => {
     const original = editor.getHTML();
     editor.commands.setSearchTerm('苹果');
     assert.equal(editor.storage.findAndReplace.results.length, 2);
+    assert.equal(editor.view.dom.querySelectorAll('.find-and-replace-result').length, 2, 'every match receives a visible search decoration');
+    assert.equal(editor.view.dom.querySelectorAll('.find-and-replace-result-current').length, 1, 'the active match is distinguished from the other results');
     assert.equal(editor.getHTML(), original, '查找不得改变持久化正文');
 
     editor.commands.setReplaceTerm('梨');

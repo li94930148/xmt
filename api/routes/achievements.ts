@@ -373,15 +373,17 @@ router.post('/check', authenticate, async (req, res) => {
       }
 
       if (earned) {
-        // 授予成就
-        await execute(
+        // The unique row is the concurrency-safe win condition. Only the request
+        // that inserts it may report or notify a newly earned achievement.
+        const awarded = await execute(
           `INSERT OR IGNORE INTO user_achievements (user_id, achievement_id) VALUES (?, ?)`,
           [userId, achievement.id]
         );
+        if (awarded !== 1) continue;
         newAchievements.push(achievement);
 
         // 发送通知
-        createMessage(
+        await createMessage(
           userId!,
           '🏆 获得新成就',
           `恭喜获得成就「${achievement.name}」！${achievement.description || ''}（+${achievement.points || 0}积分）`,

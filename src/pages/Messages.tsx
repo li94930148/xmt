@@ -27,6 +27,7 @@ import {
   StatusPill,
 } from '../components/studio';
 import { formatBeijingTime } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { useAppStore, useAuthStore, useMessageStore } from '../store';
 import type { Message } from '../types';
 
@@ -80,7 +81,12 @@ function readMessageClearRecovery(actorId: number | null | undefined): StoredMes
 
 function persistMessageClearRecovery(recovery: StoredMessageClearRecovery) {
   if (typeof window === 'undefined') throw new Error('当前环境无法安全保存清空请求编号');
-  window.sessionStorage.setItem(messageClearRecoveryStorageKey(recovery.actorId), JSON.stringify(recovery));
+  const key = messageClearRecoveryStorageKey(recovery.actorId);
+  const serialized = JSON.stringify(recovery);
+  window.sessionStorage.setItem(key, serialized);
+  if (window.sessionStorage.getItem(key) !== serialized) {
+    throw new Error('无法安全保存清空请求编号；请检查浏览器存储后重试');
+  }
 }
 
 function removeMessageClearRecovery(actorId: number) {
@@ -128,7 +134,10 @@ function readMessageReadAllRecovery(actorId: number | null | undefined): Message
 function persistMessageReadAllRecovery(recovery: StoredMessageReadAllRecovery) {
   if (typeof window === 'undefined') throw new Error('当前环境无法安全保存批量已读请求编号');
   try {
-    window.sessionStorage.setItem(messageReadAllRecoveryStorageKey(recovery.actorId), JSON.stringify(recovery));
+    const key = messageReadAllRecoveryStorageKey(recovery.actorId);
+    const serialized = JSON.stringify(recovery);
+    window.sessionStorage.setItem(key, serialized);
+    if (window.sessionStorage.getItem(key) !== serialized) throw new Error('恢复编号未能完整保存');
   } catch {
     throw new Error('当前浏览器无法安全保存批量已读请求编号');
   }
@@ -156,6 +165,7 @@ function createMessageReadAllRequestId() {
 }
 
 type MessageFilter = 'all' | 'unread' | 'actionable' | 'system';
+type MessageSummary = { total: number; unread: number; actionable: number };
 
 const filters: { key: MessageFilter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -180,7 +190,7 @@ export default function Messages() {
   const [reloadKey, setReloadKey] = useState(0);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState({ total: 0, unread: 0, actionable: 0 });
+  const [summaryState, setSummaryState] = useState<{ actorId: number | undefined; summary: MessageSummary } | null>(null);
   const [searchParams] = useSearchParams();
   const [initialClearRecovery] = useState(() => readMessageClearRecovery(useAuthStore.getState().user?.id));
   const [pendingClearRecovery, setPendingClearRecovery] = useState<StoredMessageClearRecovery | null>(initialClearRecovery);
@@ -410,7 +420,7 @@ export default function Messages() {
         if (!active || requestId !== latestMessageRequestRef.current) return;
         setMessages(result.data);
         setTotal(result.total);
-        setSummary(result.summary);
+        setSummaryState({ actorId: userId, summary: result.summary });
         loadedQueryKeyRef.current = messageQueryKey;
         setLoadedQueryKey(messageQueryKey);
         setStoreMessages(result.data);
@@ -419,15 +429,13 @@ export default function Messages() {
       })
       .catch((error) => {
         if (!active || requestId !== latestMessageRequestRef.current) return;
-        const message = error instanceof Error ? error.message : '请检查网络后重试';
+        const message = getUserFacingErrorMessage(error, '消息暂时无法加载，请检查网络后重试。');
         if (loadedQueryKeyRef.current !== messageQueryKey) {
           setMessages([]);
           setTotal(0);
-          setSummary({ total: 0, unread: 0, actionable: 0 });
           setLoadedQueryKey(null);
           loadedQueryKeyRef.current = null;
           setStoreMessages([]);
-          setUnreadCount(0);
         }
         setLoadError(message);
         addNotification({ title: '获取消息失败', message, type: 'error' });
@@ -446,14 +454,15 @@ export default function Messages() {
     return () => {
       active = false;
     };
-  }, [activeFilter, addNotification, messageQueryKey, page, reloadKey, setStoreMessages, setUnreadCount]);
+  }, [activeFilter, addNotification, messageQueryKey, page, reloadKey, setStoreMessages, setUnreadCount, userId]);
 
   const totalPages = Math.max(1, Math.ceil(total / MESSAGE_PAGE_SIZE));
-  const unreadCount = summary.unread;
-  const actionableCount = summary.actionable;
+  const summary = summaryState && summaryState.actorId === userId ? summaryState.summary : null;
+  const unreadCount = summary?.unread ?? null;
   const filteredMessages = messages;
   const showUnreadOnly = activeFilter === 'unread' || activeFilter === 'actionable';
   const hasCurrentResults = loadedQueryKey === messageQueryKey;
+  const summaryPendingLabel = loading || (!hasCurrentResults && loadError === null) ? '正在读取…' : '暂不可用';
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -475,11 +484,14 @@ export default function Messages() {
       ? current.filter((item) => item.id !== message.id)
       : current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
     if (showUnreadOnly) setTotal((current) => Math.max(0, current - 1));
-    setSummary((current) => ({
+    setSummaryState((current) => current && current.actorId === userId ? {
       ...current,
-      unread: Math.max(0, current.unread - 1),
-      actionable: message.link ? Math.max(0, current.actionable - 1) : current.actionable,
-    }));
+      summary: {
+        ...current.summary,
+        unread: Math.max(0, current.summary.unread - 1),
+        actionable: message.link ? Math.max(0, current.summary.actionable - 1) : current.summary.actionable,
+      },
+    } : current);
   };
 
   const setSingleMessageReadVerification = (actorId: number, recovery: PendingSingleMessageReadVerification | null) => {
@@ -520,7 +532,7 @@ export default function Messages() {
       addNotification({ title: '消息仍未读', message: '服务器已确认消息仍未读；没有自动重试。再次点击消息可明确重试。', type: 'info' });
     } catch (error) {
       if (useAuthStore.getState().user?.id !== actorId) return;
-      const reason = error instanceof Error ? error.message : '暂时无法核实消息状态';
+      const reason = getUserFacingErrorMessage(error, '暂时无法核实消息状态');
       setSingleMessageReadVerification(actorId, { ...recovery, error: reason });
       addNotification({ title: '消息结果待核实', message: '暂时无法核实这条消息。核实前不会再次提交。', type: 'warning' });
     } finally {
@@ -615,7 +627,7 @@ export default function Messages() {
     if (markingAllRef.current || markingAll || loading || !userId || currentSingleMessageReadVerification
       || messageReadAllRecoveryError !== null
       || (pendingMessageReadAllRecovery !== null && !canExplicitlyRetry)
-      || (!canExplicitlyRetry && unreadCount === 0)) return;
+      || (!canExplicitlyRetry && (unreadCount === null || unreadCount === 0))) return;
 
     let recovery = pendingMessageReadAllRecovery;
     if (!recovery) {
@@ -625,7 +637,7 @@ export default function Messages() {
         setPendingMessageReadAllRecovery(recovery);
         setMessageReadAllRecoveryError(null);
       } catch (error) {
-        const message = error instanceof Error ? error.message : '无法安全保存批量已读请求编号';
+        const message = getUserFacingErrorMessage(error, '无法安全保存批量已读请求编号；请检查浏览器存储设置后重试。');
         setMessageReadAllRecoveryError(message);
         setMessageReadAllRecoveryState('unavailable');
         setMessageReadAllOutcomeNotice(message);
@@ -668,7 +680,7 @@ export default function Messages() {
         void verifyMessageReadAllStatus(recovery);
         addNotification({
           title: '批量已读结果待核实',
-          message: error instanceof Error ? error.message : '服务端结果未确认；系统将先只读核实，不会盲目重复提交。',
+          message: getUserFacingErrorMessage(error, '服务端结果未确认；系统将先只读核实，不会盲目重复提交。'),
           type: 'error',
         });
       }
@@ -703,7 +715,7 @@ export default function Messages() {
         persistMessageClearRecovery(recovery);
         setPendingClearRecovery(recovery);
       } catch (error) {
-        addNotification({ title: '无法安全发起清空', message: error instanceof Error ? error.message : '请检查浏览器存储设置后重试', type: 'error' });
+        addNotification({ title: '无法安全发起清空', message: getUserFacingErrorMessage(error, '无法安全准备清空请求编号；请检查浏览器存储设置后重试。'), type: 'error' });
         return;
       }
     }
@@ -730,7 +742,7 @@ export default function Messages() {
     } catch (error) {
       if (useAuthStore.getState().user?.id !== recovery.actorId) return;
       setClearRecoveryState('checking');
-      addNotification({ title: '清空结果待核实', message: error instanceof Error ? error.message : '服务端结果未确认；系统将先只读核实，不会盲目重复删除。', type: 'error' });
+      addNotification({ title: '清空结果待核实', message: getUserFacingErrorMessage(error, '服务端结果未确认；系统将先只读核实，不会盲目重复删除。'), type: 'error' });
     } finally {
       const activeClearingActorIds = clearingActorIdsRef.current;
       if (activeClearingActorIds.has(recovery.actorId)) {
@@ -758,7 +770,7 @@ export default function Messages() {
               <ActionButton onClick={handleMarkAllAsRead}
                 disabled={loading || markingAll || (currentActorMarkingMessageIds?.size ?? 0) > 0 || currentSingleMessageReadVerification !== null || messageReadAllRecoveryError !== null
                   || (pendingMessageReadAllRecovery !== null && messageReadAllRecoveryState !== 'not_found')
-                  || (unreadCount === 0 && !(pendingMessageReadAllRecovery && messageReadAllRecoveryState === 'not_found'))}>
+                  || ((unreadCount === null || unreadCount === 0) && !(pendingMessageReadAllRecovery && messageReadAllRecoveryState === 'not_found'))}>
                 <CheckCircle2 className="h-4 w-4" />
                 {markingAll || messageReadAllRecoveryState === 'checking' || messageReadAllRecoveryState === 'submitting'
                   ? '处理中'
@@ -781,9 +793,27 @@ export default function Messages() {
         />
 
         <div className="grid gap-4 md:grid-cols-3">
-          <MetricCard title="未读消息" value={unreadCount} trend={{ label: '需要关注', up: unreadCount === 0 }} icon={Bell} tone="cyan" />
-          <MetricCard title="待处理跳转" value={actionableCount} trend={{ label: '关联业务页面', up: actionableCount === 0 }} icon={Radio} tone="violet" />
-          <MetricCard title="消息总量" value={summary.total} trend={{ label: '本地通知流', up: true }} icon={Inbox} tone="amber" />
+          <MetricCard
+            title="未读消息"
+            value={summary ? summary.unread : <span role="status" aria-live="polite">{summaryPendingLabel}</span>}
+            trend={summary ? { label: '需要关注', up: summary.unread === 0 } : undefined}
+            icon={Bell}
+            tone="cyan"
+          />
+          <MetricCard
+            title="待处理跳转"
+            value={summary ? summary.actionable : summaryPendingLabel}
+            trend={summary ? { label: '关联业务页面', up: summary.actionable === 0 } : undefined}
+            icon={Radio}
+            tone="violet"
+          />
+          <MetricCard
+            title="消息总量"
+            value={summary ? summary.total : summaryPendingLabel}
+            trend={summary ? { label: '本地通知流', up: true } : undefined}
+            icon={Inbox}
+            tone="amber"
+          />
         </div>
 
         <GlassPanel className="overflow-hidden">
@@ -810,7 +840,7 @@ export default function Messages() {
             </div>
           ) : null}
           <div className="flex flex-col gap-3 border-b border-studio-border-soft px-5 py-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-wrap gap-2">
+            <div role="group" aria-label="消息筛选" className="flex flex-wrap gap-2">
               {filters.map((filter) => (
                 <button
                   key={filter.key}
@@ -880,7 +910,7 @@ export default function Messages() {
                         disabled={isMarking || isReadLocked}
                         aria-busy={isMarking}
                         className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
-                          !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
+                          !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgb(var(--xmt-cyan-rgb)_/_0.65)]' : ''
                         } ${isMarking ? 'cursor-wait' : message.link ? 'cursor-pointer' : 'cursor-default'}`}
                       >
                         <div className="flex items-start gap-4">
@@ -898,9 +928,9 @@ export default function Messages() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h3>
+                              <h2 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h2>
                               <StatusPill tone={message.read ? 'muted' : 'cyan'}>{isMarking ? '标记中' : message.read ? '已读' : '未读'}</StatusPill>
-                              {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-muted opacity-60 transition group-hover:opacity-100" /> : null}
+                              {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-secondary transition-colors group-hover:text-studio-text-primary" /> : null}
                             </div>
                             <p className="mt-1 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
                             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">

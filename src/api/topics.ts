@@ -221,7 +221,7 @@ export async function addTopicResource(topicId: number, resourceId: number): Pro
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ resource_id: resourceId }),
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '关联资料失败'));
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '关联资料失败'), response.status);
 }
 
 export async function removeTopicResource(topicId: number, resourceId: number): Promise<void> {
@@ -229,5 +229,5 @@ export async function removeTopicResource(topicId: number, resourceId: number): 
     method: 'DELETE',
     headers: getAuthHeader(),
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '解除关联失败'));
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '解除关联失败'), response.status);
 }

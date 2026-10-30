@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { AlertTriangle, BookOpen, Flame, RefreshCw, Sparkles, User } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { displayDocId } from '../utils/docIdDisplay';
@@ -75,7 +76,7 @@ export default function CollaborationUX() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>协作故事线</p>
-            <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作故事线</h1>
+            <PageHeading className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作故事线</PageHeading>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker

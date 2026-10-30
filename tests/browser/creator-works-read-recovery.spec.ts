@@ -219,6 +219,10 @@ try {
   await page.getByRole('button', { name: '重试加载作品' }).click();
   await page.getByRole('button', { name: /测试作品一/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: /测试作品一/ }).count(), 1, '窄屏应以可直读的作品卡片呈现，而非要求横向滚动整张桌面表格');
+  const mobileWorkCard = page.getByRole('button', { name: /测试作品一/ });
+  const mobileWorkCardWithTitleOnce = page.getByRole('button', { name: /^(?!.*测试作品一.*测试作品一).*测试作品一.*$/s });
+  assert.equal(await mobileWorkCardWithTitleOnce.count(), 1, '移动作品卡片的可访问名称应包含作品标题且只播报一次');
+  assert.equal(await mobileWorkCard.getByRole('img').count(), 0, '移动作品卡片中的重复封面占位不进入辅助技术树');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, '窄屏作品库页面不应横向溢出');
   await assertCreatorPageCopyContrast(page, 'dark', '390px作品库');
   await assertWorkScoreContrast(page, 'dark', '390px作品库');
@@ -293,6 +297,12 @@ try {
   await page.getByRole('heading', { name: '测试作品一', exact: true }).waitFor();
   assert.equal(await page.getByRole('img', { name: '播放曲线，1 个历史快照', exact: true }).count(), 1, 'mobile work detail chart identifies its play metric');
   assert.equal(await page.getByRole('img', { name: '互动曲线，1 个历史快照', exact: true }).count(), 1, 'mobile work detail chart identifies its interaction metric');
+  const workPlayTable = page.getByRole('table', { name: '播放曲线，1 个历史快照：日期与数值明细', exact: true });
+  assert.equal(await workPlayTable.getByRole('row').nth(1).getByRole('rowheader').innerText(), '2026/09/16', '作品播放曲线明细将 UTC 快照时间按北京时间显示');
+  assert.equal(await workPlayTable.getByRole('row').nth(1).getByRole('cell').innerText(), '1,000', '作品播放曲线明细保留真实快照值');
+  const workInteractionTable = page.getByRole('table', { name: '互动曲线，1 个历史快照：日期与数值明细', exact: true });
+  assert.equal(await workInteractionTable.getByRole('row').nth(1).getByRole('rowheader').innerText(), '2026/09/16');
+  assert.equal(await workInteractionTable.getByRole('row').nth(1).getByRole('cell').innerText(), '117', '作品互动曲线明细保留点赞、评论、分享与收藏之和');
   await assertCreatorPageCopyContrast(page, 'dark', '390px作品详情');
   assert.equal(await page.evaluate(async () => (await fetch('/__test__/review-get-count')).json().then(value => value.reviewGetCount)), 2, '详情重试仅重新读取一次作品复盘');
   await page.getByRole('button', { name: '返回作品库' }).click();
@@ -314,6 +324,9 @@ try {
   await assertWorkScoreContrast(desktopPage, 'light', '1440px作品库');
   const desktopWorkLink = desktopPage.getByRole('link', { name: '打开作品 测试作品一', exact: true });
   await desktopWorkLink.waitFor();
+  assert.equal(await desktopWorkLink.count(), 1, '桌面作品表格的标题链接保留清晰且有用的作品名称');
+  const desktopWorkRow = desktopPage.getByRole('row').filter({ has: desktopWorkLink });
+  assert.equal(await desktopWorkRow.getByRole('img').count(), 0, '桌面作品表格中的重复封面占位不进入辅助技术树');
   await desktopWorkLink.focus();
   assert.equal(await desktopWorkLink.evaluate(element => document.activeElement === element), true, 'desktop work title is a keyboard-focusable detail link');
   await desktopPage.screenshot({ path: '/tmp/xmt-creator-works-desktop-link.png', fullPage: false });

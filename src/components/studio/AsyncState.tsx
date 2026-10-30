@@ -50,12 +50,15 @@ export function ErrorState({
   description,
   onRetry,
   className = '',
+  headingLevel = 3,
 }: {
   title?: string;
   description?: string;
   onRetry?: () => void;
   className?: string;
+  headingLevel?: 2 | 3 | 4;
 }) {
+  const Heading = headingLevel === 2 ? 'h2' : headingLevel === 4 ? 'h4' : 'h3';
   return (
     <div
       role="alert"
@@ -67,7 +70,7 @@ export function ErrorState({
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-card border border-studio-coral/30 bg-studio-coral/12 text-studio-coral-contrast">
         <AlertTriangle className="h-6 w-6" />
       </div>
-      <h3 className="text-base font-semibold tracking-tight text-studio-text-primary">{title}</h3>
+      <Heading className="text-base font-semibold tracking-tight text-studio-text-primary">{title}</Heading>
       {description ? <p className="mt-2 max-w-md text-sm leading-relaxed text-studio-text-secondary">{description}</p> : null}
       {onRetry ? (
         <ActionButton type="button" onClick={onRetry} variant="secondary" className="mt-5">

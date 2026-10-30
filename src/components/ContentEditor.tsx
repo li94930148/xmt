@@ -27,6 +27,7 @@ export interface ContentEditorProps {
   onChange?: (value: string) => void;
   readOnly?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
   onSave?: (value: string) => void | boolean | Promise<void | boolean>;
   mode?: ContentEditorMode;
   minHeight?: string | number;
@@ -52,6 +53,7 @@ export default function ContentEditor({
   onChange = noop,
   readOnly = false,
   placeholder,
+  ariaLabel,
   onSave,
   mode = 'rich',
   minHeight,
@@ -70,6 +72,7 @@ export default function ContentEditor({
   toolbarStickyTop,
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
+  const resolvedAriaLabel = ariaLabel?.trim() || (resolvedReadOnly ? '只读正文' : '正文编辑区');
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
   const socket = useSocket();
   const user = useAuthStore((state) => state.user);
@@ -240,6 +243,7 @@ export default function ContentEditor({
           onChange={onChange}
           readOnly={resolvedReadOnly}
           placeholder={placeholder}
+          ariaLabel={resolvedAriaLabel}
         />
       </div>
       </ReactBitsPageScene>
@@ -293,6 +297,7 @@ export default function ContentEditor({
             onSave={onSave ? () => onSave(value) : undefined}
             readOnly={runtime.readonly || collaboration.recoveryBlocked}
             placeholder={placeholder}
+            ariaLabel={resolvedAriaLabel}
             collaboration={editorCollaboration}
             immersive={runtime.capabilities.immersive}
             focusMode={focusMode}

@@ -8,6 +8,7 @@ import { STATUS_TEXT } from '@/constants';
 import { usePermission } from '@/hooks/usePermission';
 import AccessDeniedState from '@/components/AccessDeniedState';
 import Pagination from '@/components/Pagination';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 const PAGE_SIZE = 20;
 
@@ -70,7 +71,9 @@ export default function MobileProduction() {
         if (targetPage !== pageRef.current) setPage(targetPage);
       }
     } catch (reason) {
-      if (requestId === requestSequenceRef.current) setError(reason instanceof Error ? reason.message : '加载创作失败');
+      if (requestId === requestSequenceRef.current) {
+        setError(getUserFacingErrorMessage(reason, '创作列表暂时无法加载，请检查连接后重试。'));
+      }
     } finally {
       if (requestId === requestSequenceRef.current) setLoading(false);
     }

@@ -31,6 +31,13 @@ async function run() {
     /事件服务暂不可用/,
   );
   await assert.rejects(
+    getNotificationSettings('test-token', async (input) => String(input).endsWith('/events')
+      ? response({ message: 'HTTP 503 Service Unavailable' }, 503)
+      : response([])),
+    /事件暂时无法加载，请重试/,
+    'technical status messages are replaced with an actionable Chinese fallback',
+  );
+  await assert.rejects(
     getNotificationSettings('test-token', async () => response({ items: [] })),
     /数据格式异常/,
   );
@@ -76,6 +83,15 @@ async function run() {
   });
   assert.deepEqual(rejectedCalls, ['PUT'], 'a definite client rejection does not trigger unnecessary verification');
   assert.deepEqual(rejected, { kind: 'rejected', message: '输入不合法' });
+
+  const technicalRejected = await saveNotificationPreferences('test-token', submitted, async () => (
+    response({ message: 'HTTP 400 Bad Request' }, 400)
+  ));
+  assert.deepEqual(
+    technicalRejected,
+    { kind: 'rejected', message: '通知偏好保存失败，请重试' },
+    'status-code fallback text is not shown as a user message',
+  );
 }
 
 void run().then(() => console.log('Notification settings load contract passed'));

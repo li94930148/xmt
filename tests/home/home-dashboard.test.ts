@@ -109,6 +109,27 @@ await execute(
   `INSERT INTO retro_actions (retro_id,title,owner_id,created_by) VALUES (?, '本人负责行动项', ?, ?)`,
   [actionOwnedRetroId, retroPersonalId, directorId],
 );
+await execute(`UPDATE retro_actions SET due_date = '2026-10-31' WHERE retro_id = ? AND title = '本人负责行动项'`, [actionOwnedRetroId]);
+await execute(
+  `INSERT INTO retro_actions (retro_id,title,owner_id,due_date,status,created_by) VALUES (?, '本人最紧急行动项', ?, '2026-10-30', 'todo', ?)`,
+  [actionOwnedRetroId, retroPersonalId, directorId],
+);
+await execute(
+  `INSERT INTO retro_actions (retro_id,title,owner_id,due_date,status,created_by) VALUES (?, '本人后续行动项', ?, '2026-11-01', 'todo', ?)`,
+  [actionOwnedRetroId, retroPersonalId, directorId],
+);
+await execute(
+  `INSERT INTO retro_actions (retro_id,title,owner_id,due_date,status,created_by) VALUES (?, '本人进行中行动项', ?, '2026-10-29', 'doing', ?)`,
+  [actionOwnedRetroId, retroPersonalId, directorId],
+);
+await execute(
+  `INSERT INTO retro_actions (retro_id,title,owner_id,due_date,status,created_by) VALUES (?, '本人已完成行动项', ?, '2026-10-28', 'done', ?)`,
+  [actionOwnedRetroId, retroPersonalId, directorId],
+);
+await execute(
+  `INSERT INTO retro_actions (retro_id,title,owner_id,due_date,status,created_by) VALUES (?, '他人负责行动项', ?, '2026-10-28', 'todo', ?)`,
+  [actionOwnedRetroId, otherId, directorId],
+);
 await createRetrospective({ title: '团队内部草稿', periodStart: '2026-09-01', status: 'draft', ownerId: directorId, createdBy: directorId });
 await createRetrospective({ title: '负责人私有复盘', periodStart: '2026-08-30', status: 'draft', ownerId: directorId, createdBy: directorId });
 for (let index = 1; index <= 4; index += 1) {
@@ -386,10 +407,20 @@ try {
 
   const retroPersonalResponse = await fetch(base, { headers: { authorization: `Bearer ${signToken({ userId: retroPersonalId })}` } });
   assert.equal(retroPersonalResponse.status, 200);
-  const retroPersonal = await retroPersonalResponse.json() as { retrospectives: { total: number; tasks: Array<{ title: string }> } };
+  const retroPersonal = await retroPersonalResponse.json() as {
+    retrospectives: { total: number; tasks: Array<{ title: string }> };
+    my_retro_actions: { available: boolean; total: number; tasks: Array<{ id: number; retro_id: number; title: string; retro_title: string; due_date: string | null; status: string; description_md?: string }> };
+  };
   assert.equal(retroPersonal.retrospectives.total, 4, 'members without the full-view permission see published retrospectives plus only retrospectives they own, created, or have an assigned action in');
   assert.deepEqual(retroPersonal.retrospectives.tasks.map((retro) => retro.title), ['已发布可见复盘', '本人行动项复盘', '本人创建草稿']);
   assert.ok(!retroPersonal.retrospectives.tasks.some((retro) => retro.title === '团队内部草稿' || retro.title === '负责人私有复盘'));
+  assert.equal(retroPersonal.my_retro_actions.available, true);
+  assert.equal(retroPersonal.my_retro_actions.total, 4, 'personal action totals include only the caller-owned open actions');
+  assert.deepEqual(retroPersonal.my_retro_actions.tasks.map((action) => action.title), ['本人最紧急行动项', '本人负责行动项', '本人后续行动项'], 'the bounded preview prioritizes todo actions by due date before in-progress work');
+  assert.equal(retroPersonal.my_retro_actions.tasks.length, 3, 'home action previews stay bounded');
+  assert.ok(retroPersonal.my_retro_actions.tasks.every((action) => action.retro_id === actionOwnedRetroId && action.retro_title === '本人行动项复盘'));
+  assert.ok(!retroPersonal.my_retro_actions.tasks.some((action) => action.title.includes('已完成') || action.title.includes('他人负责')));
+  assert.ok(retroPersonal.my_retro_actions.tasks.every((action) => !('description_md' in action)), 'home action previews do not expose action descriptions');
 
   const retroPermissionResponse = await fetch(base, { headers: { authorization: `Bearer ${signToken({ userId: retroPermissionViewerId })}` } });
   assert.equal(retroPermissionResponse.status, 200);

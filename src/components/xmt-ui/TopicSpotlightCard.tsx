@@ -20,7 +20,7 @@ export default function TopicSpotlightCard({
   return (
     <SpotlightCard
       className="!rounded-2xl !border-studio-border-soft !bg-studio-card !p-5 transition-transform duration-200 hover:-translate-y-0.5"
-      spotlightColor="rgba(14, 165, 233, 0.16)"
+      spotlightColor="rgb(var(--xmt-cyan-rgb) / 0.16)"
     >
       <button type="button" onClick={onOpen} className="relative z-[1] flex h-full w-full flex-col text-left">
         <div className="flex items-center justify-between gap-3">

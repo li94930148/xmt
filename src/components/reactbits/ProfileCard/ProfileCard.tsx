@@ -524,8 +524,10 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
                 className="w-full absolute left-1/2 bottom-[-1px] will-change-transform transition-transform duration-[120ms] ease-out"
                 src={avatarUrl}
                 alt={`${name || 'User'} avatar`}
-                loading="lazy"
+                width={600}
+                height={800}
                 style={{
+                  aspectRatio: '600 / 800',
                   transformOrigin: '50% 100%',
                   transform:
                     'translateX(calc(-50% + (var(--pointer-from-left) - 0.5) * 6px)) translateZ(0) scaleY(calc(1 + (var(--pointer-from-top) - 0.5) * 0.02)) scaleX(calc(1 + (var(--pointer-from-left) - 0.5) * 0.01))',
@@ -562,8 +564,9 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
                         className="w-full h-full object-cover rounded-full"
                         src={miniAvatarUrl || avatarUrl}
                         alt={`${name || 'User'} mini avatar`}
-                        loading="lazy"
-                        style={{ display: 'block', gridArea: 'auto', borderRadius: '50%', pointerEvents: 'auto' }}
+                        width={48}
+                        height={48}
+                        style={{ aspectRatio: '1 / 1', display: 'block', gridArea: 'auto', borderRadius: '50%', pointerEvents: 'auto' }}
                         onError={e => {
                           const t = e.target as HTMLImageElement;
                           t.style.opacity = '0.5';

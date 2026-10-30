@@ -19,6 +19,7 @@ const React = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { flushSync } = await import('react-dom');
 const { TopicDimensionRequestError, isTopicDimensionWriteOutcomeUnknown } = await import('../../src/api/resourceCenter');
+const { useAuthStore } = await import('../../src/store');
 const TopicAssetDimensionsPanel = (await import('../../src/components/topics/TopicAssetDimensionsPanel')).default;
 
 type Dimension = { id: number; type: 'city' | 'person' | 'project'; value: string };
@@ -96,7 +97,19 @@ async function clickAndWait(element: HTMLElement, predicate: () => boolean, mess
   await waitFor(predicate, message);
 }
 
-test('维度写入结果不明时只读对账，保留写锁，且只允许用户显式重试', async () => {
+function mountPanel() {
+  const container = document.getElementById('root')!;
+  const root = createRoot(container);
+  flushSync(() => root.render(React.createElement(TopicAssetDimensionsPanel, { topicId: 77, canManage: true })));
+  return root;
+}
+
+function latestRecoveryButton() {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+    .find((button) => button.textContent?.includes('只读核实当前状态'));
+}
+
+test('维度写入待确认状态跨刷新恢复；只读对账不会重放新增或移除', async () => {
   assert.equal(isTopicDimensionWriteOutcomeUnknown(new TypeError('network lost')), true);
   assert.equal(isTopicDimensionWriteOutcomeUnknown(new TopicDimensionRequestError(408, 'timeout')), true);
   assert.equal(isTopicDimensionWriteOutcomeUnknown(new TopicDimensionRequestError(429, 'rate limited')), true);
@@ -111,10 +124,11 @@ test('维度写入结果不明时只读对账，保留写锁，且只允许用�
   nextAddBehavior = 'success';
   failNextRead = false;
   dropNextRemoveResponse = false;
+  window.sessionStorage.clear();
+  useAuthStore.setState({ user: { id: 77 } as never });
 
   document.body.innerHTML = '<div id="root"></div>';
-  const root = createRoot(document.getElementById('root')!);
-  flushSync(() => root.render(React.createElement(TopicAssetDimensionsPanel, { topicId: 77, canManage: true })));
+  let root = mountPanel();
   try {
     await waitFor(() => document.querySelector('[aria-label="已登记内容维度"]') !== null, 'initial dimensions did not load');
     nextAddBehavior = 'commit-then-drop';
@@ -125,26 +139,81 @@ test('维度写入结果不明时只读对账，保留写锁，且只允许用�
     assert.equal(addRequests, 1, 'uncertain mutation was submitted once');
     assert.equal(readRequests, 2, 'the failed initial read plus the failed reconciliation are the only reads');
     assert.equal(input.disabled, true, 'write remains locked while the outcome cannot be read');
-    const verifyButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.includes('只读核实当前状态'));
+    const markerKey = window.sessionStorage.key(0);
+    assert(markerKey?.includes('user:77:topic:77'), 'pending mutation is stored against the actor and topic');
+    const storedAddMarker = window.sessionStorage.getItem(markerKey!);
+    const verifyButton = latestRecoveryButton();
     assert(verifyButton, 'read-only verification remains available while writes are locked');
     assert.equal(verifyButton.disabled, false, 'read-only verification remains available while writes are locked');
-    await clickAndWait(verifyButton, () => (document.body.textContent ?? '').includes('无法确认是否由刚才的操作完成'), 'present target was not reconciled');
+
+    flushSync(() => root.unmount());
+    failNextRead = true;
+    root = mountPanel();
+    await waitFor(() => (document.body.textContent ?? '').includes('只读核实失败'), 'pending add was not resumed after refresh');
+    assert.equal(addRequests, 1, 'refresh did not replay the uncertain add');
+    assert.equal(window.sessionStorage.getItem(markerKey!), storedAddMarker, 'pending marker survives a failed post-refresh reconciliation');
+    assert.equal(document.querySelector<HTMLInputElement>('#topic-dimension-value-77'), null, 'unverified dimensions stay hidden after failed reconciliation');
+    await clickAndWait(latestRecoveryButton()!, () => (document.body.textContent ?? '').includes('无法确认是否由刚才的操作完成'), 'present target was not reconciled after refresh');
     assert.equal(addRequests, 1, 'manual verification does not replay the write');
+    assert.equal(window.sessionStorage.getItem(markerKey!), null, 'successful reconciliation clears the pending marker');
 
     nextAddBehavior = 'drop-before-commit';
-    setInputValue(input, '湖州');
+    const inputAfterRecovery = document.querySelector<HTMLInputElement>('#topic-dimension-value-77')!;
+    setInputValue(inputAfterRecovery, '湖州');
     await clickAndWait(document.querySelector<HTMLButtonElement>('button[type="submit"]')!, () => (document.body.textContent ?? '').includes('未自动重试，如仍需登记请再次点击'), 'absent target was not reported');
     assert.equal(addRequests, 2, 'absence confirmation does not automatically replay the add');
     await clickAndWait(document.querySelector<HTMLButtonElement>('button[type="submit"]')!, () => (document.body.textContent ?? '').includes('城市“湖州”已登记。'), 'explicit retry did not succeed');
     assert.equal(addRequests, 3, 'only the explicit user submission created the second write');
 
+    failNextRead = true;
     dropNextRemoveResponse = true;
     const removeButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.getAttribute('aria-label') === '移除城市：杭州');
     assert(removeButton, 'existing dimension has a remove button');
-    await clickAndWait(removeButton, () => (document.body.textContent ?? '').includes('无法确认是否由刚才的操作移除'), 'remove result was not reconciled');
+    await clickAndWait(removeButton, () => (document.body.textContent ?? '').includes('只读核实失败'), 'remove result did not remain pending after failed reconciliation');
     assert.equal(removeRequests, 1, 'uncertain remove was not replayed');
+    const removeMarkerKey = Array.from({ length: window.sessionStorage.length }, (_, index) => window.sessionStorage.key(index))
+      .find((key) => key?.includes('user:77:topic:77'));
+    assert(removeMarkerKey, 'uncertain remove is persisted before page reload');
+
+    flushSync(() => root.unmount());
+    root = mountPanel();
+    await waitFor(() => (document.body.textContent ?? '').includes('无法确认是否由刚才的操作移除'), 'pending remove was not resumed after refresh');
+    assert.equal(removeRequests, 1, 'refresh did not replay the uncertain remove');
     assert(!(document.body.textContent ?? '').includes('杭州'), 'dimension list was synchronized to the GET result');
+    assert.equal(window.sessionStorage.getItem(removeMarkerKey), null, 'successful remove reconciliation clears the marker');
   } finally {
     flushSync(() => root.unmount());
+    window.sessionStorage.clear();
+  }
+});
+
+test('无法持久化恢复标记时不发送维度写入', async () => {
+  dimensions = [{ id: 1, type: 'city', value: '杭州' }];
+  nextId = 2;
+  addRequests = 0;
+  removeRequests = 0;
+  readRequests = 0;
+  nextAddBehavior = 'success';
+  failNextRead = false;
+  dropNextRemoveResponse = false;
+  window.sessionStorage.clear();
+  useAuthStore.setState({ user: { id: 77 } as never });
+  document.body.innerHTML = '<div id="root"></div>';
+  const originalSetItem = window.Storage.prototype.setItem;
+  window.Storage.prototype.setItem = function setItem(key: string, value: string) {
+    if (key.includes('content-topic-dimension-pending')) throw new Error('storage unavailable');
+    return originalSetItem.call(this, key, value);
+  };
+  const root = mountPanel();
+  try {
+    await waitFor(() => document.querySelector('[aria-label="已登记内容维度"]') !== null, 'initial dimensions did not load');
+    setInputValue(document.querySelector<HTMLInputElement>('#topic-dimension-value-77')!, '绍兴');
+    await clickAndWait(document.querySelector<HTMLButtonElement>('button[type="submit"]')!, () => (document.body.textContent ?? '').includes('本次没有发送维度操作'), 'storage failure was not explained');
+    assert.equal(addRequests, 0, 'no POST is sent unless its recovery marker can first be persisted');
+    assert.equal(removeRequests, 0);
+  } finally {
+    flushSync(() => root.unmount());
+    window.Storage.prototype.setItem = originalSetItem;
+    window.sessionStorage.clear();
   }
 });

@@ -80,6 +80,15 @@ try {
   await removeAuditFailureTrigger('reject_delete_audit');
   assert.equal((await fetch(`${base}/resources/${resourceId}`, { method: 'DELETE', headers: adminHeaders })).status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM resources WHERE id=?', [resourceId]))?.status, 'deleted');
+  const repeatedDeleteResponses = await Promise.all([
+    fetch(`${base}/resources/${resourceId}`, { method: 'DELETE', headers: adminHeaders }),
+    fetch(`${base}/resources/${resourceId}`, { method: 'DELETE', headers: adminHeaders }),
+  ]);
+  assert.deepEqual(repeatedDeleteResponses.map((response) => response.status), [200, 200], 'repeating a completed delete is safely acknowledged');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM resource_audit_logs WHERE resource_id=? AND action='delete'",
+    [resourceId],
+  ))?.count || 0), 1, 'repeated/concurrent deletes do not duplicate the state audit');
 
   await createAuditFailureTrigger('reject_restore_audit', "NEW.action='restore'");
   await expectSafeServerFailure(
@@ -90,6 +99,15 @@ try {
   await removeAuditFailureTrigger('reject_restore_audit');
   assert.equal((await fetch(`${base}/resources/${resourceId}/restore`, { method: 'POST', headers: adminHeaders })).status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM resources WHERE id=?', [resourceId]))?.status, 'published');
+  const repeatedRestoreResponses = await Promise.all([
+    fetch(`${base}/resources/${resourceId}/restore`, { method: 'POST', headers: adminHeaders }),
+    fetch(`${base}/resources/${resourceId}/restore`, { method: 'POST', headers: adminHeaders }),
+  ]);
+  assert.deepEqual(repeatedRestoreResponses.map((response) => response.status), [200, 200], 'repeating a completed restore is safely acknowledged');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM resource_audit_logs WHERE resource_id=? AND action='restore'",
+    [resourceId],
+  ))?.count || 0), 1, 'repeated/concurrent restores do not duplicate the state audit');
 
   const tagId = await executeInsert('INSERT INTO resource_tags(name,normalized_name,created_by) VALUES(?,?,?)', ['隔离标签', '隔离标签', adminId]);
   await createAuditFailureTrigger('reject_tag_add_audit', "NEW.action='update' AND NEW.detail_json LIKE '%tag_add%'");

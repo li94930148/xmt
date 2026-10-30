@@ -47,7 +47,9 @@ const manager = { id: 95, username: 'topic-stage-manager-qa', role: 'director', 
 const creator = { id: 96, username: 'topic-stage-creator-qa', role: 'member', name: '创作者验收', enabled: true, force_change_password: false };
 const actionableManagerMessage = { id: 951, user_id: manager.id, title: '需要确认发布安排', content: '发布安排仍待跟进。', type: 'warning', read: false, link: '/publishing/941', created_at: '2026-10-09 10:00:00' };
 const managerSyncAccountUid = 'manager-sync-anomaly-uid';
+const managerSecondarySyncAccountUid = 'manager-secondary-sync-uid';
 const managerSyncAnomaly = { id: 981, platform: 'douyin', account_name: '负责人验收账号', account_uid: managerSyncAccountUid, status: 'partial_success', start_time: '2026-10-09 11:00:00', success_count: 3, failed_count: 2, owner_name: editor.name };
+const managerCreatorAgentA = { id: 1, device_id: 'manager-device-a', device_name: '采集设备 A', browser_type: '浏览器 A', browser_version: 'A-浏览器版本', browser_login_status: 'invalid', browser_compatibility: 'A-兼容状态', status: 'active', account_id: managerSyncAccountUid, online: 1 };
 const managerProductionReview = { id: 942, topic_id: 934, topic_title: '待审核稿件浏览器验收', version: 'v1.0', updated_at: '2026-10-09 08:30:00', operator_name: editor.name, assignee_name: editor.name };
 let managerProductionReviewStatus = 'review';
 let managerProductionReviewContent = '<p>隔离验收稿件正文</p>';
@@ -209,8 +211,10 @@ let hideCreatorMetricsForHome = false;
 let creatorDashboardMetricsVariant: 'snapshot' | 'official' | 'official-no-time' = 'snapshot';
 let failNextCreatorSyncLogs = false;
 let failNextCreatorAgentStatus = false;
+let creatorAgentStatusAgents: Array<Record<string, unknown>> = [managerCreatorAgentA];
 let failNextAuditSave: string | null = null;
 let commitNextAuditThenFailResponse = false;
+let failNextAuditStatusReadAfterCommit = false;
 let failNextAuditStatusRead = false;
 let failNextAuditStatusReadAfterAuditFailure = false;
 let holdNextAuditStatusRead = false;
@@ -246,19 +250,31 @@ let topicUserDirectoryReads = 0;
 const linkedResource = { id: 991, title: '解除关联反馈验收资料', summary: '隔离浏览器资料', library_type: 'knowledge', category: { id: 1, name: '验收资料', path: '验收资料' } };
 let isResourceLinked = true;
 let topicResourceListReads = 0;
+let failNextTopicResourceRead = false;
 let topicResourceSearchReads = 0;
 let holdNextTopicResourceSearch = false;
 let topicResourceSearchStartedCallback: (() => void) | null = null;
 let releaseTopicResourceSearchCallback: (() => void) | null = null;
 const topicResourceWrites = { add: 0, remove: 0 };
+let commitNextTopicResourceAddThenFail = false;
+let commitNextTopicResourceRemoveThenFail = false;
 let failNextTopicRefreshForTopicId: number | null = null;
 let topicSaveWrites = 0;
 let failNextManualTopicSave = false;
+let failNextManualTopicVersionsRead = false;
+let manualTopicVersionReads = 0;
 let manualTopicSaveWrites = 0;
 const manualTopicVersions: Array<Record<string, unknown>> = [];
 let failNextHomeAttention = false;
 let returnMalformedNextHomeAttention = false;
 let failNextHomeActivity = false;
+let holdNextViewerHomeActivity = false;
+let homeActivityReadStartedCallback: (() => void) | null = null;
+let heldHomeActivityResponse: (() => void) | null = null;
+let holdNextViewerHomeAttention = false;
+let heldViewerHomeAttentionResponse: (() => void) | null = null;
+let holdNextEditorHomeAttention = false;
+let heldEditorHomeAttentionResponse: (() => void) | null = null;
 let failNextHomeRetrospectives = false;
 let failNextHomeActionableMessages = false;
 let delayNextHomeActionableMessages = 0;
@@ -337,8 +353,16 @@ app.get('/__qa-home', (req, res) => {
     failNextHomeAttention = true;
     emptyHomeTasks = true;
   }
+  if (req.query.fail_activity === 'true') failNextHomeActivity = true;
+  if (req.query.hold_viewer_activity === 'true') holdNextViewerHomeActivity = true;
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
+});
+app.post('/__qa/release-home-activity', (_req, res) => {
+  const release = heldHomeActivityResponse;
+  heldHomeActivityResponse = null;
+  release?.();
+  return res.json({ released: Boolean(release) });
 });
 app.get('/__qa-manager-home', (req, res) => {
   if (req.query.fail_actionable === 'true') {
@@ -388,11 +412,14 @@ app.get('/api/permissions/my', (req, res) => {
   }
   return res.json(codes);
 });
-app.get('/api/inspirations', (_req, res) => res.json({ data: [1, 2, 3, 4].map((id) => ({ id, title: `首页灵感预览 ${id}`, content: '', creator_id: editor.id, created_at: '2026-10-09 12:00:00' })), total: 4 }));
+app.get('/api/inspirations', (req, res) => {
+  const isViewer = req.get('authorization') === 'Bearer topic-stage-viewer-fixture';
+  return res.json({ data: [1, 2, 3, 4].map((id) => ({ id, title: `${isViewer ? '当前账号灵感预览' : '首页灵感预览'} ${id}`, content: '', creator_id: isViewer ? viewer.id : editor.id, created_at: '2026-10-09 12:00:00' })), total: 4 });
+});
 app.get('/api/dashboard/home-attention', (req, res) => {
   if (failNextHomeAttention) {
     failNextHomeAttention = false;
-    return res.status(503).json({ message: '工作台摘要暂时无法读取，请重试。' });
+    return res.status(503).json({ message: 'Failed to fetch' });
   }
   if (returnMalformedNextHomeAttention) {
     returnMalformedNextHomeAttention = false;
@@ -436,6 +463,7 @@ app.get('/api/dashboard/home-attention', (req, res) => {
       ? { available: false, total: 0, tasks: [] }
       : { available: true, total: 1, tasks: [managerProductionReview] },
     retrospectives: retrospectiveSummary,
+    my_retro_actions: { available: true, total: 0, tasks: [] },
     topic_stages: {
       pending: { total: 4, topics: [auditTopic, secondPendingTopic, thirdPendingTopic].map((topic) => ({ id: topic.id, title: topic.title, status: 'pending', created_at: topic.created_at, stage_entered_at: topic.stage_entered_at, creator_name: topic.creator_name, assignee_name: topic.assignee_name })) },
       production: { total: 2, topics: [
@@ -478,26 +506,65 @@ app.get('/api/dashboard/home-attention', (req, res) => {
     payload.my_drafts = { tasks: [] };
     payload.topic_stages.pending = { total: 0, topics: [] };
   }
+  if (req.get('authorization') === 'Bearer topic-stage-viewer-fixture') {
+    payload.active_topics = { total: 1, topics: [{ id: mobileTopic.id, title: '当前账号进行中选题', status: 'production' }] };
+    payload.counts = { overdue: 0, due_soon: 0, stalled: 0, stage_time_unknown: 0, total: 0 };
+    payload.topics = [];
+    payload.today_publishing = { total: 0, tasks: [] };
+    payload.sync_anomalies = { available: true, total: 0, tasks: [] };
+    payload.production_reviews = { available: false, total: 0, tasks: [] };
+    payload.retrospectives = { available: true, total: 0, tasks: [] };
+    payload.my_retro_actions = { available: true, total: 0, tasks: [] };
+    payload.topic_stages = {
+      pending: { total: 0, topics: [] },
+      production: { total: 1, topics: [{ id: mobileTopic.id, title: '当前账号进行中选题', status: 'production', created_at: '2026-10-09 08:00:00', stage_entered_at: '2026-10-09 08:00:00', creator_name: viewer.name, assignee_name: viewer.name }] },
+      shooting: { total: 0, topics: [] },
+      publishing: { total: 0, topics: [] },
+      completed: { total: 0, topics: [] },
+    };
+    payload.my_drafts = { tasks: [] };
+  }
   if (holdOldHomeReads && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture' && req.get('authorization') !== 'Bearer topic-stage-creator-fixture') {
     payload.active_topics = { total: 99, topics: [{ id: mobileTopic.id, title: '迟到的旧账号选题', status: 'approved' }] };
     heldOldHomeReplies.push(() => res.json(payload));
     return;
   }
+  if (holdNextViewerHomeAttention && req.get('authorization') === 'Bearer topic-stage-viewer-fixture') {
+    holdNextViewerHomeAttention = false;
+    heldViewerHomeAttentionResponse = () => res.json(payload);
+    return;
+  }
+  if (holdNextEditorHomeAttention && req.get('authorization') === 'Bearer topic-stage-fixture') {
+    holdNextEditorHomeAttention = false;
+    heldEditorHomeAttentionResponse = () => res.json(payload);
+    return;
+  }
   return res.json(payload);
 });
-app.get('/api/dashboard/home-activity', (_req, res) => {
+app.get('/api/dashboard/home-activity', (req, res) => {
   if (failNextHomeActivity) {
     failNextHomeActivity = false;
-    return res.status(503).json({ message: '最近变化暂不可用，请重试。' });
+    return res.status(503).json({ message: 'Failed to fetch' });
   }
-  return res.json({
+  const isViewer = req.get('authorization') === 'Bearer topic-stage-viewer-fixture';
+  const payload = {
     scope: 'personal',
     generated_at: '2026-10-09 12:00:00',
-    events: [
+    events: isViewer ? [
+      { id: 'viewer-current-activity', kind: 'version', label: '稿件版本', title: '当前账号最近变化', detail: '小修 · 基于 v1.0', occurred_at: '2026-10-09 11:30:00', path: '/production/943' },
+    ] : [
       { id: 'version-943', kind: 'version', label: '稿件版本', title: '最近变化验收稿件', detail: '小修 · 基于 v1.0', occurred_at: '2026-10-09 11:00:00', path: '/production/943' },
       { id: 'topic-status-934', kind: 'topic_status', label: '选题状态', title: auditTopic.title, detail: '阶段更新至待审核', occurred_at: '2026-10-09 10:00:00', path: `/topics/${auditTopic.id}` },
     ],
-  });
+  };
+  if (isViewer && holdNextViewerHomeActivity) {
+    holdNextViewerHomeActivity = false;
+    homeActivityReadStartedCallback?.();
+    homeActivityReadStartedCallback = null;
+    heldHomeActivityResponse = () => res.json(payload);
+    return;
+  }
+  return res.json(payload);
 });
 app.get('/api/creator-agent/douyin/dashboard', (req, res) => {
   const accountUid = typeof req.query.account_id === 'string' ? req.query.account_id : undefined;
@@ -505,10 +572,10 @@ app.get('/api/creator-agent/douyin/dashboard', (req, res) => {
   creatorDashboardAccountQueries.push(accountUid);
   if (failNextCreatorDashboard) {
     failNextCreatorDashboard = false;
-    return res.status(503).json({ message: '抖音数据驾驶舱暂不可用，请重试。' });
+    return res.status(503).json({ message: 'Internal Server Error' });
   }
   return res.json({
-    account: { nickname: '负责人验收账号', douyin_uid: accountUid || managerSyncAccountUid },
+    account: { nickname: accountUid === managerSecondarySyncAccountUid ? '负责人验收账号 B' : '负责人验收账号', douyin_uid: accountUid || managerSyncAccountUid },
     metrics: {
       fans_count: hideCreatorMetricsForHome ? null : 120,
       fans_observed_on: hideCreatorMetricsForHome || creatorDashboardMetricsVariant === 'official-no-time' ? null : '2026-10-08',
@@ -543,7 +610,7 @@ app.get('/api/creator-agent/status', (_req, res) => {
     failNextCreatorAgentStatus = false;
     return res.status(503).json({ message: '采集端状态暂不可用，请重试。' });
   }
-  return res.json({ agents: [{ id: 1, device_id: 'manager-device', device_name: '验收设备', protocol_version: 1, browser_login_status: 'valid', browser_compatibility: 'compatible', status: 'active', account_id: managerSyncAccountUid, online: 1 }], protocol_version: 1 });
+  return res.json({ agents: creatorAgentStatusAgents, protocol_version: 1 });
 });
 app.get('/api/topics', (req, res) => {
   if (typeof req.query.status === 'string') homeTopicListReads += 1;
@@ -565,6 +632,10 @@ app.get('/api/users', (_req, res) => {
 });
 app.get('/api/topics/:id/resources', (req, res) => {
   topicResourceListReads += 1;
+  if (failNextTopicResourceRead) {
+    failNextTopicResourceRead = false;
+    return res.status(503).json({ message: '关联资料读取暂不可用。' });
+  }
   return res.json({ data: Number(req.params.id) === productionTopic.id && isResourceLinked ? [linkedResource] : [] });
 });
 app.post('/api/topics/:topicId/resources', (req, res) => {
@@ -573,6 +644,10 @@ app.post('/api/topics/:topicId/resources', (req, res) => {
     return res.status(409).json({ message: '资料不可关联' });
   }
   isResourceLinked = true;
+  if (commitNextTopicResourceAddThenFail) {
+    commitNextTopicResourceAddThenFail = false;
+    return res.status(503).json({ message: '关联结果响应暂不可用。' });
+  }
   return res.json({ message: '资料关联已创建' });
 });
 app.delete('/api/topics/:topicId/resources/:resourceId', (req, res) => {
@@ -581,10 +656,19 @@ app.delete('/api/topics/:topicId/resources/:resourceId', (req, res) => {
     return res.status(404).json({ message: '关联不存在' });
   }
   isResourceLinked = false;
+  if (commitNextTopicResourceRemoveThenFail) {
+    commitNextTopicResourceRemoveThenFail = false;
+    return res.status(503).json({ message: '解除结果响应暂不可用。' });
+  }
   return res.json({ message: '资料关联已解除' });
 });
 app.get('/api/topics/:id/asset-dimensions', (_req, res) => res.json({ data: [] }));
 app.get('/api/topics/:id/versions', (req, res) => {
+  manualTopicVersionReads += 1;
+  if (Number(req.params.id) === manualSaveTopic.id && failNextManualTopicVersionsRead) {
+    failNextManualTopicVersionsRead = false;
+    return res.status(503).json({ error: '隔离验收：大纲历史暂时无法读取' });
+  }
   return res.json({ data: [...manualTopicVersions].reverse() });
 });
 app.get('/api/topics/:id', (req, res) => {
@@ -779,10 +863,23 @@ function finishTopicAudit(req: express.Request, res: express.Response) {
   const topicId = Number(req.params.id);
   const topic = topics.get(topicId);
   if (!topic) return res.status(404).json({ message: '选题不存在' });
-  topic.status = req.body?.status;
-  auditWrites.push({ topicId, status: String(req.body?.status) });
+  if (topic.status !== 'pending' || !['approved', 'rejected'].includes(String(req.body?.status))) {
+    return res.status(409).json({ message: '选题状态已变化，请刷新后重新审核。' });
+  }
+  const status = String(req.body.status);
+  topic.status = status;
+  if (status === 'approved' && Number(req.body?.assignee_id) > 0) topic.assignee_id = Number(req.body.assignee_id);
+  const history = Array.isArray(topic.history) ? topic.history : [];
+  topic.history = history;
+  const nextHistoryId = history.reduce((max, entry) => Math.max(max, Number(entry.id) || 0), 0) + 1;
+  history.push({ id: nextHistoryId, topic_id: topicId, action: status, comment: String(req.body?.comment ?? ''), operator_id: editor.id, operator_name: editor.name, created_at: '2026-10-09 12:00:00' });
+  auditWrites.push({ topicId, status });
   if (commitNextAuditThenFailResponse) {
     commitNextAuditThenFailResponse = false;
+    if (failNextAuditStatusReadAfterCommit) {
+      failNextAuditStatusReadAfterCommit = false;
+      failNextAuditStatusRead = true;
+    }
     return res.status(503).json({ message: '隔离验收：审核已保存但响应丢失' });
   }
   return res.json({ message: '审核结果已保存' });
@@ -931,12 +1028,19 @@ try {
     await auditPage.goto(`${base}/__qa/${auditTopic.id}?theme=${theme}`);
     await auditPage.getByRole('heading', { name: auditTopic.title }).waitFor();
     await auditPage.getByRole('button', { name: '审核选题', exact: true }).click();
-    const approvedOption = auditPage.getByRole('button', { name: '审核通过', exact: true });
-    const rejectedOption = auditPage.getByRole('button', { name: '驳回修改', exact: true });
+    const auditResultGroup = auditPage.getByRole('group', { name: '审核结果', exact: true });
+    const approvedOption = auditResultGroup.getByRole('button', { name: '审核通过', exact: true });
+    const rejectedOption = auditResultGroup.getByRole('button', { name: '驳回修改', exact: true });
+    const auditWritesBeforeSelection = auditWrites.length;
     await approvedOption.waitFor();
+    assert.equal(await approvedOption.getAttribute('aria-pressed'), 'true', 'approval is initially exposed as the selected audit result');
+    assert.equal(await rejectedOption.getAttribute('aria-pressed'), 'false', 'rejection is initially exposed as unselected');
     assert.ok((await approvedOption.getAttribute('class'))?.includes('bg-studio-success-soft'), 'selected approval uses a soft semantic surface');
     assert.ok((await textContrast(approvedOption)) >= 4.5, `${theme}主题审核通过选项文字对比度应不低于 4.5:1`);
     await rejectedOption.click();
+    assert.equal(await approvedOption.getAttribute('aria-pressed'), 'false', 'choosing rejection clears the approval selected state');
+    assert.equal(await rejectedOption.getAttribute('aria-pressed'), 'true', 'choosing rejection exposes it as the selected audit result');
+    assert.equal(auditWrites.length, auditWritesBeforeSelection, 'changing the audit result selection does not submit an audit write');
     assert.ok((await rejectedOption.getAttribute('class'))?.includes('bg-studio-coral-soft'), 'selected rejection uses a soft semantic surface');
     assert.ok((await textContrast(rejectedOption)) >= 4.5, `${theme}主题驳回选项文字对比度应不低于 4.5:1`);
     const confirmAudit = auditPage.getByRole('button', { name: '驳回选题', exact: true });
@@ -991,12 +1095,13 @@ try {
   await auditSubmit.locator('select').last().selectOption(String(editor.id));
   failNextAuditSave = '审核服务暂不可用，请稍后重试。';
   await auditSubmit.getByRole('button', { name: '通过审核', exact: true }).click();
-  await auditSubmit.getByText('服务器仍显示待审核。未自动重发；请核对审核意见后，再次明确确认。', { exact: true }).waitFor();
+  await auditSubmit.getByText('服务器仍处于待审核状态，审核历史也未变化。系统不会自动重发；如需继续，请再次确认原审核操作。', { exact: true }).waitFor();
   assert.equal(auditTopic.status, 'pending', 'failed audit leaves the isolated topic unchanged');
   assert.deepEqual(auditWrites, [], 'failed audit is not recorded as a successful mutation');
   await auditSubmit.getByRole('heading', { name: '审核选题', exact: true }).waitFor();
-  await auditSubmit.getByRole('button', { name: '通过审核', exact: true }).click();
-  await auditSubmit.getByText('选题已通过审核', { exact: true }).waitFor();
+  await auditSubmit.getByRole('button', { name: '确认再次提交审核', exact: true }).click();
+  await auditSubmit.getByRole('dialog', { name: '确认再次提交审核', exact: true }).getByRole('button', { name: '确认再次提交', exact: true }).click();
+  await auditSubmit.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
   assert.equal(auditTopic.status, 'approved', 'successful retry updates the isolated topic before showing success');
   assert.deepEqual(auditWrites, [{ topicId: auditTopic.id, status: 'approved' }], 'the retry performs exactly one successful audit write');
   assert.equal(await auditSubmit.getByRole('heading', { name: '审核选题', exact: true }).count(), 0, 'successful audit closes the review dialog');
@@ -1024,7 +1129,7 @@ try {
   assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'one delayed audit request is in flight');
   releaseAuditSave?.();
   releaseAuditSave = null;
-  await auditSubmit.getByText('选题已通过审核', { exact: true }).waitFor();
+  await auditSubmit.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
   assert.equal(auditTopic.status, 'approved', 'the delayed audit is reflected after server confirmation');
   assert.deepEqual(auditWrites.at(-1), { topicId: auditTopic.id, status: 'approved' }, 'the delayed audit is recorded once');
   assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'the locked dialog does not issue a duplicate write');
@@ -1080,7 +1185,7 @@ try {
   failNextAuditSave = '审核服务暂不可用，请稍后重试。';
   failNextAuditStatusReadAfterAuditFailure = true;
   await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).click();
-  await lockedAudit.getByText('审核结果暂时无法确认。为避免重复提交，审核控件已锁定；请重新只读核实状态。', { exact: true }).waitFor();
+  await lockedAudit.getByText(/审核结果暂时无法确认/).waitFor();
   assert.equal(await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).isDisabled(), true, 'unknown audit result locks duplicate submission');
   assert.deepEqual(auditWrites, [], 'failed audit and failed readback do not report a successful write');
   let resolveAuditStatusReadStarted!: () => void;
@@ -1096,14 +1201,102 @@ try {
   releaseAuditStatusRead?.();
   releaseAuditStatusRead = null;
   await heldAuditStatusResponse;
-  await lockedAudit.getByText('服务器仍显示待审核。未自动重发；请核对审核意见后，再次明确确认。', { exact: true }).waitFor();
+  await lockedAudit.getByText('服务器仍处于待审核状态，审核历史也未变化。系统不会自动重发；如需继续，请再次确认原审核操作。', { exact: true }).waitFor();
   assert.equal(auditWrites.length, 0, 'read-only verification does not repeat an audit write');
-  await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).click();
-  await lockedAudit.getByText('选题已通过审核', { exact: true }).waitFor();
+  await lockedAudit.getByRole('button', { name: '确认再次提交审核', exact: true }).click();
+  await lockedAudit.getByRole('dialog', { name: '确认再次提交审核', exact: true }).getByRole('button', { name: '确认再次提交', exact: true }).click();
+  await lockedAudit.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
   assert.deepEqual(auditWrites, [{ topicId: auditTopic.id, status: 'approved' }], 'a second audit write occurs only after verification and explicit user confirmation');
   assert.equal(expectedLockedAuditHttpErrors.length, 2, 'only the injected audit and readback 503 responses are expected');
   assert.equal(expectedLockedAuditConsoleErrors.length, 2, 'only the injected audit and readback 503 errors are logged by the page');
   await lockedAudit.close();
+
+  auditTopic.status = 'pending';
+  auditWrites.length = 0;
+  const reloadAudit = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const reloadAuditPayloads: unknown[] = [];
+  reloadAudit.on('request', (request) => {
+    if (request.url().endsWith(`/api/topics/${auditTopic.id}/audit`) && request.method() === 'POST') {
+      reloadAuditPayloads.push(request.postDataJSON());
+    }
+  });
+  await reloadAudit.goto(`${base}/__qa/${auditTopic.id}`);
+  await reloadAudit.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await reloadAudit.getByRole('button', { name: '审核选题', exact: true }).click();
+  await reloadAudit.locator('#topic-audit-assignee').selectOption(String(creator.id));
+  await reloadAudit.locator('#topic-audit-comment').fill('刷新后恢复的原始审核意见');
+  const reloadAuditAttemptsBefore = auditSaveAttempts;
+  failNextAuditSave = '审核服务暂不可用，请稍后重试。';
+  failNextAuditStatusReadAfterAuditFailure = true;
+  await reloadAudit.getByRole('button', { name: '通过审核', exact: true }).click();
+  await reloadAudit.getByText(/审核结果暂时无法确认/).waitFor();
+  assert.equal(auditSaveAttempts, reloadAuditAttemptsBefore + 1, 'unknown audit response sends one POST before reload');
+  const beforeUnloadBlocked = await reloadAudit.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(beforeUnloadBlocked, true, 'unknown audit recovery warns before a reload can discard the in-memory state');
+  await reloadAudit.getByRole('button', { name: '返回列表', exact: true }).click();
+  await reloadAudit.getByRole('dialog', { name: '审核结果尚未核实', exact: true }).waitFor();
+  await reloadAudit.getByRole('button', { name: '留在本页核实审核', exact: true }).click();
+  assert.equal(await reloadAudit.getByRole('dialog', { name: '审核结果尚未核实', exact: true }).count(), 0, 'the user can stay and continue read-only recovery');
+  await reloadAudit.reload();
+  await reloadAudit.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await reloadAudit.getByText('服务器仍处于待审核状态，审核历史也未变化。系统不会自动重发；如需继续，请再次确认原审核操作。', { exact: true }).waitFor();
+  assert.equal(await reloadAudit.locator('#topic-audit-comment').inputValue(), '刷新后恢复的原始审核意见', 'reload restores the original audit comment');
+  assert.equal(await reloadAudit.locator('#topic-audit-assignee').inputValue(), String(creator.id), 'reload restores the original assignee');
+  assert.equal(auditSaveAttempts, reloadAuditAttemptsBefore + 1, 're-entry performs read-only verification and does not auto-resubmit');
+  assert.deepEqual(auditWrites, [], 'the server still has no audit write before explicit retry confirmation');
+  await reloadAudit.getByRole('button', { name: '确认再次提交审核', exact: true }).click();
+  await reloadAudit.getByRole('dialog', { name: '确认再次提交审核', exact: true }).getByRole('button', { name: '确认再次提交', exact: true }).click();
+  await reloadAudit.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
+  assert.equal(auditSaveAttempts, reloadAuditAttemptsBefore + 2, 'one additional POST follows a fresh read and explicit confirmation');
+  assert.deepEqual(reloadAuditPayloads, [
+    { status: 'approved', comment: '刷新后恢复的原始审核意见', assignee_id: creator.id },
+    { status: 'approved', comment: '刷新后恢复的原始审核意见', assignee_id: creator.id },
+  ], 'retry uses the exact persisted audit operation and does not accept changed form values');
+  await reloadAudit.close();
+
+  auditTopic.status = 'pending';
+  auditWrites.length = 0;
+  const committedAuditReload = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  await committedAuditReload.goto(`${base}/__qa/${auditTopic.id}`);
+  await committedAuditReload.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await committedAuditReload.getByRole('button', { name: '审核选题', exact: true }).click();
+  const committedAuditAttemptsBefore = auditSaveAttempts;
+  commitNextAuditThenFailResponse = true;
+  failNextAuditStatusReadAfterCommit = true;
+  await committedAuditReload.getByRole('button', { name: '通过审核', exact: true }).click();
+  await committedAuditReload.getByText(/审核结果暂时无法确认/).waitFor();
+  assert.equal(auditSaveAttempts, committedAuditAttemptsBefore + 1, 'committed response loss sends one audit POST');
+  assert.equal(auditWrites.length, 1, 'the server records the audit before dropping the response');
+  await committedAuditReload.reload();
+  await committedAuditReload.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await committedAuditReload.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
+  assert.equal(auditSaveAttempts, committedAuditAttemptsBefore + 1, 'reload recognizes committed audit history without another POST');
+  assert.equal(auditWrites.length, 1, 'read-only recovery does not duplicate the committed audit');
+  assert.equal(await committedAuditReload.evaluate((topicId) => sessionStorage.getItem(`xmt:topic-audit-pending:v1:user:${93}:topic:${topicId}`), auditTopic.id), null, 'a verified result clears only its recovery marker');
+  await committedAuditReload.close();
+
+  auditTopic.status = 'pending';
+  const blockedAuditStorage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  await blockedAuditStorage.addInitScript(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      if (key.startsWith('xmt:topic-audit-pending:v1:')) throw new DOMException('storage denied', 'SecurityError');
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await blockedAuditStorage.goto(`${base}/__qa/${auditTopic.id}`);
+  await blockedAuditStorage.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await blockedAuditStorage.getByRole('button', { name: '审核选题', exact: true }).click();
+  const blockedAuditAttemptsBefore = auditSaveAttempts;
+  await blockedAuditStorage.getByRole('button', { name: '通过审核', exact: true }).click();
+  await blockedAuditStorage.getByRole('alert').getByText(/本次未提交审核/).waitFor();
+  assert.equal(auditSaveAttempts, blockedAuditAttemptsBefore, 'storage marker failure prevents the audit POST');
+  assert.deepEqual(auditWrites, [], 'storage marker failure has no server-side audit effect');
+  await blockedAuditStorage.close();
 
   auditTopic.status = 'pending';
   const auditWritesBeforeHomeAction = auditWrites.length;
@@ -1127,9 +1320,26 @@ try {
   await home.goto(`${base}/__qa-home`);
   await home.getByRole('heading', { name: '审核与内容推进' }).waitFor();
   await home.getByRole('heading', { name: '团队选题关注' }).waitFor();
+  const desktopRecentChangesToggle = home.getByRole('button', { name: '收起最近变化', exact: true });
+  const desktopRecentChangesRegion = home.locator('#home-recent-changes-content');
   await home.getByText('可追溯的稿件版本、批注和选题阶段变化', { exact: true }).waitFor();
+  assert.equal(await desktopRecentChangesToggle.getAttribute('aria-expanded'), 'true', 'desktop recent changes reports that its content is expanded by default');
+  assert.equal(await desktopRecentChangesToggle.getAttribute('aria-controls'), 'home-recent-changes-content', 'desktop recent changes toggle points to its controlled region');
+  assert.equal(await desktopRecentChangesRegion.getAttribute('role'), 'region', 'desktop recent changes content is exposed as a named region');
+  assert.equal(await desktopRecentChangesRegion.getAttribute('aria-labelledby'), 'home-recent-changes-title', 'desktop recent changes region is named by its visible heading');
+  assert.equal(await desktopRecentChangesRegion.isVisible(), true, 'desktop recent changes region is visible while expanded');
   await home.getByText('最近变化验收稿件', { exact: true }).waitFor();
   await home.getByText('小修 · 基于 v1.0', { exact: true }).waitFor();
+  await desktopRecentChangesToggle.click();
+  const desktopRecentChangesCollapsedToggle = home.getByRole('button', { name: '展开最近变化', exact: true });
+  assert.equal(await desktopRecentChangesCollapsedToggle.getAttribute('aria-expanded'), 'false', 'desktop recent changes reports the collapsed state after activation');
+  assert.equal(await desktopRecentChangesRegion.isVisible(), false, 'desktop recent changes controlled region is hidden while collapsed');
+  assert.equal(await home.getByText('最近变化验收稿件', { exact: true }).count(), 0, 'collapsing desktop recent changes hides its event list');
+  await desktopRecentChangesCollapsedToggle.click();
+  const desktopRecentChangesExpandedToggle = home.getByRole('button', { name: '收起最近变化', exact: true });
+  assert.equal(await desktopRecentChangesExpandedToggle.getAttribute('aria-expanded'), 'true', 'desktop recent changes reports the expanded state after reopening');
+  assert.equal(await desktopRecentChangesRegion.isVisible(), true, 'desktop recent changes controlled region is shown after reopening');
+  await home.getByText('最近变化验收稿件', { exact: true }).waitFor();
   assert.equal(creatorDashboardAccountQueries.length, noPermissionCreatorReadsBeforeHome, 'Home does not request creator analytics when the signed-in user lacks creator:data:view');
   assert.equal(await home.getByText('近 7 天播放变化', { exact: true }).count(), 0, 'creator metrics stay hidden for a user without view permission');
   assert.deepEqual(recentHomePublishingListRequests, [], 'Home no longer reads the publishing list to synthesize recent activity');
@@ -1351,9 +1561,11 @@ try {
   await partialHome.goto(`${base}/__qa-home`);
   assert.equal(await partialHome.getByText('工作台部分数据暂时无法读取', { exact: true }).count(), 0, 'the aggregate error is not repeated in a second dashboard banner');
   const unavailablePendingStage = partialHome.getByRole('button', { name: /— 待审/ });
-  await unavailablePendingStage.getByText('暂时无法读取，请重试', { exact: true }).waitFor();
+  await unavailablePendingStage.getByText('暂时无法读取', { exact: true }).waitFor();
   const unavailableRetrospectiveStage = partialHome.getByRole('button', { name: /— 复盘/ });
-  await unavailableRetrospectiveStage.getByText('暂时无法读取，请重试', { exact: true }).waitFor();
+  await unavailableRetrospectiveStage.getByText('暂时无法读取', { exact: true }).waitFor();
+  assert.equal(await unavailablePendingStage.getByRole('button').count(), 0, 'a failed stage card exposes no misleading nested retry control');
+  await partialHome.getByRole('button', { name: '重新加载', exact: true }).waitFor();
   await partialHome.getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).waitFor();
   assert.equal(await partialHome.getByRole('alert').count(), 1, 'the aggregate failure has one actionable alert');
   assert.equal(await partialHome.getByText('—', { exact: true }).count(), 7, 'failed stage counts, retrospective count, and attention count remain unknown instead of zero');
@@ -1378,11 +1590,14 @@ try {
   failNextHomeRetrospectives = true;
   await partialRetrospectiveHome.goto(`${base}/__qa-home`);
   await partialRetrospectiveHome.getByRole('heading', { name: '团队选题关注' }).waitFor();
-  await partialRetrospectiveHome.getByRole('button', { name: /^— 复盘/ }).getByText('暂时无法读取，请重试', { exact: true }).waitFor();
+  const unavailableRetrospectiveCard = partialRetrospectiveHome.getByRole('button', { name: /^— 复盘/ });
+  await unavailableRetrospectiveCard.getByText('暂时无法读取', { exact: true }).waitFor();
   await partialRetrospectiveHome.getByRole('button', { name: /^4 待审/ }).getByText(auditTopic.title, { exact: true }).waitFor();
   assert.equal(await partialRetrospectiveHome.getByText('团队周复盘', { exact: true }).count(), 0, 'an unavailable retrospective summary is not rendered as an empty inventory or stale preview');
   assert.equal(await partialRetrospectiveHome.getByText('今天没有必须处理的任务', { exact: true }).count(), 0, 'the isolated retrospective failure does not block other Home sections');
   assert.equal(await partialRetrospectiveHome.getByRole('alert').count(), 1, 'the partial failure is reported in the dashboard summary');
+  await unavailableRetrospectiveCard.click();
+  await partialRetrospectiveHome.waitForURL((url) => url.pathname === '/retrospectives');
   await partialRetrospectiveHome.close();
 
   const mobileRetrospectiveHome = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
@@ -1519,10 +1734,21 @@ try {
   assert.match(await desktopManagerPriorityTasks.nth(1).getAttribute('aria-label') || '', /^查看同步：/);
   assert.match(await desktopManagerPriorityTasks.nth(2).getAttribute('aria-label') || '', /^跟进选题：/);
   assert.match(await desktopManagerPriorityTasks.nth(3).getAttribute('aria-label') || '', /^开始审核：/);
-  await managerHome.getByRole('heading', { name: '团队选题关注' }).waitFor();
+  await managerHome.getByRole('heading', { name: '团队工作概览' }).waitFor();
+  const managerCrossModuleOverview = managerHome.getByTestId('home-cross-module-overview');
+  await managerCrossModuleOverview.getByRole('button', { name: '选题卡点：2 项，逾期 1 · 卡点 1 · 临近 1' }).waitFor();
+  await managerCrossModuleOverview.getByRole('button', { name: '待审选题：4 项，进入选题审核' }).waitFor();
+  await managerCrossModuleOverview.getByRole('button', { name: '待审稿件：1 项，按现有稿件权限范围' }).waitFor();
+  await managerCrossModuleOverview.getByRole('button', { name: '今日待发布：1 项，按现有发布权限范围' }).waitFor();
+  await managerCrossModuleOverview.getByRole('button', { name: '同步异常：1 项，失败或未完整的账号' }).waitFor();
+  await managerCrossModuleOverview.getByRole('button', { name: '待办消息：1 项，未读且可跟进' }).waitFor();
+  await managerCrossModuleOverview.getByText('各项目按当前账号已有权限与可见范围统计。', { exact: true }).waitFor();
   const userMenuButton = managerHome.locator('button[title="打开用户菜单"]');
   await userMenuButton.waitFor();
   assert.equal(await userMenuButton.getAttribute('title'), '打开用户菜单');
+  const userMenuVisibleLabel = (await userMenuButton.locator('div.hidden.text-right').innerText()).replace(/\s+/g, ' ').trim();
+  assert.equal(await userMenuButton.getAttribute('aria-label'), null, 'the user-menu name comes from its visible account and role text');
+  assert.equal(await managerHome.getByRole('button', { name: `${userMenuVisibleLabel} 打开用户菜单`, exact: true }).count(), 1, 'the user-menu name keeps the visible label and explains its purpose');
   assert.equal(await userMenuButton.getAttribute('aria-expanded'), 'false');
   await managerHome.getByText('近 7 天播放变化', { exact: true }).waitFor();
   await managerHome.getByText('粉丝总数', { exact: true }).waitFor();
@@ -1658,11 +1884,43 @@ try {
   failNextCreatorAgentStatus = true;
   await creatorDashboardPage.goto(`${base}/analytics/creator-center?account_id=${encodeURIComponent(managerSyncAccountUid)}`);
   await creatorDashboardPage.getByText('抖音数据驾驶舱暂不可用，请重试。', { exact: true }).waitFor();
+  assert.equal(await creatorDashboardPage.getByText('Internal Server Error', { exact: true }).count(), 0, 'dashboard does not expose the raw technical response');
   await creatorDashboardPage.getByRole('button', { name: '重新加载数据', exact: true }).click();
   await creatorDashboardPage.getByRole('heading', { name: '抖音数据驾驶舱' }).waitFor();
   await creatorDashboardPage.getByText('负责人验收账号', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('采集端在线', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('尚无同步记录；首次同步后会显示在这里。', { exact: true }).waitFor();
+  const creatorProfileImages = creatorDashboardPage.locator('img[alt$=" avatar"], img[alt$=" mini avatar"]');
+  assert.equal(await creatorProfileImages.count(), 2, 'the creator profile card exposes its portrait and compact avatar images');
+  for (let index = 0; index < await creatorProfileImages.count(); index += 1) {
+    const dimensions = await creatorProfileImages.nth(index).evaluate((element) => ({
+      width: element.getAttribute('width'),
+      height: element.getAttribute('height'),
+      aspectRatio: getComputedStyle(element).aspectRatio,
+      loading: element.loading,
+    }));
+    assert.ok(Number(dimensions.width) > 0 && Number(dimensions.height) > 0, `creator image ${index + 1} reserves its intrinsic dimensions`);
+    assert.notEqual(dimensions.aspectRatio, 'auto', `creator image ${index + 1} declares a stable aspect ratio`);
+    assert.notEqual(dimensions.loading, 'lazy', `above-the-fold creator image ${index + 1} loads eagerly`);
+  }
+  const creatorProfileGlow = creatorDashboardPage.locator('[style*="--behind-glow-color"]').first();
+  for (const theme of ['light', 'dark'] as const) {
+    await creatorDashboardPage.evaluate((nextTheme) => localStorage.setItem('xmt_theme', nextTheme), theme);
+    await creatorDashboardPage.reload();
+    await creatorDashboardPage.getByRole('heading', { name: '抖音数据驾驶舱' }).waitFor();
+    const glow = await creatorProfileGlow.evaluate((element) => {
+      const token = getComputedStyle(document.documentElement).getPropertyValue('--xmt-cyan-rgb').trim();
+      const overlay = element.querySelector('.pointer-events-none');
+      const background = overlay ? getComputedStyle(overlay).backgroundImage : '';
+      const renderedColor = background.match(/rgba?\(([^)]+)\)/)?.[1]?.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
+      return { token: token.split(/\s+/).map(Number), configuredColor: element.style.getPropertyValue('--behind-glow-color'), renderedColor };
+    });
+    assert.equal(glow.configuredColor, 'rgb(var(--xmt-cyan-rgb) / 0.38)', `${theme} creator profile glow uses the theme token`);
+    assert.deepEqual(glow.renderedColor, glow.token, `${theme} creator profile glow resolves to the active cyan token`);
+  }
+  await creatorDashboardPage.evaluate(() => localStorage.setItem('xmt_theme', 'light'));
+  await creatorDashboardPage.reload();
+  await creatorDashboardPage.getByRole('heading', { name: '抖音数据驾驶舱' }).waitFor();
   const creatorWorksButton = creatorDashboardPage.getByRole('button', { name: '查看作品', exact: true });
   for (const width of [320, 390, 1440]) {
     await creatorDashboardPage.setViewportSize({ width, height: 844 });
@@ -1670,6 +1928,7 @@ try {
       const button = element.getBoundingClientRect();
       const card = element.closest('[aria-label="创作者账号概览"]')?.getBoundingClientRect();
       return {
+        height: button.height,
         whiteSpace: getComputedStyle(element).whiteSpace,
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
@@ -1679,6 +1938,7 @@ try {
         viewportWidth: document.documentElement.clientWidth,
       };
     });
+    assert.ok(creatorWorksButtonLayout.height >= 40, `the creator works action is at least 40px high at ${width}px`);
     assert.equal(creatorWorksButtonLayout.whiteSpace, 'nowrap', `the creator works action stays on one line at ${width}px`);
     assert.ok(creatorWorksButtonLayout.scrollWidth <= creatorWorksButtonLayout.clientWidth, `the creator works label fits within its button at ${width}px`);
     assert.ok(creatorWorksButtonLayout.buttonRight <= creatorWorksButtonLayout.cardRight, `the creator works action stays within its card at ${width}px`);
@@ -1690,14 +1950,75 @@ try {
   failNextCreatorAgentStatus = true;
   await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).click();
   await creatorDashboardPage.getByText('驾驶舱刷新失败，仍显示最近一次成功数据：抖音数据驾驶舱暂不可用，请重试。', { exact: true }).waitFor();
+  assert.equal(await creatorDashboardPage.getByText('Internal Server Error', { exact: true }).count(), 0, 'dashboard refresh recovery does not expose the raw technical response');
   await creatorDashboardPage.getByText('采集端状态暂不可用', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('同步记录读取失败；当前同步指标尚未确认。请点击页面上方“刷新数据”重试。', { exact: true }).waitFor();
   await creatorDashboardPage.getByText('负责人验收账号', { exact: true }).first().waitFor();
   assert.equal(await creatorDashboardPage.getByText('采集端离线', { exact: true }).count(), 0, 'a refresh failure retains the existing collector identity without presenting unknown as offline');
+  await creatorDashboardPage.setViewportSize({ width: 320, height: 720 });
+  const dashboardRefreshAlert = creatorDashboardPage.getByRole('alert').filter({ hasText: '驾驶舱刷新失败，仍显示最近一次成功数据：' });
+  const dashboardRetryButton = dashboardRefreshAlert.getByRole('button', { name: '重新加载', exact: true });
+  await dashboardRetryButton.scrollIntoViewIfNeeded();
+  const dashboardRetryBox = await dashboardRetryButton.boundingBox();
+  assert.ok(dashboardRetryBox && dashboardRetryBox.height >= 40, 'the inline dashboard retry action is at least 40px high at 320px');
+  await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).focus();
+  await creatorDashboardPage.keyboard.press('Tab');
+  assert.equal(await dashboardRetryButton.evaluate((element) => element === document.activeElement), true, 'keyboard Tab reaches the inline dashboard retry action');
+  const dashboardRetryFocus = await dashboardRetryButton.evaluate((element) => ({
+    visible: element.matches(':focus-visible'),
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    outlineWidth: getComputedStyle(element).outlineWidth,
+  }));
+  assert.equal(dashboardRetryFocus.visible, true, 'keyboard focus on the retry action is visually exposed');
+  assert.equal(dashboardRetryFocus.outlineStyle, 'solid', 'keyboard focus uses the shared solid focus outline');
+  assert.equal(dashboardRetryFocus.outlineWidth, '2px', 'keyboard focus outline remains clearly visible at 320px');
+  const dashboardNarrowLayout = await creatorDashboardPage.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
+  assert.ok(dashboardNarrowLayout.scrollWidth <= dashboardNarrowLayout.width + 1, 'the dashboard error recovery state has no horizontal overflow at 320px');
+  await creatorDashboardPage.setViewportSize({ width: 1440, height: 960 });
   await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).click();
   await creatorDashboardPage.getByText('采集端在线', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('尚无同步记录；首次同步后会显示在这里。', { exact: true }).waitFor();
   assert.equal(await creatorDashboardPage.getByRole('alert').count(), 0, 'a successful dashboard refresh clears all three independent errors');
+
+  const creatorAgentPanel = creatorDashboardPage.getByRole('heading', { name: 'Creator Agent' }).locator('..');
+  await creatorAgentPanel.getByText('采集设备 A', { exact: true }).waitFor();
+  const creatorAgentFields = creatorAgentPanel.locator('div.grid > div');
+  assert.match(await creatorAgentFields.nth(1).innerText(), /浏览器 A.*A-浏览器版本/s, 'account A shows its own browser details');
+  assert.match(await creatorAgentFields.nth(3).innerText(), /抖音登录\s+未确认/, 'account A shows its own login state');
+
+  failNextCreatorAgentStatus = true;
+  await creatorDashboardPage.evaluate((nextAccountId) => {
+    history.pushState({}, '', `/analytics/creator-center?account_id=${encodeURIComponent(nextAccountId)}`);
+    dispatchEvent(new PopStateEvent('popstate'));
+  }, managerSecondarySyncAccountUid);
+  await creatorDashboardPage.getByText('负责人验收账号 B', { exact: true }).waitFor();
+  await creatorDashboardPage.getByText('采集端状态暂不可用', { exact: true }).first().waitFor();
+  assert.equal(await creatorAgentPanel.getByText('采集设备 A', { exact: true }).count(), 0, 'account B does not show account A device after the status request fails');
+  assert.equal(await creatorAgentPanel.getByText('浏览器 A', { exact: true }).count(), 0, 'account B does not show account A browser after the status request fails');
+  assert.equal(await creatorAgentPanel.getByText('A-浏览器版本', { exact: true }).count(), 0, 'account B does not show account A browser version after the status request fails');
+  assert.equal(await creatorAgentPanel.getByText('A-兼容状态', { exact: true }).count(), 0, 'account B does not show account A compatibility after the status request fails');
+  assert.equal(await creatorAgentFields.nth(3).innerText(), '抖音登录\n暂不可用', 'account B login state is unavailable when its status request fails');
+  assert.equal(await creatorDashboardPage.getByText('采集端离线', { exact: true }).count(), 0, 'a failed status request does not convert an unmatched account into offline');
+
+  await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).click();
+  await creatorDashboardPage.getByText('尚未绑定采集端', { exact: true }).first().waitFor();
+  assert.equal(await creatorAgentPanel.getByText('采集设备 A', { exact: true }).count(), 0, 'a successful status read without a B agent does not retain account A device');
+  assert.equal(await creatorAgentFields.nth(0).innerText(), '设备\n尚未绑定采集端', 'an account without a matching agent is shown as not bound');
+  assert.equal(await creatorAgentFields.nth(3).innerText(), '抖音登录\n未确认', 'an account without a matching agent has no inherited login state');
+
+  creatorAgentStatusAgents = [{ ...managerCreatorAgentA, id: 2, device_id: 'manager-device-b', device_name: '采集设备 B', browser_type: '浏览器 B', browser_version: 'B-浏览器版本', browser_login_status: 'valid', browser_compatibility: 'B-兼容状态', account_id: managerSecondarySyncAccountUid, online: 0 }];
+  await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).click();
+  await creatorAgentPanel.getByText('采集设备 B', { exact: true }).waitFor();
+  await creatorAgentPanel.getByText('采集端离线', { exact: true }).waitFor();
+  assert.equal(await creatorAgentPanel.getByText('采集设备 A', { exact: true }).count(), 0, 'account B displays only its own collector after status recovery');
+  assert.match(await creatorAgentFields.nth(1).innerText(), /浏览器 B.*B-浏览器版本/s, 'account B displays its own browser details');
+  assert.equal(await creatorAgentFields.nth(3).innerText(), '抖音登录\n正常', 'account B displays its own login state while its collector is offline');
+
+  creatorAgentStatusAgents = creatorAgentStatusAgents.map((agent) => ({ ...agent, online: 1 }));
+  await creatorDashboardPage.getByRole('button', { name: '刷新数据', exact: true }).click();
+  await creatorAgentPanel.getByText('采集端在线', { exact: true }).waitFor();
+  creatorAgentStatusAgents = [managerCreatorAgentA];
+
   assert.ok(expectedCreatorDashboardErrors.length >= 6, 'the only expected Creator Dashboard errors are the injected 503s and their response records');
   assert.ok(creatorDashboardApiMethods.every((method) => method === 'GET'), 'dashboard failure and retry recovery perform no API writes');
   await creatorDashboardPage.close();
@@ -1710,6 +2031,9 @@ try {
   managerProductionReviewContent = '<p>隔离验收稿件正文</p>';
   managerProductionApprovalWrites = 0;
   await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  const managerMobileOverview = managerMobile.getByTestId('home-cross-module-overview');
+  await managerMobileOverview.getByRole('button', { name: '选题卡点：2 项，逾期 1 · 卡点 1 · 临近 1' }).waitFor();
+  await managerMobileOverview.getByRole('button', { name: '待办消息：1 项，未读且可跟进' }).waitFor();
   const managerQuickActions = managerMobile.getByTestId('mobile-home-quick-action');
   assert(await managerQuickActions.count() >= 3, 'the management mobile Home renders its available quick actions');
   const quickActionWidths = () => managerQuickActions.evaluateAll((elements) => elements.map((element) => {
@@ -1751,6 +2075,17 @@ try {
   await pendingStageNavigation;
   await managerMobile.goto(`${base}/__qa-manager-home`);
   await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  const managerTaskToggle = managerMobile.getByRole('button', { name: '查看剩余 3 项', exact: true });
+  assert.equal(await managerTaskToggle.getAttribute('aria-expanded'), 'false', 'the mobile priority-task list starts collapsed');
+  assert.equal(await managerTaskToggle.getAttribute('aria-controls'), 'mobile-home-priority-tasks', 'the collapsed toggle identifies the controlled task list');
+  assert.equal(await managerMobile.locator('#mobile-home-priority-tasks').count(), 1, 'the controlled task list has the referenced stable id');
+  await managerTaskToggle.click();
+  const collapseManagerTasks = managerMobile.getByRole('button', { name: '收起任务', exact: true });
+  assert.equal(await collapseManagerTasks.getAttribute('aria-expanded'), 'true', 'the mobile priority-task list reports expanded after opening');
+  assert.equal(await collapseManagerTasks.getAttribute('aria-controls'), 'mobile-home-priority-tasks', 'the expanded toggle controls the same task list');
+  await collapseManagerTasks.click();
+  assert.equal(await managerPriorityTasks.count(), 3, 'collapsing the mobile priority-task list restores the first three tasks');
+  assert.equal(await managerMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).getAttribute('aria-expanded'), 'false', 'the mobile priority-task toggle reports collapsed after closing');
   await managerMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
   await managerPriorityTasks.nth(5).waitFor();
   const managerTaskText = await managerPriorityTasks.allInnerTexts();
@@ -1818,6 +2153,7 @@ try {
   creatorMobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await creatorMobile.goto(`${base}/__qa-creator-home`);
   await creatorMobile.getByRole('heading', { name: '我的今日任务' }).waitFor();
+  assert.equal(await creatorMobile.getByTestId('home-cross-module-overview').count(), 0, 'the manager-only cross-module overview is not exposed in a creator Home');
   assert.equal(await creatorMobile.getByTestId('mobile-home-active-topic-summary').innerText(), '共 2 项 · 展示最近 1 项', 'the creator Home shows the exact personal in-progress total separately from its bounded preview');
   const creatorPriorityTasks = creatorMobile.getByTestId('mobile-home-task');
   await creatorPriorityTasks.nth(2).waitFor();
@@ -2044,6 +2380,7 @@ try {
   await mobileAnnouncementStrip.getByRole('button', { name: '查看公告', exact: true }).waitFor();
   await homeMobile.getByRole('button', { name: '记灵感', exact: true }).waitFor();
   await homeMobile.getByRole('alert').getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByText(/Failed to fetch/i).count(), 0, 'the mobile attention card never exposes browser transport errors');
   await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
   assert.equal(await homeMobile.getByRole('alert').count(), 1, 'the mobile Home keeps the attention error scoped to its priority task card');
   await homeMobile.getByText('暂时无法确认是否有需要立即处理的任务。', { exact: true }).waitFor();
@@ -2081,8 +2418,19 @@ try {
   await homeMobile.getByRole('heading', { name: '内容阶段' }).waitFor();
   await homeMobile.getByRole('button', { name: '4 灵感池' }).waitFor();
   const stagePreviewToggle = homeMobile.getByRole('button', { name: /各阶段最新内容/ });
+  for (const width of [390, 320]) {
+    await homeMobile.setViewportSize({ width, height: 844 });
+    const stagePreviewToggleBounds = await stagePreviewToggle.boundingBox();
+    assert(stagePreviewToggleBounds && stagePreviewToggleBounds.height >= 40, `mobile stage preview disclosure reaches the 40px touch target at ${width}px`);
+  }
+  await homeMobile.setViewportSize({ width: 390, height: 844 });
   assert.equal(await stagePreviewToggle.getAttribute('aria-expanded'), 'false', 'mobile stage previews are collapsed by default to keep the first screen compact');
   assert.equal(await homeMobile.locator('#mobile-home-stage-previews').count(), 1, 'the stage-preview disclosure references a persistent controlled region');
+  await stagePreviewToggle.focus();
+  await stagePreviewToggle.press('Space');
+  assert.equal(await stagePreviewToggle.getAttribute('aria-expanded'), 'true', 'the mobile stage preview disclosure opens with the keyboard');
+  await stagePreviewToggle.press('Space');
+  assert.equal(await stagePreviewToggle.getAttribute('aria-expanded'), 'false', 'the mobile stage preview disclosure closes with the keyboard');
   const stagePreviewRequestCount = homeTopicListReads;
   await stagePreviewToggle.click();
   const stagePreviewList = homeMobile.getByTestId('mobile-home-stage-preview-list');
@@ -2129,6 +2477,7 @@ try {
   assert.equal(firstMobileActivityFailureResponse.status(), 503, 'expanding recent changes surfaces the isolated activity-read failure');
   assert.equal(firstMobileActivityFailureResponse.request().method(), 'GET', 'recent changes remain read-only');
   await homeMobile.getByRole('alert').getByText('最近变化暂不可用，请重试。', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByText(/Failed to fetch/i).count(), 0, 'the mobile recent-changes card never exposes browser transport errors');
   const firstMobileActivityRetry = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity'));
   await homeMobile.getByRole('button', { name: '重新加载最近变化', exact: true }).click();
   assert.equal((await firstMobileActivityRetry).status(), 200, 'the mobile recent-changes retry recovers');
@@ -2290,6 +2639,115 @@ try {
       heldOldHomeReplies.splice(0).forEach((reply) => reply());
       await identityHome.close();
     }
+  }
+
+  const accountScopedRecentActivity = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const accountActivityMethods: string[] = [];
+  accountScopedRecentActivity.on('pageerror', (error) => errors.push(error.message));
+  accountScopedRecentActivity.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  accountScopedRecentActivity.on('request', (request) => {
+    if (request.url().endsWith('/api/dashboard/home-activity')) accountActivityMethods.push(request.method());
+  });
+  try {
+    await accountScopedRecentActivity.goto(`${base}/__qa-home`);
+    await accountScopedRecentActivity.getByText('最近变化验收稿件', { exact: true }).waitFor();
+    holdNextViewerHomeActivity = true;
+    const viewerActivityReadStarted = new Promise<void>((resolve) => { homeActivityReadStartedCallback = resolve; });
+    await accountScopedRecentActivity.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'topic-stage-viewer-fixture', { persist: 'memory' });
+    }, viewer);
+    await viewerActivityReadStarted;
+    await accountScopedRecentActivity.getByRole('heading', { name: '工作台', exact: true }).waitFor();
+    assert.equal(await accountScopedRecentActivity.getByText('最近变化验收稿件', { exact: true }).count(), 0, 'switching accounts immediately hides the previous account recent activity');
+    await accountScopedRecentActivity.getByText('正在读取最近变化…', { exact: true }).waitFor();
+    assert.equal(await accountScopedRecentActivity.getByText('当前账号最近变化', { exact: true }).count(), 0, 'the new account remains in a read-only loading state until its activity arrives');
+    assert.ok(heldHomeActivityResponse, 'the new account activity response is held by the isolated fixture');
+    heldHomeActivityResponse();
+    heldHomeActivityResponse = null;
+    await accountScopedRecentActivity.getByText('当前账号最近变化', { exact: true }).waitFor();
+    assert.equal(await accountScopedRecentActivity.getByText('最近变化验收稿件', { exact: true }).count(), 0, 'only the current account recent activity is shown after the read completes');
+    assert.deepEqual(accountActivityMethods, ['GET', 'GET'], 'account switching only reads each account recent activity and does not write business data');
+  } finally {
+    holdNextViewerHomeActivity = false;
+    homeActivityReadStartedCallback = null;
+    heldHomeActivityResponse?.();
+    heldHomeActivityResponse = null;
+    await accountScopedRecentActivity.close();
+  }
+
+  const accountScopedDashboard = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const dashboardReadMethods: string[] = [];
+  accountScopedDashboard.on('pageerror', (error) => errors.push(error.message));
+  accountScopedDashboard.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  accountScopedDashboard.on('request', (request) => {
+    if (request.url().endsWith('/api/dashboard/home-attention') || request.url().endsWith('/api/inspirations')) dashboardReadMethods.push(request.method());
+  });
+  try {
+    await accountScopedDashboard.goto(`${base}/__qa-home`);
+    await accountScopedDashboard.getByText('首页灵感预览 3', { exact: true }).waitFor();
+    await accountScopedDashboard.getByText('最近变化验收稿件', { exact: true }).waitFor();
+    holdNextViewerHomeAttention = true;
+    const viewerAttentionRead = accountScopedDashboard.waitForRequest((request) => request.url().endsWith('/api/dashboard/home-attention')
+      && request.headers().authorization === 'Bearer topic-stage-viewer-fixture');
+    await accountScopedDashboard.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'topic-stage-viewer-fixture', { persist: 'memory' });
+    }, viewer);
+    await viewerAttentionRead;
+    await accountScopedDashboard.getByText('正在加载工作台…', { exact: true }).waitFor({ state: 'attached' });
+    assert.equal(await accountScopedDashboard.getByText('首页灵感预览 3', { exact: true }).count(), 0, 'switching accounts hides the previous account inspiration preview while the summary is pending');
+    assert.equal(await accountScopedDashboard.getByText('最近变化验收稿件', { exact: true }).count(), 0, 'switching accounts hides the previous account home sections while the summary is pending');
+    assert.ok(heldViewerHomeAttentionResponse, 'the current account home summary is held by the isolated fixture');
+    heldViewerHomeAttentionResponse();
+    heldViewerHomeAttentionResponse = null;
+    await accountScopedDashboard.getByRole('heading', { name: '我的今日任务', exact: true }).waitFor();
+    await accountScopedDashboard.getByText('当前账号进行中选题', { exact: true }).waitFor();
+    await accountScopedDashboard.getByText('当前账号灵感预览 3', { exact: true }).waitFor();
+    assert.equal(await accountScopedDashboard.getByText('首页灵感预览 3', { exact: true }).count(), 0, 'only the current account inspiration preview is shown after its read completes');
+    assert.deepEqual(dashboardReadMethods, ['GET', 'GET', 'GET', 'GET'], 'account-scoped Home dashboard reads remain GET-only');
+  } finally {
+    holdNextViewerHomeAttention = false;
+    heldViewerHomeAttentionResponse?.();
+    heldViewerHomeAttentionResponse = null;
+    await accountScopedDashboard.close();
+  }
+
+  const staleAttentionRetry = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const retryReadMethods: string[] = [];
+  staleAttentionRetry.on('pageerror', (error) => errors.push(error.message));
+  staleAttentionRetry.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  staleAttentionRetry.on('request', (request) => {
+    if (request.url().endsWith('/api/dashboard/home-attention')) retryReadMethods.push(request.method());
+  });
+  try {
+    await staleAttentionRetry.goto(`${base}/__qa-home?fail_attention=true`);
+    const attentionError = staleAttentionRetry.getByRole('alert').filter({ hasText: '工作台摘要暂时无法读取' });
+    await attentionError.getByRole('button', { name: '重新加载', exact: true }).waitFor();
+    holdNextEditorHomeAttention = true;
+    const heldEditorRetryRequest = staleAttentionRetry.waitForRequest((request) => request.url().endsWith('/api/dashboard/home-attention')
+      && request.headers().authorization === 'Bearer topic-stage-fixture');
+    await attentionError.getByRole('button', { name: '重新加载', exact: true }).click();
+    await heldEditorRetryRequest;
+    await staleAttentionRetry.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'topic-stage-viewer-fixture', { persist: 'memory' });
+    }, viewer);
+    await staleAttentionRetry.getByText('当前账号灵感预览 3', { exact: true }).waitFor();
+    await staleAttentionRetry.getByText('当前账号进行中选题', { exact: true }).waitFor();
+    assert.ok(heldEditorHomeAttentionResponse, 'the previous account retry remains deliberately held until the new account is loaded');
+    heldEditorHomeAttentionResponse?.();
+    heldEditorHomeAttentionResponse = null;
+    await staleAttentionRetry.waitForTimeout(80);
+    assert.equal(await staleAttentionRetry.getByText('当前账号灵感预览 3', { exact: true }).count(), 1, 'a late previous-account retry does not replace the current account inspiration preview');
+    assert.equal(await staleAttentionRetry.getByText('首页灵感预览 3', { exact: true }).count(), 0, 'a late previous-account retry cannot restore old account content');
+    assert.equal(await staleAttentionRetry.getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).count(), 0, 'a late previous-account retry cannot restore its error state');
+    assert.deepEqual(retryReadMethods, ['GET', 'GET', 'GET'], 'the retry and account transition perform only read-only attention requests');
+  } finally {
+    holdNextEditorHomeAttention = false;
+    heldEditorHomeAttentionResponse?.();
+    heldEditorHomeAttentionResponse = null;
+    await staleAttentionRetry.close();
   }
 
   if (process.env.XMT_HOME_DASHBOARD_ONLY === '1') {
@@ -2462,8 +2920,19 @@ try {
   assert.equal(expectedHttpErrors.length, 1, 'only the intentionally injected post-mutation refresh 503 is expected');
   assert.equal(expectedConsoleErrors.length, 1, 'the only expected browser console error is the injected refresh 503');
   await desktop.getByText(linkedResource.title, { exact: true }).waitFor();
+  const resourceViewLink = desktop.getByRole('link', { name: `查看资料：${linkedResource.title}`, exact: true });
+  const resourceUnlinkButton = desktop.getByRole('button', { name: `解除与「${linkedResource.title}」的关联`, exact: true });
+  for (const width of [1440, 390, 320]) {
+    await desktop.setViewportSize({ width, height: 960 });
+    for (const [label, target] of [['resource view', resourceViewLink], ['resource unlink', resourceUnlinkButton]] as const) {
+      const bounds = await target.boundingBox();
+      assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `${width}px ${label} target is at least 40×40px`);
+      assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= width + 1, `${width}px ${label} target stays in the viewport`);
+    }
+  }
+  await desktop.setViewportSize({ width: 1440, height: 960 });
   const initialResourceListReads = topicResourceListReads;
-  await desktop.getByRole('button', { name: '解除关联' }).click();
+  await resourceUnlinkButton.click();
   await desktop.getByRole('button', { name: '解除', exact: true }).click();
   await desktop.getByText('解除关联成功', { exact: true }).waitFor();
   assert.equal(isResourceLinked, false, 'successful resource unlink persists in the isolated fixture');
@@ -2473,7 +2942,8 @@ try {
   const openResourcePicker = desktop.getByRole('button', { name: '关联资料' });
   assert.match(await openResourcePicker.getAttribute('class') || '', /xmt-btn-primary/, 'topic resource linking uses the shared primary button style');
   await openResourcePicker.click();
-  await desktop.getByPlaceholder('搜索资料').fill('隔离素材');
+  const resourceSearchInput = desktop.getByRole('textbox', { name: '搜索资料', exact: true });
+  await resourceSearchInput.fill('隔离素材');
   const searchButton = desktop.getByRole('button', { name: '搜索', exact: true });
   assert.match(await searchButton.getAttribute('class') || '', /xmt-btn-primary/, 'topic resource search uses the shared primary button style');
   const searchStarted = new Promise<void>((resolve) => { topicResourceSearchStartedCallback = resolve; });
@@ -2488,21 +2958,112 @@ try {
   const pendingSearchButton = desktop.getByRole('button', { name: '搜索中…', exact: true });
   await pendingSearchButton.waitFor();
   assert.equal(await pendingSearchButton.isDisabled(), true, 'search shows a disabled in-progress action');
-  assert.equal(await desktop.getByPlaceholder('搜索资料').isDisabled(), true, 'the search term cannot change while its results are pending');
+  assert.equal(await resourceSearchInput.isDisabled(), true, 'the search term cannot change while its results are pending');
   assert.equal(topicResourceSearchReads, searchReadsBefore + 1, 'duplicate form submissions during one pending search produce only one request');
   releaseTopicResourceSearchCallback?.();
   releaseTopicResourceSearchCallback = null;
   topicResourceSearchStartedCallback = null;
   await desktop.getByText(linkedResource.title, { exact: true }).waitFor();
-  assert.equal(await desktop.getByPlaceholder('搜索资料').isDisabled(), false, 'the search term is editable again after results arrive');
+  assert.equal(await resourceSearchInput.isDisabled(), false, 'the search term is editable again after results arrive');
+  const resourceAddButton = desktop.getByRole('button', { name: `关联资料：${linkedResource.title}`, exact: true });
+  for (const width of [1440, 390, 320]) {
+    await desktop.setViewportSize({ width, height: 960 });
+    const bounds = await resourceAddButton.boundingBox();
+    assert.ok(bounds && bounds.height >= 40, `${width}px resource link action is at least 40px high`);
+    assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= width + 1, `${width}px resource link action stays in the viewport`);
+  }
+  await desktop.setViewportSize({ width: 1440, height: 960 });
   const addResourceResponse = desktop.waitForResponse((response) => response.url().endsWith(`/api/topics/${productionTopic.id}/resources`) && response.request().method() === 'POST');
-  await desktop.getByRole('button', { name: '关联', exact: true }).click();
+  await resourceAddButton.click();
   assert.equal((await addResourceResponse).status(), 200, 'resource link is accepted by the isolated fixture');
   await desktop.getByRole('dialog', { name: '关联资料' }).getByRole('button', { name: '关闭弹窗', exact: true }).click();
   await desktop.getByRole('link', { name: linkedResource.title, exact: true }).waitFor();
   assert.equal(isResourceLinked, true, 'successful resource link persists in the isolated fixture');
   assert.equal(topicResourceWrites.add, 1, 'successful link is submitted once');
   assert.equal(topicResourceListReads, initialResourceListReads, 'confirmed link updates the current list without a follow-up GET');
+
+  const resourceRecoveryKey = 'xmt:topic-resource-recovery:v1:actor:93:topic:931';
+  const readResourceRecovery = async () => {
+    const serialized = await desktop.evaluate((key) => window.sessionStorage.getItem(key), resourceRecoveryKey);
+    assert.ok(serialized, 'the unresolved operation persists in this browser session');
+    assert.doesNotMatch(serialized, /access[_-]?token|refresh[_-]?token|password/i, 'recovery stores no authentication secrets');
+    const payload = JSON.parse(serialized) as { version: number; actorId: number; topicId: number; recoveries: Array<Record<string, unknown>> };
+    assert.deepEqual(Object.keys(payload).sort(), ['actorId', 'recoveries', 'topicId', 'version']);
+    assert.equal(payload.version, 1);
+    assert.equal(payload.actorId, editor.id);
+    assert.equal(payload.topicId, productionTopic.id);
+    assert.equal(payload.recoveries.length, 1);
+    const [record] = payload.recoveries;
+    assert.deepEqual(Object.keys(record).sort(), ['actorId', 'mutation', 'requestId', 'resource', 'topicId', 'version']);
+    assert.equal(record.actorId, editor.id);
+    assert.equal(record.topicId, productionTopic.id);
+    assert.match(String(record.requestId), /^[0-9a-f-]{36}$/i);
+    assert.deepEqual(record.resource, { id: linkedResource.id, title: linkedResource.title });
+    return record;
+  };
+
+  const removeWritesBeforeLostResponse = topicResourceWrites.remove;
+  const resourceReadsBeforeLostRemove = topicResourceListReads;
+  commitNextTopicResourceRemoveThenFail = true;
+  failNextTopicResourceRead = true;
+  await resourceUnlinkButton.click();
+  await desktop.getByRole('button', { name: '解除', exact: true }).click();
+  await desktop.getByText('结果仍待核实', { exact: false }).waitFor();
+  assert.equal(isResourceLinked, false, 'the isolated unlink committed even though its response and first readback failed');
+  assert.equal(topicResourceWrites.remove, removeWritesBeforeLostResponse + 1, 'lost unlink response produced exactly one write');
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostRemove + 1, 'the failed unlink is followed by one read-only verification attempt');
+  assert.equal(await desktop.getByRole('button', { name: `解除与「${linkedResource.title}」的关联`, exact: true }).isDisabled(), true, 'the target unlink stays locked until readback succeeds');
+  const unlinkRecoveryBeforeReload = await readResourceRecovery();
+  assert.equal(unlinkRecoveryBeforeReload.mutation, 'unlink');
+  failNextTopicResourceRead = true;
+  await desktop.reload();
+  const unlinkVerifyButton = desktop.getByRole('button', { name: `只读核实资料关联状态：${linkedResource.title}`, exact: true });
+  await unlinkVerifyButton.waitFor();
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostRemove + 2, 'refresh attempts only one read-only reconciliation and keeps the marker when that read fails');
+  assert.deepEqual(await readResourceRecovery(), unlinkRecoveryBeforeReload, 'the same exact unlink marker survives refresh and a failed readback');
+  assert.equal(topicResourceWrites.remove, removeWritesBeforeLostResponse + 1, 'refresh does not repeat an unresolved unlink write');
+  await unlinkVerifyButton.click();
+  await desktop.getByText('解除关联已确认', { exact: true }).waitFor();
+  assert.equal(await desktop.getByText(linkedResource.title, { exact: true }).count(), 0, 'read-only recovery reflects the committed unlink');
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostRemove + 3, 'manual recovery performs one additional read-only check');
+  assert.equal(await desktop.evaluate((key) => window.sessionStorage.getItem(key), resourceRecoveryKey), null, 'confirmed recovery removes its local marker');
+  assert.equal(topicResourceWrites.remove, removeWritesBeforeLostResponse + 1, 'unlink recovery sends no second write');
+
+  await openResourcePicker.click();
+  await resourceSearchInput.fill('隔离素材');
+  await searchButton.click();
+  await desktop.getByRole('button', { name: `关联资料：${linkedResource.title}`, exact: true }).waitFor();
+  const addWritesBeforeLostResponse = topicResourceWrites.add;
+  const resourceReadsBeforeLostAdd = topicResourceListReads;
+  commitNextTopicResourceAddThenFail = true;
+  failNextTopicResourceRead = true;
+  await desktop.getByRole('button', { name: `关联资料：${linkedResource.title}`, exact: true }).click();
+  await desktop.getByText('结果仍待核实', { exact: false }).waitFor();
+  assert.equal(isResourceLinked, true, 'the isolated link committed even though its response and first readback failed');
+  assert.equal(topicResourceWrites.add, addWritesBeforeLostResponse + 1, 'lost link response produced exactly one write');
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostAdd + 1, 'the failed link is followed by one read-only verification attempt');
+  await openResourcePicker.click();
+  await resourceSearchInput.fill('隔离素材');
+  await searchButton.click();
+  const lockedAddButton = desktop.getByRole('button', { name: `等待核实关联：${linkedResource.title}`, exact: true });
+  await lockedAddButton.waitFor();
+  assert.equal(await lockedAddButton.isDisabled(), true, 'the target link stays locked until readback succeeds');
+  await desktop.getByRole('dialog', { name: '关联资料' }).getByRole('button', { name: '关闭弹窗', exact: true }).click();
+  const addRecoveryBeforeReload = await readResourceRecovery();
+  assert.equal(addRecoveryBeforeReload.mutation, 'link');
+  failNextTopicResourceRead = true;
+  await desktop.reload();
+  const addVerifyButton = desktop.getByRole('button', { name: `只读核实资料关联状态：${linkedResource.title}`, exact: true });
+  await addVerifyButton.waitFor();
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostAdd + 2, 'refresh attempts only one read-only reconciliation and keeps the link marker when that read fails');
+  assert.deepEqual(await readResourceRecovery(), addRecoveryBeforeReload, 'the same exact link marker survives refresh and a failed readback');
+  assert.equal(topicResourceWrites.add, addWritesBeforeLostResponse + 1, 'refresh does not repeat an unresolved link write');
+  await addVerifyButton.click();
+  await desktop.getByText('关联已确认', { exact: true }).waitFor();
+  await desktop.getByRole('link', { name: linkedResource.title, exact: true }).waitFor();
+  assert.equal(topicResourceListReads, resourceReadsBeforeLostAdd + 3, 'manual recovery performs one additional read-only check');
+  assert.equal(await desktop.evaluate((key) => window.sessionStorage.getItem(key), resourceRecoveryKey), null, 'confirmed recovery removes its local marker');
+  assert.equal(topicResourceWrites.add, addWritesBeforeLostResponse + 1, 'link recovery sends no second write');
   await desktop.screenshot({ path: '/tmp/xmt-topic-stage-repair-1440.png', fullPage: true });
   await desktop.close();
 
@@ -2919,10 +3480,41 @@ try {
   mobileAudit.on('pageerror', (error) => errors.push(error.message));
   mobileAudit.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   const mobileAuditWritesBeforeNavigation = auditWrites.length;
+  await mobileAudit.goto(`${base}/__qa/${auditTopic.id}`);
+  await mobileAudit.getByRole('textbox', { name: '选题标题' }).waitFor();
+  const collapsedMobileAuditToggle = mobileAudit.getByRole('button', { name: '开始审核', exact: true });
+  await collapsedMobileAuditToggle.waitFor();
+  assert.equal(await collapsedMobileAuditToggle.getAttribute('aria-expanded'), 'false', 'mobile audit disclosure reports its initial collapsed state');
+  assert.equal(await collapsedMobileAuditToggle.getAttribute('aria-controls'), 'mobile-topic-audit-panel', 'mobile audit disclosure identifies its controlled panel');
+  const mobileAuditPanel = mobileAudit.locator('#mobile-topic-audit-panel');
+  assert.equal(await mobileAuditPanel.getAttribute('hidden'), '', 'the controlled audit panel remains in the document while collapsed');
+  assert.equal(auditWrites.length, mobileAuditWritesBeforeNavigation, 'checking the initial audit disclosure does not write an audit');
+  await collapsedMobileAuditToggle.click();
+  const expandedMobileAuditToggle = mobileAudit.getByRole('button', { name: '收起审核', exact: true });
+  assert.equal(await expandedMobileAuditToggle.getAttribute('aria-expanded'), 'true', 'mobile audit disclosure reports its expanded state');
+  await mobileAuditPanel.waitFor({ state: 'visible' });
+  await mobileAudit.getByRole('region', { name: '选题审核', exact: true }).waitFor();
+  const mobileAuditResultGroup = mobileAuditPanel.getByRole('group', { name: '审核结果', exact: true });
+  assert.equal(await mobileAuditResultGroup.getByRole('button').count(), 2, 'mobile audit decisions share a named result group');
+  assert.equal(await mobileAuditResultGroup.getByRole('button', { name: '通过', exact: true }).getAttribute('aria-pressed'), 'true', 'mobile audit initially exposes approval as selected');
+  assert.equal(await mobileAuditResultGroup.getByRole('button', { name: '驳回', exact: true }).getAttribute('aria-pressed'), 'false', 'mobile audit initially exposes rejection as unselected');
+  await mobileAuditResultGroup.getByRole('button', { name: '驳回', exact: true }).click();
+  await mobileAuditPanel.getByRole('textbox', { name: '审核意见（选填）' }).fill('折叠后应保留的合成审核意见');
+  await expandedMobileAuditToggle.click();
+  assert.equal(await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).getAttribute('aria-expanded'), 'false', 'mobile audit disclosure reports its collapsed state after closing');
+  assert.equal(await mobileAuditPanel.getAttribute('hidden'), '', 'collapsing the audit disclosure hides but does not remove its panel');
+  assert.equal(await mobileAudit.getByRole('button', { name: '确认通过选题', exact: true }).count(), 0, 'collapsing the audit disclosure hides its submission action');
+  await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).click();
+  assert.equal(await mobileAuditResultGroup.getByRole('button', { name: '通过', exact: true }).getAttribute('aria-pressed'), 'false', 'mobile audit collapse and reopen preserves the deselected approval');
+  assert.equal(await mobileAuditResultGroup.getByRole('button', { name: '驳回', exact: true }).getAttribute('aria-pressed'), 'true', 'mobile audit decision survives collapse and reopen');
+  assert.equal(await mobileAuditPanel.getByRole('textbox', { name: '审核意见（选填）' }).inputValue(), '折叠后应保留的合成审核意见', 'mobile audit comment survives collapse and reopen');
+  assert.equal(auditWrites.length, mobileAuditWritesBeforeNavigation, 'opening and closing the audit disclosure never submits an audit');
   await mobileAudit.goto(`${base}/__qa/${auditTopic.id}?action=audit`);
   await mobileAudit.getByRole('textbox', { name: '选题标题' }).waitFor();
   await mobileAudit.waitForURL((url) => url.pathname === `/topics/${auditTopic.id}` && !url.searchParams.has('action'));
-  await mobileAudit.getByRole('button', { name: '收起审核', exact: true }).waitFor();
+  const directReviewAuditToggle = mobileAudit.getByRole('button', { name: '收起审核', exact: true });
+  await directReviewAuditToggle.waitFor();
+  assert.equal(await directReviewAuditToggle.getAttribute('aria-expanded'), 'true', 'direct review navigation exposes its automatically expanded audit disclosure');
   const mobileAuditSubmit = mobileAudit.getByRole('button', { name: '确认通过选题', exact: true });
   await mobileAuditSubmit.waitFor();
   assert.equal(await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).count(), 0, 'mobile direct review navigation expands the audit panel without a second click');
@@ -3057,6 +3649,18 @@ try {
   await savePage.close();
 
   const manualSavePage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  manualTopicVersions.splice(0, manualTopicVersions.length, {
+    id: 1,
+    document_type: 'topic_outline',
+    document_id: String(manualSaveTopic.id),
+    version: 'baseline',
+    content: String(manualSaveTopic.outline ?? ''),
+    change_type: 'baseline',
+    is_baseline: 1,
+    operator_id: null,
+    operator_name: null,
+    created_at: null,
+  });
   const expectedManualSaveHttpErrors: string[] = [];
   const expectedManualSaveConsoleErrors: string[] = [];
   manualSavePage.on('pageerror', (error) => errors.push(error.message));
@@ -3068,7 +3672,7 @@ try {
   manualSavePage.on('response', (response) => {
     if (response.status() < 400) return;
     const responseDescription = `${response.status()} ${response.url()}`;
-    if (response.url().endsWith(`/api/topics/${manualSaveTopic.id}`) && response.status() === 503) expectedManualSaveHttpErrors.push(responseDescription);
+    if ((response.url().endsWith(`/api/topics/${manualSaveTopic.id}`) || response.url().endsWith(`/api/topics/${manualSaveTopic.id}/versions`)) && response.status() === 503) expectedManualSaveHttpErrors.push(responseDescription);
     else errors.push(`Unexpected HTTP error: ${responseDescription}`);
   });
   await manualSavePage.goto(`${base}/__qa/${manualSaveTopic.id}`);
@@ -3077,6 +3681,8 @@ try {
   await manualSavePage.locator('[data-topic-manual-runtime="ready"]').waitFor();
   const outlineEditor = manualSavePage.locator('.ProseMirror').last();
   await outlineEditor.waitFor({ state: 'visible' });
+  const outlineHistory = manualSavePage.getByRole('region', { name: '大纲版本历史' });
+  await outlineHistory.getByText('历史原稿（时间未记录）', { exact: true }).waitFor();
   await outlineEditor.fill('手动保存失败后保留的选题大纲');
   failNextManualTopicSave = true;
   await manualSavePage.getByRole('button', { name: '保存', exact: true }).click();
@@ -3095,21 +3701,144 @@ try {
   await manualSavePage.getByRole('button', { name: '编辑选题', exact: true }).click();
   const versionOutlineEditor = manualSavePage.locator('[contenteditable="true"]').last();
   await versionOutlineEditor.fill('选题大纲版本快照正文');
+  const versionReadsBeforeSave = manualTopicVersionReads;
+  failNextManualTopicVersionsRead = true;
   await manualSavePage.getByRole('button', { name: '小版本保存', exact: true }).click();
-  const outlineHistory = manualSavePage.getByRole('region', { name: '大纲版本历史' });
+  await outlineHistory.getByRole('alert').getByText('大纲版本历史读取失败，请重新加载。', { exact: true }).waitFor();
+  assert.equal(manualTopicVersions.length, 2, 'the server commits the outline version before its independent history read fails');
+  assert.equal(manualTopicVersionReads, versionReadsBeforeSave + 1, 'the failed history refresh issues one read after the version save');
+  assert.equal(manualTopicSaveWrites, 3, 'a failed history refresh does not mark the confirmed version write as failed or repeat it');
+  assert.equal(await outlineHistory.getByText('历史原稿（时间未记录）', { exact: true }).count(), 0, 'a failed refresh clears the previously loaded history instead of showing stale rows');
+  assert.equal(await outlineHistory.getByText('v1.0 · 小版本', { exact: true }).count(), 0, 'a stale version list is not presented as the refreshed history');
+  assert.equal(await outlineHistory.getByText('暂无已保存版本', { exact: true }).count(), 0, 'a failed read is not presented as a confirmed empty history');
+  const manualWritesBeforeHistoryRetry = manualTopicSaveWrites;
+  const versionReadsBeforeRetry = manualTopicVersionReads;
+  const reloadHistoryButton = outlineHistory.getByRole('button', { name: '重新加载大纲历史', exact: true });
+  const reloadHistoryBounds = await reloadHistoryButton.boundingBox();
+  assert.ok(reloadHistoryBounds && reloadHistoryBounds.height >= 40, `history retry action has a 40px target: ${JSON.stringify(reloadHistoryBounds)}`);
+  await reloadHistoryButton.click();
   await outlineHistory.getByText('v1.0 · 小版本', { exact: true }).waitFor();
+  assert.equal(manualTopicVersionReads, versionReadsBeforeRetry + 1, 'the explicit recovery action retries only the read-only history request');
+  assert.equal(manualTopicSaveWrites, manualWritesBeforeHistoryRetry, 'retrying history never resubmits the outline version write');
   const outlinePreviews = outlineHistory.getByText('查看此版本正文', { exact: true });
   assert.equal(await outlinePreviews.count(), 2, 'the initial outline is retained as a baseline beside the explicit version');
   const outlineVersionEntry = outlineHistory.getByRole('listitem').filter({ hasText: 'v1.0 · 小版本' });
   const outlineBaselineEntry = outlineHistory.getByRole('listitem').filter({ hasText: '历史原稿（时间未记录）' });
+  const outlineVersionSummary = outlineVersionEntry.getByText('查看此版本正文', { exact: true });
+  const outlineVersionSummaryBounds = await outlineVersionSummary.boundingBox();
+  assert.ok(outlineVersionSummaryBounds && outlineVersionSummaryBounds.height >= 40, `version disclosure action has a 40px target: ${JSON.stringify(outlineVersionSummaryBounds)}`);
   await outlineBaselineEntry.getByText('查看此版本正文', { exact: true }).click();
   await outlineBaselineEntry.getByText('手动保存失败后保留的选题大纲', { exact: true }).waitFor();
   await outlineVersionEntry.getByText('查看此版本正文', { exact: true }).click();
   await outlineVersionEntry.getByText('选题大纲版本快照正文', { exact: true }).waitFor();
   assert.equal(manualTopicSaveWrites, 3, 'explicit version creation submits exactly one additional update');
-  assert.equal(expectedManualSaveHttpErrors.length, 1, 'only the intentionally injected manual-save 503 is expected');
-  assert.equal(expectedManualSaveConsoleErrors.length, 1, 'only the intentionally injected manual-save 503 reaches the console');
+  assert.equal(expectedManualSaveHttpErrors.length, 2, 'the manual-save and independent history-read 503s are the only expected HTTP errors');
+  assert.equal(expectedManualSaveConsoleErrors.length, 2, 'only the injected save and history-read 503s reach the console');
   await manualSavePage.close();
+
+  const recoveryMarkerPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const recoveryMarkerKey = `xmt:topic-detail-save-recovery:v1:user:${editor.id}:topic:${manualSaveTopic.id}`;
+  let recoveryMarkerPutRequests = 0;
+  let recoveryMarkerReadRequests = 0;
+  recoveryMarkerPage.on('pageerror', (error) => errors.push(error.message));
+  recoveryMarkerPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  recoveryMarkerPage.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname !== `/api/topics/${manualSaveTopic.id}`) return;
+    if (request.method() === 'PUT') recoveryMarkerPutRequests += 1;
+    if (request.method() === 'GET') recoveryMarkerReadRequests += 1;
+  });
+  await recoveryMarkerPage.addInitScript((key) => {
+    const testWindow = window as Window & { __xmtAllowTopicRecoveryCleanup?: boolean; __xmtDropTopicRecoveryWrite?: boolean; __xmtTamperTopicRecoveryWrite?: boolean };
+    testWindow.__xmtAllowTopicRecoveryCleanup = false;
+    testWindow.__xmtDropTopicRecoveryWrite = false;
+    testWindow.__xmtTamperTopicRecoveryWrite = true;
+    const nativeSetItem = Storage.prototype.setItem;
+    const nativeRemoveItem = Storage.prototype.removeItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (this === window.localStorage && name === key && testWindow.__xmtTamperTopicRecoveryWrite) {
+        testWindow.__xmtTamperTopicRecoveryWrite = false;
+        const marker = JSON.parse(value) as { target?: { title?: string } };
+        if (marker.target) marker.target.title = `${marker.target.title ?? ''}（静默篡改）`;
+        nativeSetItem.call(this, name, JSON.stringify(marker));
+        return;
+      }
+      if (this === window.localStorage && name === key && testWindow.__xmtDropTopicRecoveryWrite) {
+        testWindow.__xmtDropTopicRecoveryWrite = false;
+        return;
+      }
+      nativeSetItem.call(this, name, value);
+    };
+    Storage.prototype.removeItem = function (name) {
+      if (this === window.localStorage && name === key && !testWindow.__xmtAllowTopicRecoveryCleanup) return;
+      nativeRemoveItem.call(this, name);
+    };
+  }, recoveryMarkerKey);
+  await recoveryMarkerPage.goto(`${base}/__qa/${manualSaveTopic.id}`);
+  await recoveryMarkerPage.getByRole('heading', { name: manualSaveTopic.title }).waitFor();
+  const recoveryMarkerTitle = recoveryMarkerPage.locator('input[type="text"]').first();
+  await recoveryMarkerPage.getByRole('button', { name: '编辑选题', exact: true }).click();
+  const tamperedMarkerTitle = '恢复标记被改写时保留的选题标题';
+  await recoveryMarkerTitle.fill(tamperedMarkerTitle);
+  const readsBeforeTamperedMarkerSave = recoveryMarkerReadRequests;
+  await recoveryMarkerPage.getByRole('button', { name: '保存', exact: true }).click();
+  const invalidRecoveryNotice = recoveryMarkerPage.getByTestId('topic-save-recovery');
+  await invalidRecoveryNotice.getByText(/恢复记录未能完整保存或读取/).waitFor();
+  assert.equal(await recoveryMarkerTitle.inputValue(), tamperedMarkerTitle, 'content tampering during recovery-marker persistence keeps the original title in the editor');
+  assert.equal(recoveryMarkerPutRequests, 0, 'a tampered recovery marker prevents the topic PUT');
+  assert.equal(recoveryMarkerReadRequests, readsBeforeTamperedMarkerSave, 'preflight marker tampering does not add a topic GET or PUT');
+  assert.equal(manualTopicSaveWrites, 3, 'preflight marker tampering leaves the isolated topic unchanged');
+  assert.equal(await invalidRecoveryNotice.getByRole('button', { name: '按当前本地内容保存', exact: true }).count(), 0, 'an invalid stored target is never offered as a retryable draft');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key) !== null, recoveryMarkerKey), true, 'the deliberately corrupted marker remains available for explicit cleanup verification');
+  await invalidRecoveryNotice.getByRole('button', { name: '重新读取并采用服务端内容', exact: true }).click();
+  await invalidRecoveryNotice.getByText(/当前修改保持不变、写入继续锁定/).waitFor();
+  assert.equal(await recoveryMarkerTitle.inputValue(), tamperedMarkerTitle, 'failed invalid-marker cleanup preserves the editor content');
+  assert.equal(recoveryMarkerPutRequests, 0, 'read-only invalid-marker cleanup does not send a topic PUT');
+  await recoveryMarkerPage.evaluate(() => { (window as Window & { __xmtAllowTopicRecoveryCleanup?: boolean }).__xmtAllowTopicRecoveryCleanup = true; });
+  await invalidRecoveryNotice.getByRole('button', { name: '重新读取并采用服务端内容', exact: true }).click();
+  await invalidRecoveryNotice.waitFor({ state: 'detached' });
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key), recoveryMarkerKey), null, 'the invalid marker is cleared only after verified removal');
+  assert.equal(recoveryMarkerPutRequests, 0, 'adopting server content after invalid-marker cleanup remains read-only');
+
+  await recoveryMarkerPage.getByRole('button', { name: '编辑选题', exact: true }).click();
+  const cleanupFailureTitle = '服务端已保存但恢复标记待清理';
+  await recoveryMarkerTitle.fill(cleanupFailureTitle);
+  await recoveryMarkerPage.evaluate(() => { (window as Window & { __xmtAllowTopicRecoveryCleanup?: boolean }).__xmtAllowTopicRecoveryCleanup = false; });
+  await recoveryMarkerPage.getByRole('button', { name: '保存', exact: true }).click();
+  const cleanupBlockedNotice = recoveryMarkerPage.getByTestId('topic-save-recovery');
+  await cleanupBlockedNotice.getByText(/服务器已返回保存成功，但本地恢复记录未能清除/).waitFor();
+  assert.equal(manualTopicSaveWrites, 4, 'the server accepts the cleanup-failure save exactly once');
+  assert.equal(recoveryMarkerPutRequests, 1, 'cleanup failure follows exactly one topic PUT');
+  assert.equal(manualSaveTopic.title, cleanupFailureTitle, 'the isolated server contains the confirmed saved title');
+  assert.equal(await recoveryMarkerTitle.inputValue(), cleanupFailureTitle, 'cleanup failure keeps the confirmed content visible');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key) !== null, recoveryMarkerKey), true, 'a silently retained marker keeps recovery locked');
+  const readsBeforeCleanupVerify = recoveryMarkerReadRequests;
+  await cleanupBlockedNotice.getByRole('button', { name: '只读核实上次保存', exact: true }).click();
+  await cleanupBlockedNotice.getByText(/本地恢复记录未能清除/).waitFor();
+  assert.equal(recoveryMarkerReadRequests, readsBeforeCleanupVerify + 1, 'the first cleanup retry performs one read-only topic GET');
+  assert.equal(recoveryMarkerPutRequests, 1, 'read-only cleanup verification does not repeat the topic PUT');
+  await recoveryMarkerPage.evaluate(() => { (window as Window & { __xmtAllowTopicRecoveryCleanup?: boolean }).__xmtAllowTopicRecoveryCleanup = true; });
+  await cleanupBlockedNotice.getByRole('button', { name: '只读核实上次保存', exact: true }).click();
+  await cleanupBlockedNotice.waitFor({ state: 'detached' });
+  assert.equal(recoveryMarkerReadRequests, readsBeforeCleanupVerify + 2, 'the successful cleanup retry also performs only one GET');
+  assert.equal(recoveryMarkerPutRequests, 1, 'confirmed cleanup never repeats the topic PUT');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key), recoveryMarkerKey), null, 'recovery unlocks only after the marker is verified absent');
+
+  await recoveryMarkerPage.getByRole('button', { name: '编辑选题', exact: true }).click();
+  const droppedMarkerTitle = '恢复标记静默丢失后保留的标题';
+  await recoveryMarkerTitle.fill(droppedMarkerTitle);
+  await recoveryMarkerPage.evaluate(() => { (window as Window & { __xmtDropTopicRecoveryWrite?: boolean }).__xmtDropTopicRecoveryWrite = true; });
+  await recoveryMarkerPage.getByRole('button', { name: '保存', exact: true }).click();
+  await recoveryMarkerPage.getByRole('alert').filter({ hasText: '本次选题修改未发送' }).waitFor();
+  assert.equal(await recoveryMarkerTitle.inputValue(), droppedMarkerTitle, 'a silently dropped recovery marker keeps the current editor input');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key), recoveryMarkerKey), null, 'a silently dropped marker leaves no recovery value');
+  assert.equal(recoveryMarkerPutRequests, 1, 'a silently dropped marker prevents a topic PUT');
+  await recoveryMarkerPage.getByRole('button', { name: '保存', exact: true }).click();
+  await recoveryMarkerPage.getByRole('heading', { name: droppedMarkerTitle, exact: true }).waitFor();
+  assert.equal(recoveryMarkerPutRequests, 2, 'after storage recovers, only the user explicit save sends one PUT');
+  assert.equal(manualTopicSaveWrites, 5, 'the explicit retry after a no-send result updates the isolated topic exactly once');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => localStorage.getItem(key), recoveryMarkerKey), null, 'successful explicit retry verifies marker cleanup');
+  await recoveryMarkerPage.close();
 
   assert.deepEqual(errors, [], 'topic detail renders without unexpected browser or console errors');
   await homeMobile.close();

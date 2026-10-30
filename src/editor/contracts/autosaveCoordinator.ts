@@ -21,6 +21,13 @@ export interface AutosaveFlushResult {
 export interface AutosaveCoordinator {
   /** Returns false when the coordinator no longer accepts new revisions. */
   scheduleSave(content: string, revision: number): boolean;
+  /** Reconciles matching queued/failed content after an external read confirms it is persisted. */
+  confirmPersistedContent(content: string): boolean;
+  /**
+   * Drops queued/failed snapshots after their content has been preserved elsewhere.
+   * An in-flight persist is not aborted; its later rejection will not be retried.
+   */
+  discardPendingSaves(): boolean;
   flush(options?: AutosaveFlushOptions): Promise<AutosaveFlushResult>;
   beginGracefulDispose(): boolean;
   completeGracefulDispose(): void;

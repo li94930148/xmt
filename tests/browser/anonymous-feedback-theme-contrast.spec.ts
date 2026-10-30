@@ -188,8 +188,22 @@ try {
   await submissionPage.getByRole('button', { name: '提交意见', exact: true }).first().click();
   const dialog = submissionPage.getByRole('dialog', { name: '匿名意见箱' });
   await dialog.waitFor();
-  await dialog.locator('select').selectOption('process');
-  await dialog.getByPlaceholder('请输入你的想法...').fill('隔离双提交与回执验收');
+  const typeField = dialog.getByLabel(/意见类型/);
+  const contentField = dialog.getByLabel(/意见内容/);
+  assert.equal(await typeField.getAttribute('id'), 'anonymous-feedback-type', 'the feedback type label targets a stable field id');
+  assert.equal(await typeField.getAttribute('name'), 'type', 'the feedback type control has a stable form name');
+  assert.equal(await contentField.getAttribute('id'), 'anonymous-feedback-content', 'the feedback content label targets a stable field id');
+  assert.equal(await contentField.getAttribute('name'), 'content', 'the feedback content control has a stable form name');
+  assert.equal(await typeField.getAttribute('required'), '', 'the named feedback type control exposes native required semantics');
+  assert.equal(await contentField.getAttribute('required'), '', 'the named feedback content control exposes native required semantics');
+  const emptySubmitButton = dialog.getByRole('button', { name: '提交意见', exact: true });
+  await emptySubmitButton.click();
+  await submissionPage.getByText('意见类型和意见内容均为必填项', { exact: true }).waitFor();
+  const emptySubmitState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number };
+  assert.equal(emptySubmitState.requestCount, 0, 'an empty submission shows validation feedback without sending a POST');
+
+  await typeField.selectOption('process');
+  await contentField.fill('隔离双提交与回执验收');
   await submissionPage.request.post(`${base}/__qa/hold-next-submission`);
   const submitButton = dialog.getByRole('button', { name: '提交意见', exact: true });
   await submitButton.evaluate((element) => {
@@ -197,22 +211,22 @@ try {
     (element as HTMLButtonElement).click();
   });
   await dialog.getByText('正在提交意见', { exact: true }).waitFor();
-  assert.equal(await dialog.locator('textarea').isDisabled(), true, 'the form locks during the confirmed write');
+  assert.equal(await contentField.isDisabled(), true, 'the form locks during the confirmed write');
   await submissionPage.waitForFunction(async () => (await (await fetch('/__qa/submission-state')).json()).requestCount === 1);
   await submissionPage.request.post(`${base}/__qa/release-submission`);
   await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
-  assert.equal(await submissionPage.getByPlaceholder('请输入你的想法...').inputValue(), '', 'confirmed submission clears only after success');
+  assert.equal(await contentField.inputValue(), '', 'confirmed submission clears only after success');
   let submissionState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number; savedCount: number };
   assert.equal(submissionState.requestCount, 1, 'two same-event submits create one request');
   assert.equal(submissionState.savedCount, 2, 'the delayed request is saved once alongside the initial fixture');
 
-  await dialog.locator('select').selectOption('feature');
-  await dialog.getByPlaceholder('请输入你的想法...').fill('失败保留后重试验收');
+  await typeField.selectOption('feature');
+  await contentField.fill('失败保留后重试验收');
   await submissionPage.request.post(`${base}/__qa/fail-next-submission`);
   await submitButton.click();
   await dialog.getByText('尚未查到这次意见提交', { exact: true }).waitFor();
-  assert.equal(await dialog.locator('select').inputValue(), 'feature', 'failed writes preserve the selected type');
-  assert.equal(await dialog.getByPlaceholder('请输入你的想法...').inputValue(), '失败保留后重试验收', 'failed writes preserve the content for retry');
+  assert.equal(await typeField.inputValue(), 'feature', 'failed writes preserve the selected type');
+  assert.equal(await contentField.inputValue(), '失败保留后重试验收', 'failed writes preserve the content for retry');
   const failedRequestId = submissionRequestIds.at(-1);
   assert.ok(failedRequestId, 'the ambiguous write used a request ID');
   await dialog.getByRole('button', { name: '检查后开始新提交' }).click();
@@ -225,20 +239,20 @@ try {
   assert.equal(submissionState.savedCount, 3, 'only confirmed writes are persisted');
   assert.notEqual(submissionRequestIds.at(-1), failedRequestId, 'an explicit resubmission uses a new request ID after not_found');
 
-  await dialog.locator('select').selectOption('usage');
-  await dialog.getByPlaceholder('请输入你的想法...').fill('刷新失败仍应确认已提交');
+  await typeField.selectOption('usage');
+  await contentField.fill('刷新失败仍应确认已提交');
   await submissionPage.request.post(`${base}/__qa/fail-feedback-reads`, { data: { count: 2 } });
   await submitButton.click();
   await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
   await submissionPage.getByText('意见列表暂时不可用', { exact: true }).waitFor();
-  assert.equal(await dialog.getByPlaceholder('请输入你的想法...').inputValue(), '', 'post-write read failures do not restore submitted text');
+  assert.equal(await contentField.inputValue(), '', 'post-write read failures do not restore submitted text');
   assert.equal(await submissionPage.getByText('提交失败', { exact: true }).count(), 0, 'a confirmed write is never reported as failed due to a later read failure');
   submissionState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number; savedCount: number };
   assert.equal(submissionState.requestCount, 4);
   assert.equal(submissionState.savedCount, 4);
 
-  await dialog.locator('select').selectOption('team');
-  await dialog.getByPlaceholder('请输入你的想法...').fill('首次响应丢失后按回执确认');
+  await typeField.selectOption('team');
+  await contentField.fill('首次响应丢失后按回执确认');
   const stateBeforeLostResponse = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as {
     requestCount: number; savedCount: number;
   };

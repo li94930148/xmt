@@ -18,8 +18,8 @@ export async function insertTopicOutlineOriginSnapshot(
   const sourceOutlineVersion = matchingVersions.length === 1 ? matchingVersions[0].version : null;
   await tx.execute(
     `INSERT INTO production_origin_snapshots (
-       production_id, source_type, source_content_snapshot, source_outline_version
-     ) VALUES (?, 'topic_outline', ?, ?)`,
-    [productionId, contentSnapshot, sourceOutlineVersion],
+       production_id, source_type, source_content_snapshot, source_outline_version, source_topic_id
+     ) VALUES (?, 'topic_outline', ?, ?, ?)`,
+    [productionId, contentSnapshot, sourceOutlineVersion, Number(topicId)],
   );
 }

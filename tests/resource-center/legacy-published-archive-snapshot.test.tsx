@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { JSDOM } from 'jsdom';
+import { StaticRouter } from 'react-router';
 import { LegacyPublishedArchiveSnapshotView } from '../../src/components/resource-center/ArchiveSnapshotView';
 import { getSafeArchiveHttpUrl, parseLegacyPublishedArchive } from '../../src/components/resource-center/parseLegacyPublishedArchive';
 
@@ -185,4 +187,86 @@ test('renders archive fields as business-facing markup rather than serializing t
   assert.match(markup, /抖音/);
   assert.match(markup, /123/);
   assert.doesNotMatch(markup, /published_records|"publishing_id"|\{\s*"topic"/);
+});
+
+test('renders exact per-publication source snapshots and keeps source links behind production:view', () => {
+  const result = parse(JSON.stringify({
+    topic: { id: 71, title: '多平台来源归档' },
+    published_records: [
+      {
+        publishing_id: 501,
+        platform: 'weixin',
+        status: 'published',
+        script_source: { topic_id: 71, production_id: 801, version: 'v1.0', state: 'derived' },
+      },
+      {
+        publishing_id: 502,
+        platform: 'douyin',
+        status: 'published',
+        script_source: { topic_id: 71, production_id: 802, version: 'v2.0', state: 'inherited' },
+      },
+      {
+        publishing_id: 503,
+        platform: 'bilibili',
+        status: 'published',
+        script_source: { topic_id: 71, source_topic_id: 72, production_id: 803, version: 'v3.0', state: 'derived' },
+      },
+      {
+        publishing_id: 504,
+        platform: 'xiaohongshu',
+        status: 'published',
+        script_source: { topic_id: 71, production_id: null, version: 'v4.0', state: 'derived' },
+      },
+      {
+        publishing_id: 505,
+        platform: 'kuaishou',
+        status: 'published',
+        script_source: { topic_id: 71, production_id: 805, version: 'v5.0', state: 'derived' },
+      },
+    ],
+    script_source_snapshots: [
+      { topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>微信发布来源正文</p>' },
+      { topic_id: 71, production_id: 802, version: 'v2.0', content: '<p>抖音发布来源正文</p>' },
+      { topic_id: 72, production_id: 803, version: 'v3.0', content: '<p>跨选题内容不可见</p>' },
+      { topic_id: 71, production_id: 805, version: 'v5.0', content: '<p>重复匹配正文一</p>' },
+      { topic_id: 71, production_id: 805, version: 'v5.0', content: '<p>重复匹配正文二</p>' },
+    ],
+  }));
+
+  assert.equal(result.kind, 'archive');
+  if (result.kind !== 'archive') return;
+  assert.deepEqual(result.snapshot.publishedRecords.map((record) => record.scriptSource?.version ?? null), ['v1.0', 'v2.0', 'v3.0', null, 'v5.0']);
+  assert.equal(result.snapshot.publishedRecords[2].scriptSource?.sourceTopicId, 72, 'the archive parser preserves server-derived source-topic provenance separately from the archive topic');
+  assert.deepEqual(result.snapshot.scriptSourceSnapshots.map(({ productionId, version }) => [productionId, version]), [
+    [801, 'v1.0'], [802, 'v2.0'], [803, 'v3.0'], [805, 'v5.0'], [805, 'v5.0'],
+  ]);
+
+  const originalWindow = globalThis.window;
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: new JSDOM('').window });
+  let restrictedMarkup = '';
+  let authorizedMarkup = '';
+  try {
+    restrictedMarkup = renderToStaticMarkup(createElement(StaticRouter, { location: '/' },
+      createElement(LegacyPublishedArchiveSnapshotView, { snapshot: result.snapshot }),
+    ));
+    authorizedMarkup = renderToStaticMarkup(createElement(StaticRouter, { location: '/' },
+      createElement(LegacyPublishedArchiveSnapshotView, { snapshot: result.snapshot, canViewProduction: true }),
+    ));
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+  assert.match(restrictedMarkup, /微信发布来源正文/);
+  assert.match(restrictedMarkup, /抖音发布来源正文/);
+  assert.doesNotMatch(restrictedMarkup, /跨选题内容不可见|重复匹配正文一|重复匹配正文二/);
+  assert.match(restrictedMarkup, /来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限/);
+  assert.match(restrictedMarkup, /创作稿来源记录无效，已隐藏来源内容/);
+  assert.match(restrictedMarkup, /没有唯一匹配的来源正文快照/);
+  assert.doesNotMatch(restrictedMarkup, /href="\/production\//, 'archive access alone does not expose a source-work link');
+
+  assert.match(authorizedMarkup, /href="\/production\/801\/source-snapshot\?version=v1\.0"/);
+  assert.match(authorizedMarkup, /href="\/production\/802\/source-snapshot\?version=v2\.0"/);
+  assert.match(authorizedMarkup, /href="\/production\/803\/source-snapshot\?version=v3\.0"/, 'a cross-topic source can be opened through its independently authorized, read-only route');
+  assert.match(authorizedMarkup, /href="\/production\/805\/source-snapshot\?version=v5\.0"/, 'a complete same-topic source link remains available even when its archived body match is ambiguous');
+  assert.doesNotMatch(authorizedMarkup, /href="\/production\/804/, 'incomplete source references never become links');
 });

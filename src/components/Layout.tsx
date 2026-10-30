@@ -91,7 +91,7 @@ function Breadcrumbs() {
             {crumb.path && !isLast ? (
               <Link
                 to={crumb.path}
-                className="rounded-md px-1 py-0.5 transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
+                className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md px-2 py-2 text-center transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary"
               >
                 {crumb.label}
               </Link>
@@ -114,6 +114,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
+  const userMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const desktopScrollContainerRef = useRef<HTMLDivElement>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -182,9 +183,10 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
       setWritingFocusPath(null);
       setShowCmdPalette(false);
       setShowHelp(false);
+      if (userMenuOpen) userMenuTriggerRef.current?.focus();
       setUserMenuOpen(false);
       setMobileNavOpen(false);
-    }, []),
+    }, [userMenuOpen]),
   });
 
   useEffect(() => {
@@ -422,11 +424,11 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
             <button
               onClick={() => navigate('/messages')}
               className="xmt-btn xmt-btn-ghost relative h-10 w-10 shrink-0 !p-0"
-              aria-label="打开消息中心"
+              aria-label={`打开消息中心${unreadCount > 0 ? `，未读 ${unreadCount > 9 ? '9+' : unreadCount} 条${unreadCount > 9 ? `，共 ${unreadCount} 条` : ''}` : ''}`}
             >
               <Bell className="h-[18px] w-[18px]" />
               {unreadCount > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-studio-coral-soft px-1 text-[10px] font-bold text-studio-coral-contrast shadow-[0_0_10px_rgba(255,122,147,0.45)]">
+                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-studio-coral-soft px-1 text-[10px] font-bold text-studio-coral-contrast shadow-glow-coral">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -443,9 +445,11 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
 
             <div className="relative ml-1 border-l border-studio-border-soft pl-3">
               <button
+                ref={userMenuTriggerRef}
                 onClick={() => setUserMenuOpen((value) => !value)}
                 className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-studio-surface-soft"
                 aria-expanded={userMenuOpen}
+                aria-controls={userMenuOpen ? 'desktop-user-menu' : undefined}
                 title="打开用户菜单"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-studio-primary to-studio-violet shadow-sm shadow-studio-primary/25 ring-1 ring-inset ring-white/15">
@@ -459,10 +463,16 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
                     {getRoleDisplayName(user?.role)}
                   </p>
                 </div>
+                <span className="sr-only">打开用户菜单</span>
               </button>
 
               {userMenuOpen && (
-                <div className="xmt-modal-enter absolute right-0 top-[calc(100%+10px)] w-52 rounded-card border border-studio-border-soft bg-studio-surface p-2 shadow-floating backdrop-blur-xl">
+                <div
+                  id="desktop-user-menu"
+                  role="group"
+                  aria-label="用户菜单"
+                  className="xmt-modal-enter absolute right-0 top-[calc(100%+10px)] w-52 rounded-card border border-studio-border-soft bg-studio-surface p-2 shadow-floating backdrop-blur-xl"
+                >
                   <button
                     onClick={() => {
                       setUserMenuOpen(false);

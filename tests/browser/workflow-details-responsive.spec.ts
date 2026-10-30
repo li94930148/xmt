@@ -123,6 +123,107 @@ async function verifyShootingScriptSaveRecovery(browser: import('playwright').Br
   console.log('Shooting script save recovery assertions passed: ambiguous commit is verified on reload, writes stay locked during uncertainty, and unchanged content requires an explicit retry.');
 }
 
+async function verifyShootingRecoveryStorageReadFailures(browser: import('playwright').Browser, base: string, errors: string[]) {
+  for (const [key, label] of [
+    ['xmt:shooting-script-save-pending:v1:user:91:shooting:301', '剧本版本'],
+    ['xmt:shooting-status-pending:v1:user:91:shooting:301', '成片状态'],
+  ] as const) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript((blockedKey) => {
+      const originalGetItem = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (this: Storage, keyName: string) {
+        if (window.name !== 'xmt-storage-retry' && keyName === blockedKey) {
+          throw new DOMException('Storage read is unavailable', 'SecurityError');
+        }
+        return originalGetItem.call(this, keyName);
+      };
+    }, key);
+    await page.goto(`${base}/__qa?page=shooting`);
+    await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+    await page.getByTestId('shooting-recovery-storage-blocked').waitFor();
+    assert.equal(await page.getByRole('button', { name: '小版本保存', exact: true }).isDisabled(), true, `${label} recovery read failure locks minor version writes`);
+    assert.equal(await page.getByRole('button', { name: '大版本保存', exact: true }).isDisabled(), true, `${label} recovery read failure locks major version writes`);
+    assert.equal(await page.getByRole('button', { name: '完成制作', exact: true }).isDisabled(), true, `${label} recovery read failure locks status writes`);
+    assert.equal(await page.locator('.ProseMirror').first().evaluate((element) => (element as HTMLElement).isContentEditable), false, `${label} recovery read failure makes the collaborative editor read-only`);
+    const before = await page.request.get(`${base}/__qa/shooting-script-save-state`).then((response) => response.json());
+    assert.equal(before.shootingVersionActionWriteCount, 0, `${label} recovery read failure sends no version write`);
+    assert.equal((await page.request.get(`${base}/__qa/shooting-status-write-count`).then((response) => response.json())).count, 0, `${label} recovery read failure sends no status write`);
+
+    await page.evaluate(() => { window.name = 'xmt-storage-retry'; });
+    await page.getByRole('button', { name: '重新读取恢复记录', exact: true }).click();
+    await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+    await page.getByTestId('shooting-recovery-storage-blocked').waitFor({ state: 'hidden' });
+    assert.equal(await page.getByRole('button', { name: '小版本保存', exact: true }).isDisabled(), false, `${label} recovery can continue after a successful storage reread`);
+    assert.equal(await page.getByRole('button', { name: '完成制作', exact: true }).isDisabled(), false, `${label} reread restores the normal status action`);
+    const after = await page.request.get(`${base}/__qa/shooting-script-save-state`).then((response) => response.json());
+    assert.equal(after.shootingVersionActionWriteCount, 0, `${label} explicit recovery reread never replays a version write`);
+    assert.equal((await page.request.get(`${base}/__qa/shooting-status-write-count`).then((response) => response.json())).count, 0, `${label} explicit recovery reread never replays a status write`);
+    await page.close();
+  }
+  console.log('Shooting recovery storage assertions passed: unreadable script/status markers lock editing and all writes, then unlock only after explicit successful reread.');
+}
+
+async function verifyShootingRecoveryMarkerExactPersistence(browser: import('playwright').Browser, base: string, errors: string[]) {
+  for (const [target, refuseCleanup] of [
+    ['script', false], ['status', false], ['script', true], ['status', true],
+  ] as const) {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript(({ markerKind, shouldRefuseCleanup }) => {
+      const scriptKey = 'xmt:shooting-script-save-pending:v1:user:91:shooting:301';
+      const statusKey = 'xmt:shooting-status-pending:v1:user:91:shooting:301';
+      const originalSetItem = Storage.prototype.setItem;
+      const originalRemoveItem = Storage.prototype.removeItem;
+      const targetKey = markerKind === 'script' ? scriptKey : statusKey;
+      Storage.prototype.setItem = function (key, serialized) {
+        if (key === targetKey) {
+          const marker = JSON.parse(serialized);
+          if (markerKind === 'script') marker.expectedContent = `${marker.expectedContent} corrupted`;
+          else marker.targetStatus = 'cancelled';
+          return originalSetItem.call(this, key, JSON.stringify(marker));
+        }
+        return originalSetItem.call(this, key, serialized);
+      };
+      if (shouldRefuseCleanup) {
+        Storage.prototype.removeItem = function (key) {
+          if (key === targetKey) return;
+          return originalRemoveItem.call(this, key);
+        };
+      }
+    }, { markerKind: target, shouldRefuseCleanup: refuseCleanup });
+    await page.goto(`${base}/__qa?page=shooting`);
+    await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+    if (target === 'script') {
+      await page.getByRole('button', { name: '小版本保存', exact: true }).click();
+      await page.getByText('剧本版本恢复信息未能完整保存', { exact: false }).waitFor();
+      const state = await page.request.get(`${base}/__qa/shooting-script-save-state`).then((response) => response.json());
+      const marker = await page.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:shooting-script-save-pending:v1:user:91:shooting:301') || 'null'));
+      assert.equal(state.shootingVersionActionWriteCount, 0, 'a valid but altered script recovery marker prevents its version PUT');
+      assert.equal(marker === null, !refuseCleanup, 'the script marker is cleared only after verified cleanup');
+    } else {
+      await page.getByRole('button', { name: '完成制作', exact: true }).click();
+      await page.getByText('成片状态恢复信息未能完整保存', { exact: false }).waitFor();
+      const state = await page.request.get(`${base}/__qa/shooting-status-write-count`).then((response) => response.json());
+      const marker = await page.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:shooting-status-pending:v1:user:91:shooting:301') || 'null'));
+      assert.equal(state.count, 0, 'a valid but altered status recovery marker prevents its status PUT');
+      assert.equal(marker === null, !refuseCleanup, 'the status marker is cleared only after verified cleanup');
+    }
+    if (refuseCleanup) {
+      await page.getByTestId('shooting-recovery-storage-blocked').waitFor();
+      await page.reload();
+      await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+      await page.getByTestId('shooting-recovery-storage-blocked').waitFor();
+      assert.equal(await page.getByRole('button', { name: '小版本保存', exact: true }).isDisabled(), true, `${target} recovery marker integrity failure stays locked after reload`);
+      assert.equal(await page.getByRole('button', { name: '完成制作', exact: true }).isDisabled(), true, `${target} recovery marker integrity failure prevents status writes after reload`);
+    }
+    await page.close();
+  }
+  console.log('Shooting recovery marker assertions passed: altered payloads fail exact readback; verified cleanup is confirmed, and cleanup failure stays blocked across reload.');
+}
+
 const shooting = {
   id: 301,
   topic_id: 302,
@@ -176,6 +277,8 @@ let shootingStatusUpdateStarted = false;
 let shootingStatusUpdateGate: Promise<void> = Promise.resolve();
 let releaseShootingStatusUpdate: (() => void) | null = null;
 let historicalSourceEditable = false;
+let outlineSkeletonFixture = false;
+let production303ReassignedForOriginTest = false;
 let delayNextProduction303Read = false;
 let delayedProduction303Response: import('express').Response | null = null;
 let production303HistoryPaginationEnabled = false;
@@ -215,7 +318,14 @@ let commitNextShootingScriptSaveThenFail = false;
 let failNextShootingScriptDetailRead = false;
 let shootingScriptDetailReadCount = 0;
 let failNextPublishingDetailRead = false;
+let failNextPublishingDetailReadStatus: number | null = null;
+let delayNextPublishingDetailReadStatus = false;
 let publishingDetailReadCount = 0;
+let failNextPublishingVersionsReadStatus: number | null = null;
+let delayNextPublishingVersionsReadStatus = false;
+let revokePublishingReadAccessAfterNextFailedSave = false;
+let expirePublishingReadAuthAfterNextFailedSave = false;
+const publishingReadErrorOrder: string[] = [];
 let archiveSyncRetryCount = 0;
 const shootingScriptVersions: Array<Record<string, unknown>> = [];
 const publishingScriptVersions: Array<Record<string, unknown>> = [];
@@ -225,21 +335,29 @@ const publishingVersionRequests: Array<Record<string, unknown>> = [];
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.get('/__qa', (req, res) => {
-  const page = req.query.page === 'publishing' ? 'publishing' : req.query.page === 'shooting-list' ? 'shooting-list' : req.query.page === 'achievements' ? 'achievements' : 'shooting';
+  const page = req.query.page === 'publishing' ? 'publishing' : req.query.page === 'shooting-list' ? 'shooting-list' : req.query.page === 'achievements' ? 'achievements' : req.query.page === 'production' ? 'production' : 'shooting';
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   const emptyDerivedScript = req.query.script === 'empty-derived';
   const historicalDerivedScript = req.query.script === 'historical-derived';
   const sourceSave = req.query.script === 'source-save';
+  outlineSkeletonFixture = req.query.script === 'outline-skeleton';
   const archiveMode = String(req.query.archive || '');
   failNextShootingVersionsRead = req.query.versionRead === 'shooting';
   failNextPublishingVersionsRead = req.query.versionRead === 'publishing';
-  failNextPublishingScriptSaveWithoutCommit = req.query.scriptSave === 'no-commit';
+  failNextPublishingScriptSaveWithoutCommit = req.query.scriptSave === 'no-commit' || req.query.scriptSave === 'uncommitted-access-revoked';
   commitNextPublishingScriptSaveThenFail = req.query.scriptSave === 'commit-read-fail';
   failNextShootingScriptSaveWithoutCommit = req.query.scriptSave === 'no-commit';
   commitNextShootingScriptSaveThenFail = req.query.scriptSave === 'commit-read-fail';
   failNextShootingScriptDetailRead = false;
   shootingScriptDetailReadCount = 0;
   failNextPublishingDetailRead = false;
+  failNextPublishingDetailReadStatus = null;
+  delayNextPublishingDetailReadStatus = false;
+  failNextPublishingVersionsReadStatus = null;
+  delayNextPublishingVersionsReadStatus = false;
+  revokePublishingReadAccessAfterNextFailedSave = req.query.scriptSave === 'uncommitted-access-revoked';
+  expirePublishingReadAuthAfterNextFailedSave = req.query.scriptSave === 'uncommitted-auth-expired';
+  publishingReadErrorOrder.splice(0);
   publishingDetailReadCount = 0;
   shootingVersionReadCount = 0;
   publishingVersionReadCount = 0;
@@ -264,7 +382,7 @@ app.get('/__qa', (req, res) => {
   archiveSyncFailuresRemaining = archiveMode === 'pending' ? 1 : 0;
   archiveSyncOnNextShootingSave = archiveMode === 'after-shooting-save';
   archiveSyncOnNextPublishingSave = archiveMode === 'after-publishing-save';
-  historicalSourceEditable = historicalDerivedScript;
+  historicalSourceEditable = historicalDerivedScript || outlineSkeletonFixture;
   shooting.script_content = emptyDerivedScript || historicalDerivedScript ? '' : null;
   publishing.script_content = emptyDerivedScript || historicalDerivedScript ? '' : null;
   shooting.script_source_production_id = emptyDerivedScript || historicalDerivedScript ? 303 : null;
@@ -292,7 +410,7 @@ app.get('/__qa', (req, res) => {
   shootingVersionRequests.splice(0);
   publishingVersionRequests.splice(0);
   if (sourceSave) rejectCollaborationUpdates = false;
-  const path = page === 'publishing' ? '/publishing/501' : page === 'shooting-list' ? '/shooting' : page === 'achievements' ? '/achievements' : '/shooting/301';
+  const path = page === 'publishing' ? '/publishing/501' : page === 'shooting-list' ? '/shooting' : page === 'achievements' ? '/achievements' : page === 'production' ? '/production/303' : '/shooting/301';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','workflow-detail-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(path)});</script>`);
 });
 app.get('/api/auth/me', (_req, res) => res.json(user));
@@ -302,7 +420,7 @@ app.get('/api/topics/302', (_req, res) => res.json({ data: {
   id: 302,
   title: '城市早餐探店拍摄计划',
   description: '选题说明隔离文本。',
-  outline: '<p>当前选题大纲（不是来源历史）</p>',
+  outline: outlineSkeletonFixture ? '<h2>开场</h2><h3>采访要点</h3><h2>收尾</h2>' : '<p>当前选题大纲（不是来源历史）</p>',
   platform: '抖音',
   status: 'production',
   creator_id: user.id,
@@ -347,7 +465,7 @@ app.get('/__qa/script-source-state', (_req, res) => res.json({
 }));
 app.get('/__qa/collaboration-state', (_req, res) => res.json({ collaborationUpdateCount, rejectedCollaborationUpdateCount, rejectedScriptSaveCount }));
 app.get('/__qa/workflow-version-state', (_req, res) => res.json({ shooting: shootingVersionRequests, publishing: publishingVersionRequests, shootingReadCount: shootingVersionReadCount, publishingReadCount: publishingVersionReadCount, shootingSaveStarted: shootingScriptSaveStarted, publishingSaveStarted: publishingScriptSaveStarted }));
-app.get('/__qa/publishing-script-save-state', (_req, res) => res.json({ publishingDetailReadCount, publishingScriptWriteCount, publishingVersions: publishingScriptVersions }));
+app.get('/__qa/publishing-script-save-state', (_req, res) => res.json({ publishingDetailReadCount, publishingVersionReadCount, publishingScriptWriteCount, publishingVersions: publishingScriptVersions, publishingReadErrorOrder }));
 app.get('/__qa/shooting-script-save-state', (_req, res) => res.json({ shootingScriptDetailReadCount, shootingScriptWriteCount, shootingVersionActionWriteCount, shootingVersions: shootingScriptVersions }));
 app.post('/__qa/delay-next-shooting-script-save', (_req, res) => {
   delayNextShootingScriptSave = true;
@@ -370,6 +488,13 @@ app.post('/__qa/release-publishing-script-save', (_req, res) => {
   releasePublishingScriptSave?.();
   releasePublishingScriptSave = null;
   return res.json({ released: true });
+});
+app.post('/__qa/revoke-publishing-read-access', (_req, res) => {
+  failNextPublishingDetailReadStatus = 403;
+  delayNextPublishingDetailReadStatus = true;
+  failNextPublishingVersionsReadStatus = 403;
+  delayNextPublishingVersionsReadStatus = true;
+  return res.json({ revoked: true });
 });
 app.post('/__qa/delay-next-archive-sync-retry/:stage', (req, res) => {
   if (req.params.stage !== 'shooting' && req.params.stage !== 'publishing') return res.status(400).json({ message: '无效的隔离阶段' });
@@ -479,16 +604,36 @@ app.post('/api/workflow/shooting/301/archive-sync', async (_req, res) => {
   publishedArchiveSyncPending = false;
   return res.json({ message: '发布归档已同步', archiveSync: 'synced' });
 });
-app.get('/api/workflow/publishing/501', (_req, res) => {
+app.get('/api/workflow/publishing/501', async (_req, res) => {
   publishingDetailReadCount += 1;
+  if (failNextPublishingDetailReadStatus !== null) {
+    const status = failNextPublishingDetailReadStatus;
+    failNextPublishingDetailReadStatus = null;
+    if (delayNextPublishingDetailReadStatus) {
+      delayNextPublishingDetailReadStatus = false;
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    }
+    publishingReadErrorOrder.push(`detail:${status}`);
+    return res.status(status).json({ message: status === 403 ? '模拟发布剧本核实权限已撤销' : '模拟发布剧本保存后的详情核实失败' });
+  }
   if (failNextPublishingDetailRead) {
     failNextPublishingDetailRead = false;
     return res.status(503).json({ message: '模拟发布剧本保存后的详情核实失败' });
   }
   return res.json({ ...publishing, published_archive_script_sync_pending: publishedArchiveSyncPending, can_sync_published_archive: true });
 });
-app.get('/api/workflow/publishing/501/versions', (_req, res) => {
+app.get('/api/workflow/publishing/501/versions', async (_req, res) => {
   publishingVersionReadCount += 1;
+  if (failNextPublishingVersionsReadStatus !== null) {
+    const status = failNextPublishingVersionsReadStatus;
+    failNextPublishingVersionsReadStatus = null;
+    if (delayNextPublishingVersionsReadStatus) {
+      delayNextPublishingVersionsReadStatus = false;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    publishingReadErrorOrder.push(`versions:${status}`);
+    return res.status(status).json({ message: status === 403 ? '模拟剧本历史核实权限已撤销' : '模拟发布剧本历史读取失败' });
+  }
   if (failNextPublishingVersionsRead) {
     failNextPublishingVersionsRead = false;
     return res.status(503).json({ message: '模拟发布剧本历史读取失败' });
@@ -500,6 +645,19 @@ app.put('/api/workflow/publishing/501', async (req, res) => {
     publishingScriptWriteCount += 1;
     if (failNextPublishingScriptSaveWithoutCommit) {
       failNextPublishingScriptSaveWithoutCommit = false;
+      if (revokePublishingReadAccessAfterNextFailedSave) {
+        revokePublishingReadAccessAfterNextFailedSave = false;
+        failNextPublishingDetailReadStatus = 403;
+        delayNextPublishingDetailReadStatus = true;
+        failNextPublishingVersionsReadStatus = 403;
+        delayNextPublishingVersionsReadStatus = true;
+      } else if (expirePublishingReadAuthAfterNextFailedSave) {
+        expirePublishingReadAuthAfterNextFailedSave = false;
+        failNextPublishingDetailReadStatus = 401;
+        delayNextPublishingDetailReadStatus = true;
+        failNextPublishingVersionsReadStatus = 401;
+        delayNextPublishingVersionsReadStatus = true;
+      }
       return res.status(503).json({ message: '模拟发布剧本未提交但响应异常' });
     }
     if (delayNextPublishingScriptSave) {
@@ -571,12 +729,12 @@ const productionFixture = (productionId: number) => {
   const otherProduction = productionId === 304;
   return {
     id: productionId,
-    topic_id: otherProduction ? 305 : 302,
-    topic_title: otherProduction ? '第二条隔离生产记录' : '城市早餐探店拍摄计划',
+    topic_id: otherProduction || production303ReassignedForOriginTest ? 305 : 302,
+    topic_title: otherProduction || production303ReassignedForOriginTest ? '第二条隔离生产记录' : '城市早餐探店拍摄计划',
     topic_status: 'publishing',
     version: 'v2',
-    content: otherProduction ? '<p>第二条正式稿</p>' : '<p>当前创作稿测试内容</p>',
-    content_markdown: otherProduction ? '<p>第二条正式稿</p>' : '<p>当前创作稿测试内容</p>',
+    content: otherProduction ? '<p>第二条正式稿</p>' : outlineSkeletonFixture ? '<h2>开场</h2><p>已有正文</p>' : '<p>当前创作稿测试内容</p>',
+    content_markdown: otherProduction ? '<p>第二条正式稿</p>' : outlineSkeletonFixture ? '<h2>开场</h2><p>已有正文</p>' : '<p>当前创作稿测试内容</p>',
     content_json: null,
     status: otherProduction || historicalSourceEditable ? 'draft' : 'approved',
     operator_id: user.id,
@@ -587,9 +745,18 @@ const productionFixture = (productionId: number) => {
     origin_source_type: 'topic_outline',
     origin_source_content_snapshot: '<p>创建时的大纲来源快照测试</p>',
     origin_source_outline_version: otherProduction ? null : 'v1.2',
+    origin_source_topic_id: otherProduction ? null : 302,
     origin_captured_at: '2026-10-07 09:00:00',
   };
 };
+app.post('/__qa/reassign-production-303-topic-for-origin-test', (_req, res) => {
+  production303ReassignedForOriginTest = true;
+  return res.json({ reassigned: true });
+});
+app.post('/__qa/restore-production-303-topic-for-origin-test', (_req, res) => {
+  production303ReassignedForOriginTest = false;
+  return res.json({ restored: true });
+});
 app.post('/__qa/delay-next-production-303-read', (_req, res) => {
   delayNextProduction303Read = true;
   return res.json({ delayed: true });
@@ -635,6 +802,24 @@ app.post('/__qa/release-material-source-insertion', (_req, res) => {
   });
   delayedMaterialSourceInsertionResponse = null;
   return res.json({ released: true });
+});
+app.get('/api/workflow/production/:id/source-snapshot', (req, res) => {
+  if (Number(req.params.id) !== 303 || req.query.version !== 'v1.0') {
+    return res.status(404).json({ message: '创作来源版本不可用' });
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({
+    production_id: 303,
+    source_topic_id: 302,
+    source_topic_title: '城市早餐探店拍摄计划',
+    version: 'v1.0',
+    content: '<p>历史来源正文测试</p>',
+    content_markdown: '<p>历史来源正文测试</p>',
+    status: 'approved',
+    created_at: '2026-10-01 09:00:00',
+    version_timestamp: '2026-10-01 09:00:00',
+    operator_name: user.name,
+  });
 });
 app.get('/api/workflow/production/:id', (req, res) => {
   const productionId = Number(req.params.id);
@@ -785,6 +970,38 @@ if (process.env.XMT_WORKFLOW_DETAIL_QA_SERVE === '1') {
 const browser = await chromium.launch({ headless: true });
 try {
   const errors: string[] = [];
+  const outlineContinuationPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  outlineContinuationPage.setDefaultTimeout(10000);
+  outlineContinuationPage.on('pageerror', (error) => errors.push(error.message));
+  const productionWrites: string[] = [];
+  outlineContinuationPage.on('request', (request) => {
+    if (request.url().includes('/api/workflow/production/303') && request.method() !== 'GET') productionWrites.push(request.method());
+  });
+  await outlineContinuationPage.goto(`${base}/__qa?page=production&script=outline-skeleton`);
+  await outlineContinuationPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  const outlineContinueButton = outlineContinuationPage.getByRole('button', { name: '按大纲续写', exact: true });
+  await outlineContinueButton.waitFor();
+  await outlineContinuationPage.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === '按大纲续写');
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  const productionEditor = outlineContinuationPage.locator('.ProseMirror').first();
+  await productionEditor.getByRole('heading', { name: '开场' }).waitFor();
+  await outlineContinueButton.click();
+  await productionEditor.getByRole('heading', { name: '采访要点' }).waitFor();
+  await productionEditor.getByRole('heading', { name: '收尾' }).waitFor();
+  assert.equal(await productionEditor.locator('h2', { hasText: '开场' }).count(), 1, 'outline continuation keeps the existing manuscript section exactly once');
+  assert.equal(await productionEditor.locator('h3', { hasText: '采访要点' }).count(), 1, 'outline continuation inserts the missing subsection at its original depth');
+  assert.equal(await productionEditor.locator('h2', { hasText: '收尾' }).count(), 1, 'outline continuation inserts each missing top-level section');
+  assert.equal(await productionEditor.getByText('已有正文', { exact: true }).count(), 1, 'outline continuation preserves existing manuscript text');
+  await outlineContinueButton.click();
+  await outlineContinuationPage.getByText('大纲小节已在正文中', { exact: true }).waitFor();
+  assert.equal(await productionEditor.locator('h3', { hasText: '采访要点' }).count(), 1, 'repeating continuation does not duplicate inserted headings');
+  assert.deepEqual(productionWrites, [], 'outline insertion does not create a formal version or status write');
+  await outlineContinuationPage.close({ runBeforeUnload: false });
+
+  await verifyShootingRecoveryStorageReadFailures(browser, base, errors);
+  await verifyShootingRecoveryMarkerExactPersistence(browser, base, errors);
   await verifyShootingScriptSaveRecovery(browser, base, errors);
   const expectedVersionHistoryFailures: string[] = [];
   let expectedVersionHistoryConsoleErrors = 0;
@@ -1075,8 +1292,8 @@ try {
   const clipboardCollaborationBefore = await shootingHistoryContrastPage.request.get(`${base}/__qa/collaboration-state`).then((response) => response.json());
 
   let clipboardMenu = await openEditorContextMenu();
-  assert.equal(await clipboardMenu.getByRole('button', { name: /^复制/ }).isDisabled(), false, 'copy is available when editor text is selected');
-  await clipboardMenu.getByRole('button', { name: /^复制/ }).click();
+  assert.equal(await clipboardMenu.getByRole('menuitem', { name: /^复制/ }).isDisabled(), false, 'copy is available when editor text is selected');
+  await clipboardMenu.getByRole('menuitem', { name: /^复制/ }).click();
   await shootingHistoryContrastPage.getByText('浏览器未能复制所选内容，请检查剪贴板权限后重试。', { exact: true }).waitFor();
   assert.equal(await shootingHistoryContrastPage.getByTestId('editor-context-menu').count(), 0, 'the context menu closes after a failed clipboard action');
 
@@ -1084,15 +1301,15 @@ try {
     (window as Window & { __clipboardQa: { outcomes: Record<string, boolean>; calls: string[] } }).__clipboardQa.outcomes.copy = true;
   });
   clipboardMenu = await openEditorContextMenu();
-  await clipboardMenu.getByRole('button', { name: /^复制/ }).click();
+  await clipboardMenu.getByRole('menuitem', { name: /^复制/ }).click();
   await shootingHistoryContrastPage.getByText('所选内容已复制到剪贴板。', { exact: true }).waitFor();
 
   clipboardMenu = await openEditorContextMenu();
-  await clipboardMenu.getByRole('button', { name: /^剪切/ }).click();
+  await clipboardMenu.getByRole('menuitem', { name: /^剪切/ }).click();
   await shootingHistoryContrastPage.getByText('正文未确认变更；请检查剪贴板权限后重试。', { exact: false }).waitFor();
 
   clipboardMenu = await openEditorContextMenu();
-  await clipboardMenu.getByRole('button', { name: /^粘贴/ }).click();
+  await clipboardMenu.getByRole('menuitem', { name: /^粘贴/ }).click();
   await shootingHistoryContrastPage.getByText('浏览器未允许页面读取剪贴板，请使用系统粘贴快捷键或浏览器菜单。', { exact: true }).waitFor();
 
   const clipboardQaState = await shootingHistoryContrastPage.evaluate(() => (window as Window & {
@@ -1144,7 +1361,10 @@ try {
   await shootingBaselineEntry.getByText('该版本的创作来源未记录', { exact: true }).waitFor();
   const shootingVersionEntry = shootingHistory.getByRole('listitem').filter({ hasText: 'v1.0 · 小版本' });
   const shootingSourceVersionLink = shootingVersionEntry.getByRole('button', { name: '来源创作稿：v2 · 查看', exact: true });
+  const shootingVersionBodyDisclosure = shootingVersionEntry.locator('summary');
   await shootingSourceVersionLink.waitFor();
+  await assertMinimumTapTarget(shootingSourceVersionLink, '拍摄历史来源创作版本入口');
+  await assertMinimumTapTarget(shootingVersionBodyDisclosure, '拍摄历史版本正文展开');
   await shootingVersionEntry.getByText('查看此版本正文', { exact: true }).click();
   await shootingVersionEntry.getByText('拍摄用隔离稿件。', { exact: true }).waitFor();
   for (const viewport of [
@@ -1170,6 +1390,8 @@ try {
     await assertButtonFits(saveShootingMinor, `${viewport.width}px 拍摄详情小版本保存`, viewport, 1);
     await assertButtonFits(saveShootingMajor, `${viewport.width}px 拍摄详情大版本保存`, viewport, 1);
     await assertButtonFits(shootingSourceVersionLink, `${viewport.width}px 拍摄历史来源创作版本入口`, viewport, 1);
+    await assertMinimumTapTarget(shootingSourceVersionLink, `${viewport.width}px 拍摄历史来源创作版本入口`);
+    await assertMinimumTapTarget(shootingVersionBodyDisclosure, `${viewport.width}px 拍摄历史版本正文展开`);
     await assertButtonFits(returnToShootingList, `${viewport.width}px 拍摄详情返回列表`, viewport, 1);
     await assertButtonFits(toggleShootingInfo, `${viewport.width}px 拍摄详情信息栏开关`, viewport, 1);
     await assertButtonFits(copyShootingScript, `${viewport.width}px 拍摄剧本复制全文`, viewport, 1);
@@ -1209,8 +1431,12 @@ try {
   assert.equal(await shootingHistory.isVisible(), true, 'shooting version history is available on the detail page');
   assert.ok(await contrastRatio(finishProduction) >= 4.5, 'light-theme shooting completion action has accessible text contrast');
   await shootingSourceVersionLink.click();
-  await page.waitForURL(/\/production\/303\?version=v2$/);
-  await page.getByRole('button', { name: '当前版本查看 / 编辑', exact: true }).waitFor();
+  await page.waitForURL(/\/production\/303\/source-snapshot\?version=v2$/);
+  await page.getByRole('heading', { name: '创作来源快照暂不可用', exact: true }).waitFor();
+  await page.getByText('创作来源版本不可用', { exact: true }).waitFor();
+  assert.equal(await page.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'an unavailable exact history source never falls back to the current manuscript');
+  assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the unavailable historical source remains read-only');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'the unavailable source snapshot does not overflow at desktop width');
   await page.goto(`${base}/__qa?page=shooting&theme=dark`);
   await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   assert.ok(await contrastRatio(page.getByRole('button', { name: '完成制作', exact: true })) >= 4.5, 'dark-theme shooting completion action has accessible text contrast');
@@ -1245,7 +1471,9 @@ try {
   await page.getByText('v1.0 · 小版本', { exact: true }).waitFor();
   const publishingVersionEntry = publishingHistory.getByRole('listitem').filter({ hasText: 'v1.0 · 小版本' });
   const publishingSourceVersionLink = publishingVersionEntry.getByRole('button', { name: '来源创作稿：v2 · 查看', exact: true });
+  const publishingVersionBodyDisclosure = publishingVersionEntry.locator('summary');
   await publishingSourceVersionLink.waitFor();
+  await assertMinimumTapTarget(publishingVersionBodyDisclosure, '发布历史版本正文展开');
   await publishingVersionEntry.getByText('查看此版本正文', { exact: true }).click();
   await publishingVersionEntry.getByText('发布用隔离稿件。', { exact: true }).waitFor();
   for (const viewport of [
@@ -1289,6 +1517,7 @@ try {
     await cancelEdit.click();
     await assertButtonFits(publishingSourceVersionLink, `${viewport.width}px 发布历史来源创作版本入口`, viewport, 1);
     await assertMinimumTapTarget(publishingSourceVersionLink, `${viewport.width}px 发布历史来源创作版本入口`);
+    await assertMinimumTapTarget(publishingVersionBodyDisclosure, `${viewport.width}px 发布历史版本正文展开`);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), `${viewport.width}px publishing detail has no horizontal page overflow`);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1626,8 +1855,20 @@ try {
   await sourceHistoryPage.goto(`${base}/__qa?page=publishing&script=historical-derived`);
   await sourceHistoryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   await sourceHistoryPage.getByText(/创作版本时间.*12:00/).waitFor();
+  const sourceSnapshotRead = sourceHistoryPage.waitForResponse((response) => response.url().includes('/api/workflow/production/303/source-snapshot?version=v1.0') && response.request().method() === 'GET');
   await sourceHistoryPage.getByRole('button', { name: '查看引用创作版本 v1.0', exact: true }).click();
-  await sourceHistoryPage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await sourceHistoryPage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  const sourceSnapshotResponse = await sourceSnapshotRead;
+  assert.equal(sourceSnapshotResponse.headers()['cache-control'], 'no-store', 'source-version responses are not cached');
+  await sourceHistoryPage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
+  await sourceHistoryPage.getByText('创作稿 #303 · v1.0', { exact: true }).waitFor();
+  await sourceHistoryPage.getByRole('heading', { name: '城市早餐探店拍摄计划', exact: true }).waitFor();
+  await sourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
+  assert.equal(await sourceHistoryPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'the publishing source link displays only the exact historical manuscript snapshot');
+  assert.equal(await sourceHistoryPage.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the source snapshot page has no manuscript editing action');
+  await sourceHistoryPage.getByRole('button', { name: '返回来源页面', exact: true }).click();
+  await sourceHistoryPage.waitForURL(/\/publishing\/501$/);
+  await sourceHistoryPage.goto(`${base}/production/303?version=v1.0`);
   await sourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
   const sourceMaterialSnapshot = sourceHistoryPage.getByTestId('production-material-history-snapshot');
   await sourceMaterialSnapshot.getByText('v1.0资料快照测试', { exact: true }).waitFor();
@@ -1649,11 +1890,12 @@ try {
   await sourceHistoryPage.getByRole('button', { name: '展开信息栏', exact: true }).click();
   await sourceHistoryPage.getByRole('button', { name: '收起信息栏', exact: true }).waitFor();
   await sourceHistoryPage.getByRole('button', { name: '查看创作版本 v1.0', exact: true }).click();
-  await sourceHistoryPage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await sourceHistoryPage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  await sourceHistoryPage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
   await sourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
-  await sourceHistoryPage.getByTestId('production-material-history-snapshot').getByText('v1.0资料快照测试', { exact: true }).waitFor();
-  assert.equal(await sourceHistoryPage.getByTestId('production-resources-panel').count(), 0, 'the shooting source link also opens a read-only historical material snapshot');
-  assert.equal(historicalMaterialDraftReads, 0, 'the shooting source link never requests the current material draft for a historical version');
+  assert.equal(await sourceHistoryPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'the shooting source link never substitutes the current manuscript');
+  assert.equal(await sourceHistoryPage.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the shooting source snapshot remains read-only');
+  assert.equal(historicalMaterialDraftReads, 0, 'the shooting source link never requests a current material draft');
   await sourceHistoryPage.goto(`${base}/production/303?version=v0.9`);
   await sourceHistoryPage.getByText('未记录快照的历史正文', { exact: true }).waitFor();
   await sourceHistoryPage.getByTestId('production-material-history-snapshot').getByText('该历史版本没有材料快照记录', { exact: true }).waitFor();
@@ -1667,11 +1909,20 @@ try {
   outlineSourceDesktopPage.setDefaultTimeout(10000);
   outlineSourceDesktopPage.on('pageerror', (error) => errors.push(error.message));
   outlineSourceDesktopPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await outlineSourceDesktopPage.request.post(`${base}/__qa/reassign-production-303-topic-for-origin-test`);
   await outlineSourceDesktopPage.goto(`${base}/__qa?page=publishing&script=historical-derived`);
   await outlineSourceDesktopPage.getByRole('button', { name: '查看引用创作版本 v1.0', exact: true }).click();
-  await outlineSourceDesktopPage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await outlineSourceDesktopPage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  await outlineSourceDesktopPage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
+  await outlineSourceDesktopPage.getByText('历史来源正文测试', { exact: true }).waitFor();
+  assert.equal(await outlineSourceDesktopPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'A-to-B reassignment keeps the exact A source snapshot without exposing B current content');
+  await outlineSourceDesktopPage.goto(`${base}/production/303?version=v1.0`);
+  await outlineSourceDesktopPage.getByText('历史来源正文测试', { exact: true }).waitFor();
   const outlineSourceLink = outlineSourceDesktopPage.getByRole('link', { name: '查看来源大纲版本', exact: true });
   await outlineSourceLink.waitFor();
+  const desktopOriginLinkBounds = await outlineSourceLink.boundingBox();
+  assert.ok(desktopOriginLinkBounds && desktopOriginLinkBounds.height >= 40, `desktop origin link has a 40px touch target: ${JSON.stringify(desktopOriginLinkBounds)}`);
+  await outlineSourceDesktopPage.getByRole('button', { name: '第二条隔离生产记录', exact: true }).waitFor();
   assert.match(await outlineSourceLink.getAttribute('href') || '', /^\/topics\/302\?outlineVersion=v1\.2$/);
   await outlineSourceLink.click();
   await outlineSourceDesktopPage.waitForURL(/\/topics\/302\?outlineVersion=v1\.2$/);
@@ -1695,7 +1946,14 @@ try {
   await mobileSourceHistoryPage.goto(`${base}/__qa?page=publishing&script=historical-derived`);
   await mobileSourceHistoryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   await mobileSourceHistoryPage.getByRole('button', { name: '查看引用创作版本 v1.0', exact: true }).click();
-  await mobileSourceHistoryPage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await mobileSourceHistoryPage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  await mobileSourceHistoryPage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
+  await mobileSourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
+  assert.equal(await mobileSourceHistoryPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'the mobile publishing source link displays only its exact historical manuscript');
+  assert.equal(await mobileSourceHistoryPage.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the mobile source snapshot never exposes manuscript editing');
+  await mobileSourceHistoryPage.getByRole('button', { name: '返回来源页面', exact: true }).click();
+  await mobileSourceHistoryPage.waitForURL(/\/publishing\/501$/);
+  await mobileSourceHistoryPage.goto(`${base}/production/303?version=v1.0`);
   await mobileSourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
   const mobileMaterialSnapshot = mobileSourceHistoryPage.getByTestId('production-material-history-snapshot');
   await mobileMaterialSnapshot.getByText('v1.0资料快照测试', { exact: true }).waitFor();
@@ -1703,6 +1961,14 @@ try {
   await mobileSourceHistoryPage.getByText('初稿创建时引用了选题大纲').waitFor();
   await mobileSourceHistoryPage.getByText('来源版本：v1.2', { exact: true }).waitFor();
   await mobileSourceHistoryPage.getByText('来源版本：v1.2', { exact: true }).scrollIntoViewIfNeeded();
+  const mobileOriginLink = mobileSourceHistoryPage.getByRole('link', { name: '查看来源大纲版本', exact: true });
+  const mobileOriginLinkBounds = await mobileOriginLink.boundingBox();
+  assert.ok(mobileOriginLinkBounds && mobileOriginLinkBounds.height >= 40, `390px mobile origin link has a 40px touch target: ${JSON.stringify(mobileOriginLinkBounds)}`);
+  await mobileSourceHistoryPage.setViewportSize({ width: 320, height: 844 });
+  const narrowOriginLinkBounds = await mobileOriginLink.boundingBox();
+  assert.ok(narrowOriginLinkBounds && narrowOriginLinkBounds.height >= 40, `320px mobile origin link has a 40px touch target: ${JSON.stringify(narrowOriginLinkBounds)}`);
+  assert.ok(await mobileSourceHistoryPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'the origin panel does not overflow a 320px mobile viewport');
+  await mobileSourceHistoryPage.setViewportSize({ width: 390, height: 844 });
   await mobileSourceHistoryPage.screenshot({ path: '/tmp/xmt-production-origin-version-mobile.png', fullPage: false });
   await mobileSourceHistoryPage.getByText('查看创建时的大纲快照', { exact: true }).click();
   await mobileSourceHistoryPage.getByText('创建时的大纲来源快照测试', { exact: true }).waitFor();
@@ -1728,13 +1994,11 @@ try {
   await mobileSourceHistoryPage.getByRole('region', { name: '创作来源版本' }).waitFor();
   await mobileSourceHistoryPage.screenshot({ path: '/tmp/xmt-shooting-source-card-390.png', fullPage: false });
   await mobileSourceHistoryPage.getByRole('button', { name: '查看创作版本 v1.0', exact: true }).click();
-  await mobileSourceHistoryPage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await mobileSourceHistoryPage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  await mobileSourceHistoryPage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
   await mobileSourceHistoryPage.getByText('历史来源正文测试', { exact: true }).waitFor();
-  await mobileSourceHistoryPage.getByText('历史版本 v1.0 · 只读', { exact: true }).waitFor();
-  const mobileShootingMaterialSnapshot = mobileSourceHistoryPage.getByTestId('production-material-history-snapshot');
-  await mobileShootingMaterialSnapshot.getByText('v1.0资料快照测试', { exact: true }).waitFor();
-  await mobileShootingMaterialSnapshot.scrollIntoViewIfNeeded();
-  await mobileSourceHistoryPage.screenshot({ path: '/tmp/xmt-shooting-source-history-390.png', fullPage: false });
+  assert.equal(await mobileSourceHistoryPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'the mobile shooting link never substitutes the current manuscript');
+  await mobileSourceHistoryPage.screenshot({ path: '/tmp/xmt-shooting-source-snapshot-390.png', fullPage: false });
   assert.equal(await mobileSourceHistoryPage.getByText('当前创作稿测试内容', { exact: true }).count(), 0, 'the mobile shooting source link does not substitute the current manuscript');
   assert.equal(await mobileSourceHistoryPage.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the mobile historical source remains read-only');
   assert.equal(mobileHistoricalMaterialDraftReads, 0, 'the mobile shooting source link never requests the current material draft');
@@ -1746,7 +2010,12 @@ try {
   outlineSourceMobilePage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await outlineSourceMobilePage.goto(`${base}/__qa?page=publishing&script=historical-derived`);
   await outlineSourceMobilePage.getByRole('button', { name: '查看引用创作版本 v1.0', exact: true }).click();
-  await outlineSourceMobilePage.waitForURL(/\/production\/303\?version=v1\.0$/);
+  await outlineSourceMobilePage.waitForURL(/\/production\/303\/source-snapshot\?version=v1\.0$/);
+  await outlineSourceMobilePage.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
+  await outlineSourceMobilePage.getByText('历史来源正文测试', { exact: true }).waitFor();
+  assert.equal(await outlineSourceMobilePage.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the source snapshot page is read-only on mobile');
+  await outlineSourceMobilePage.goto(`${base}/production/303?version=v1.0`);
+  await outlineSourceMobilePage.getByText('历史来源正文测试', { exact: true }).waitFor();
   const mobileOutlineSourceLink = outlineSourceMobilePage.getByRole('link', { name: '查看来源大纲版本', exact: true });
   await mobileOutlineSourceLink.waitFor();
   await mobileOutlineSourceLink.scrollIntoViewIfNeeded();
@@ -1769,6 +2038,7 @@ try {
   await outlineSourceMobilePage.getByText('来源大纲版本 v0.0 当前无法定位；没有回退到最新大纲。', { exact: true }).waitFor();
   assert.equal(await outlineSourceMobilePage.getByText('当前选题大纲（不是来源历史）', { exact: true }).count(), 0, 'mobile never substitutes the current outline for an unavailable historical source');
   await outlineSourceMobilePage.close();
+  await outlineSourceMobilePage.request.post(`${base}/__qa/restore-production-303-topic-for-origin-test`);
 
   const mobileSnapshotEdgePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   mobileSnapshotEdgePage.setDefaultTimeout(10000);
@@ -1852,6 +2122,60 @@ try {
     throw error;
   }
   await sourceSavePage.close();
+
+  const materialResizePage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  materialResizePage.setDefaultTimeout(10000);
+  materialResizePage.on('pageerror', (error) => errors.push(error.message));
+  const materialResizeWrites: string[] = [];
+  materialResizePage.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.startsWith('/api/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
+      materialResizeWrites.push(`${request.method()} ${pathname}`);
+    }
+  });
+  await materialResizePage.goto(`${base}/__qa?script=historical-derived`);
+  await materialResizePage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  await materialResizePage.goto(`${base}/production/303`);
+  const materialResizePanel = materialResizePage.getByTestId('production-resources-panel');
+  await materialResizePanel.getByText('已保存', { exact: true }).waitFor();
+  const materialResizeHandle = materialResizePanel.getByRole('separator', { name: '拖动调整创作资料区域高度，双击恢复默认高度' });
+  const materialWritesBeforeResize = await materialResizePage.request.get(`${base}/__qa/material-draft-state`).then((response) => response.json());
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '360', 'the isolated material panel starts at its documented default height');
+  const resizeBounds = await materialResizeHandle.boundingBox();
+  assert.ok(resizeBounds, 'the material resize handle is visible before dragging');
+  const resizeX = resizeBounds.x + resizeBounds.width / 2;
+  const resizeY = resizeBounds.y + resizeBounds.height / 2;
+  await materialResizePage.mouse.move(resizeX, resizeY);
+  await materialResizePage.mouse.down();
+  await materialResizePage.mouse.move(resizeX, resizeY + 80, { steps: 4 });
+  await materialResizePage.mouse.up();
+  await materialResizePage.waitForFunction(() => document.querySelector('[aria-label="拖动调整创作资料区域高度，双击恢复默认高度"]')?.getAttribute('aria-valuenow') === '440');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '440', 'pointer dragging changes the material panel height by the pointer delta');
+  assert.equal(await materialResizePage.evaluate(() => localStorage.getItem('xmt:production-materials-height:v1:user:91')), '440', 'pointer release persists only the panel layout preference');
+  await materialResizeHandle.press('Home');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '360', 'Home restores the default material panel height');
+  await materialResizeHandle.press('ArrowDown');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '380', 'keyboard resizing increases the panel by one step');
+  await materialResizeHandle.press('ArrowUp');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '360', 'keyboard resizing decreases the panel by one step');
+  assert.equal(await materialResizePage.evaluate(() => localStorage.getItem('xmt:production-materials-height:v1:user:91')), '360', 'keyboard resizing persists its layout preference');
+
+  await materialResizePage.setViewportSize({ width: 390, height: 844 });
+  await materialResizeHandle.scrollIntoViewIfNeeded();
+  for (let index = 0; index < 20; index += 1) await materialResizeHandle.press('ArrowDown');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuemax'), '633', 'the narrow viewport exposes the 75 percent height limit');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '633', 'keyboard resizing clamps at the narrow viewport maximum');
+  for (let index = 0; index < 30; index += 1) await materialResizeHandle.press('ArrowUp');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuemin'), '240', 'the minimum height is exposed to assistive technology');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '240', 'keyboard resizing clamps at the minimum height');
+  await materialResizeHandle.press('Home');
+  assert.equal(await materialResizeHandle.getAttribute('aria-valuenow'), '360', 'the narrow layout can restore its default height');
+  assert.deepEqual(materialResizeWrites, [], 'dragging and keyboard resizing do not send business write requests');
+  const materialWritesAfterResize = await materialResizePage.request.get(`${base}/__qa/material-draft-state`).then((response) => response.json());
+  assert.equal(materialWritesAfterResize.writes.length, materialWritesBeforeResize.writes.length, 'layout resizing does not save or alter the material draft');
+  assert.ok(await materialResizePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the resized material panel fits a 390px viewport without horizontal overflow');
+  await materialResizePage.screenshot({ path: '/tmp/xmt-material-resize-narrow.png', fullPage: false });
+  await materialResizePage.close();
 
   const materialLineagePage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   materialLineagePage.setDefaultTimeout(10000);
@@ -2058,6 +2382,33 @@ try {
   assert.equal(finalPublishingDuplicateState.publishing.length - publishingVersionCountBeforeDuplicate, 1, 'same-task double activation creates exactly one publishing version');
   await publishingDuplicateSavePage.close();
 
+  const publishingStorageDropPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  publishingStorageDropPage.setDefaultTimeout(10000);
+  publishingStorageDropPage.on('pageerror', (error) => errors.push(error.message));
+  await publishingStorageDropPage.goto(`${base}/__qa?page=publishing&scriptSave=no-commit`);
+  await publishingStorageDropPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  await publishingStorageDropPage.getByRole('button', { name: '编辑剧本', exact: true }).click();
+  const storageDropPublishingDraft = publishingStorageDropPage.locator('.ProseMirror').first();
+  await storageDropPublishingDraft.click();
+  await publishingStorageDropPage.keyboard.press('Control+A');
+  await publishingStorageDropPage.keyboard.type('恢复凭证静默丢写时保留的发布剧本');
+  const publishingWritesBeforeStorageDrop = await publishingStorageDropPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount);
+  const publishingRecoveryStorageKey = 'xmt:publishing-script-save-pending:v1:user:91:publishing:501';
+  await publishingStorageDropPage.evaluate((key) => {
+    const nativeSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (this === window.sessionStorage && name === key) return;
+      nativeSetItem.call(this, name, value);
+    };
+  }, publishingRecoveryStorageKey);
+  await publishingStorageDropPage.getByRole('button', { name: '小版本保存', exact: true }).click();
+  await publishingStorageDropPage.getByRole('alert').filter({ hasText: '本次没有发送保存请求' }).waitFor();
+  assert.equal(await storageDropPublishingDraft.innerText(), '恢复凭证静默丢写时保留的发布剧本', 'a silently dropped recovery marker preserves the publishing script');
+  assert.equal(await publishingStorageDropPage.evaluate((key) => sessionStorage.getItem(key), publishingRecoveryStorageKey), null, 'a silently dropped publishing marker remains absent');
+  const publishingStateAfterStorageDrop = await publishingStorageDropPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json());
+  assert.equal(publishingStateAfterStorageDrop.publishingScriptWriteCount, publishingWritesBeforeStorageDrop, 'a silently dropped recovery marker prevents a publishing script write');
+  await publishingStorageDropPage.close();
+
   const publishingCommitRecoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   publishingCommitRecoveryPage.setDefaultTimeout(10000);
   publishingCommitRecoveryPage.on('pageerror', (error) => errors.push(error.message));
@@ -2106,6 +2457,92 @@ try {
   assert.equal(retriedPublishingState.publishingVersions.filter((entry: { is_baseline: number }) => entry.is_baseline !== 1).length, 1, 'only the explicit user retry creates the publishing version');
   assert.equal(retriedPublishingState.publishingScriptWriteCount, unchangedPublishingState.publishingScriptWriteCount + 1, 'the user-triggered retry sends exactly one additional PUT');
   await publishingUnchangedRecoveryPage.close();
+
+  const revokedPublishingRecoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  revokedPublishingRecoveryPage.setDefaultTimeout(10000);
+  revokedPublishingRecoveryPage.on('pageerror', (error) => errors.push(error.message));
+  await revokedPublishingRecoveryPage.goto(`${base}/__qa?page=publishing&scriptSave=uncommitted-access-revoked`);
+  await revokedPublishingRecoveryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '编辑剧本', exact: true }).click();
+  const revokedPublishingDraft = revokedPublishingRecoveryPage.locator('.ProseMirror').first();
+  await revokedPublishingDraft.click();
+  await revokedPublishingRecoveryPage.keyboard.press('Control+A');
+  await revokedPublishingRecoveryPage.keyboard.type('权限恢复后仍需核实的私有草稿');
+  const revokedWriteCountBefore = await revokedPublishingRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount);
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '小版本保存', exact: true }).click();
+  const revokedAccessAlert = revokedPublishingRecoveryPage.getByRole('alert').filter({ hasText: '当前账号已无权读取这条发布记录或剧本历史' });
+  await revokedAccessAlert.waitFor();
+  await revokedPublishingRecoveryPage.waitForFunction(async () => {
+    const state = await (await fetch('/__qa/publishing-script-save-state')).json();
+    return state.publishingReadErrorOrder.length >= 2;
+  });
+  const firstForbiddenVerificationState = await revokedPublishingRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json());
+  assert.deepEqual(firstForbiddenVerificationState.publishingReadErrorOrder.slice(-2), ['versions:403', 'detail:403'], 'a forbidden version-history GET completes before the delayed detail GET and is still recognized as access denial');
+  assert.equal(await revokedPublishingRecoveryPage.getByText('城市早餐探店拍摄计划', { exact: true }).count(), 0, 'a revoked detail read clears previously loaded publishing details');
+  assert.equal(await revokedPublishingRecoveryPage.locator('.editor-content-preview, .ProseMirror').count(), 0, 'a revoked read permission hides both script preview and editor');
+  assert.equal(await revokedPublishingRecoveryPage.getByRole('button', { name: '保存', exact: true }).count(), 0, 'a revoked read permission leaves no script write control');
+  const revokedMarker = await revokedPublishingRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:publishing-script-save-pending:v1:user:91:publishing:501'));
+  assert.ok(revokedMarker, 'a forbidden read-only verification keeps the same-user recovery marker');
+  assert.match(revokedMarker || '', /权限恢复后仍需核实的私有草稿/, 'the local draft remains recoverable after read permission is revoked');
+  const revokedBeforeUnload = await revokedPublishingRecoveryPage.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(revokedBeforeUnload, true, '403 keeps the beforeunload warning because sessionStorage is cleared when the tab closes');
+  const revokedWriteCountAfter = await revokedPublishingRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount);
+  assert.equal(revokedWriteCountAfter - revokedWriteCountBefore, 1, 'the access-denied recovery path never resubmits the publishing PUT');
+  await revokedPublishingRecoveryPage.request.post(`${base}/__qa/revoke-publishing-read-access`);
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '只读核实保存状态', exact: true }).click();
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '正在核实…', exact: true }).waitFor();
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '返回发布管理', exact: true }).click();
+  assert.match(new URL(revokedPublishingRecoveryPage.url()).pathname, /\/publishing\/501$/, 'while a read-only recheck is in flight, leaving stays blocked to protect the local draft');
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '只读核实保存状态', exact: true }).waitFor();
+  await revokedAccessAlert.waitFor();
+  assert.equal(await revokedPublishingRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount), revokedWriteCountAfter, 'retrying a forbidden read remains read-only');
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '返回发布管理', exact: true }).click();
+  await revokedPublishingRecoveryPage.waitForURL(/\/publishing$/);
+  assert.ok(await revokedPublishingRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:publishing-script-save-pending:v1:user:91:publishing:501')), 'leaving after access is revoked does not delete the unresolved recovery marker');
+
+  const otherAccount = { ...user, id: 92, username: 'other-workflow-detail-qa', name: '另一账号' };
+  await revokedPublishingRecoveryPage.evaluate((account) => localStorage.setItem('xmt_user', JSON.stringify(account)), otherAccount);
+  await revokedPublishingRecoveryPage.route('**/api/auth/me', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(otherAccount) }));
+  await revokedPublishingRecoveryPage.goto(`${base}/publishing/501`);
+  await revokedPublishingRecoveryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  assert.equal(await revokedPublishingRecoveryPage.getByRole('alert').filter({ hasText: '权限恢复后仍需核实的私有草稿' }).count(), 0, 'a different account does not read the original account recovery marker');
+  assert.equal(await revokedPublishingRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:publishing-script-save-pending:v1:user:92:publishing:501')), null, 'the other account has no recovery marker under its own key');
+  await revokedPublishingRecoveryPage.getByRole('button', { name: '编辑剧本', exact: true }).click();
+  assert.equal(await revokedPublishingRecoveryPage.locator('.ProseMirror').first().innerText(), '发布用隔离稿件。', 'the other account sees the server manuscript, not the first account local draft');
+  await revokedPublishingRecoveryPage.unroute('**/api/auth/me');
+  await revokedPublishingRecoveryPage.evaluate((account) => localStorage.setItem('xmt_user', JSON.stringify(account)), user);
+  await revokedPublishingRecoveryPage.reload();
+  await revokedPublishingRecoveryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  await revokedPublishingRecoveryPage.getByText('剧本尚未保存', { exact: true }).waitFor();
+  assert.equal(await revokedPublishingRecoveryPage.locator('.ProseMirror').first().innerText(), '权限恢复后仍需核实的私有草稿', 'the original account can re-enter after permission returns and recover its pending draft');
+  const afterRevokedRecovery = await revokedPublishingRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json());
+  assert.equal(afterRevokedRecovery.publishingScriptWriteCount, revokedWriteCountAfter, 're-entry resumes read-only verification without another PUT');
+  assert.equal(await revokedPublishingRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:publishing-script-save-pending:v1:user:91:publishing:501')), null, 'the original account marker clears once the unchanged save result is verified');
+  await revokedPublishingRecoveryPage.close();
+
+  const expiredAuthRecoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  expiredAuthRecoveryPage.setDefaultTimeout(10000);
+  expiredAuthRecoveryPage.on('pageerror', (error) => errors.push(error.message));
+  await expiredAuthRecoveryPage.goto(`${base}/__qa?page=publishing&scriptSave=uncommitted-auth-expired`);
+  await expiredAuthRecoveryPage.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
+  await expiredAuthRecoveryPage.getByRole('button', { name: '编辑剧本', exact: true }).click();
+  await expiredAuthRecoveryPage.locator('.ProseMirror').first().click();
+  await expiredAuthRecoveryPage.keyboard.press('Control+A');
+  await expiredAuthRecoveryPage.keyboard.type('登录过期期间保留的隔离草稿');
+  const expiredAuthWriteCountBefore = await expiredAuthRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount);
+  await expiredAuthRecoveryPage.getByRole('button', { name: '小版本保存', exact: true }).click();
+  await expiredAuthRecoveryPage.getByRole('alert').filter({ hasText: '剧本保存结果尚未确认' }).waitFor();
+  await expiredAuthRecoveryPage.getByRole('button', { name: '返回发布管理', exact: true }).click();
+  assert.match(new URL(expiredAuthRecoveryPage.url()).pathname, /\/publishing\/501$/, 'an expired-session 401 remains locked for read-only verification and is not mistaken for revoked read permission');
+  const expiredAuthPendingMarker = await expiredAuthRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:publishing-script-save-pending:v1:user:91:publishing:501'));
+  assert.match(expiredAuthPendingMarker || '', /登录过期期间保留的隔离草稿/, '401 keeps the draft and recovery marker for the same account');
+  const expiredAuthWriteCountAfter = await expiredAuthRecoveryPage.request.get(`${base}/__qa/publishing-script-save-state`).then((response) => response.json()).then((state) => state.publishingScriptWriteCount);
+  assert.equal(expiredAuthWriteCountAfter - expiredAuthWriteCountBefore, 1, '401 read failures do not auto-repeat the publishing PUT');
+  await expiredAuthRecoveryPage.close({ runBeforeUnload: false });
 
   for (const stage of ['shooting', 'publishing'] as const) {
     const archiveRetryPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });

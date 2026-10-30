@@ -1,3 +1,5 @@
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
+
 export type NotificationPreference = {
   id?: number;
   channel: string;
@@ -21,9 +23,7 @@ export type NotificationEvent = {
 async function readList<T>(response: Response, label: string): Promise<T[]> {
   const payload = await response.json().catch(() => null) as unknown;
   if (!response.ok) {
-    const message = payload && typeof payload === 'object' && 'message' in payload
-      ? String(payload.message)
-      : `${label}加载失败（HTTP ${response.status}）`;
+    const message = getUserFacingErrorMessage(payload, `${label}暂时无法加载，请重试`);
     throw new Error(message);
   }
   if (!Array.isArray(payload)) {
@@ -119,9 +119,7 @@ export async function saveNotificationPreferences(
   }
 
   const payload = await response.json().catch(() => null) as unknown;
-  const message = payload && typeof payload === 'object' && 'message' in payload
-    ? String(payload.message)
-    : `通知偏好保存失败（HTTP ${response.status}）`;
+  const message = getUserFacingErrorMessage(payload, '通知偏好保存失败，请重试');
   return { kind: 'rejected', message };
 }
 

@@ -7,6 +7,7 @@ import {
   type UpdateResourceCenterResourceInput,
 } from '../api/resourceCenter';
 import { useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import {
   clearResourceUpdateRecovery,
   createResourceUpdateRequestId,
@@ -124,7 +125,8 @@ export function useResourceUpdateRecovery(
     } catch (error) {
       if (!isCurrentScope(recovery.actorId, recovery.resourceId, generation)) return;
       updatePending(recovery.actorId, recovery.resourceId, generation, { recovery, phase: 'uncertain' });
-      updateMessage(recovery.actorId, recovery.resourceId, generation, `${error instanceof Error ? error.message : '暂时无法核实资料保存结果'}。恢复编号已保留；请只读重新核实，不要重复保存。`);
+      const message = getUserFacingErrorMessage(error, '暂时无法核实资料保存结果');
+      updateMessage(recovery.actorId, recovery.resourceId, generation, `${message}。恢复编号已保留；请只读重新核实，不要重复保存。`);
     } finally {
       operationsRef.current.delete(operationKey);
     }
@@ -177,7 +179,7 @@ export function useResourceUpdateRecovery(
       recovery = { version: 1, actorId, resourceId, libraryType, requestId: createResourceUpdateRequestId(), payload: input };
       persistResourceUpdateRecovery(recovery);
     } catch (error) {
-      updateMessage(actorId, resourceId, generation, error instanceof Error ? error.message : '无法保存资料更新恢复信息；本次未提交修改。');
+      updateMessage(actorId, resourceId, generation, getUserFacingErrorMessage(error, '无法保存资料更新恢复信息；本次未提交修改。'));
       return;
     }
     updatePending(actorId, resourceId, generation, { recovery, phase: 'checking' });

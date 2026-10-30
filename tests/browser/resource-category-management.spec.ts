@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const categoryFixtureOnly = process.env.XMT_RESOURCE_CATEGORY_FIXTURE_ONLY === '1';
+const resourceDeleteRecoveryFixtureMode = process.argv.includes('--mcp-resource-delete-recovery-fixture');
 const resourceCreateRecoveryFixtureMode = process.argv.includes('--mcp-resource-create-recovery-fixture');
 const resourceUpdateRecoveryFixtureMode = process.argv.includes('--mcp-resource-update-recovery-fixture');
 const resourceUpdateNotFoundFixtureMode = process.argv.includes('--mcp-resource-update-not-found-fixture');
@@ -58,6 +59,7 @@ let resourceDeleteRequests = 0;
 let failNextResourceUpdate = true;
 let failNextResourceReadAfterUpdate = false;
 let failNextResourceReadAfterDelete = false;
+let resourceReadsToSkipBeforeDeleteFailure = 0;
 let releaseResourceUpdate: (() => void) | null = null;
 let markResourceUpdateStarted: (() => void) | null = null;
 const resourceUpdateStarted = new Promise<void>((resolve) => { markResourceUpdateStarted = resolve; });
@@ -73,6 +75,8 @@ const resourceDetail = {
 let expectedHttpErrorResponses = 0;
 const app = express();
 app.use(express.json());
+app.get('/__qa/editor-accessibility', (_req, res) => res.type('html').send('<!doctype html><html><head><title>编辑器无障碍验收</title><meta name="viewport" content="width=device-width, initial-scale=1" /><script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script><script type="module" src="/@vite/client"></script></head><body><div id="root"></div><script type="module" src="/tests/browser/editor-accessibility.fixture.tsx"></script></body></html>'));
+app.get('/__qa/checklist-b5', (_req, res) => res.type('html').send('<!doctype html><html><head><title>登录灰度与资料筛选验收</title><meta name="viewport" content="width=device-width, initial-scale=1" /><script type="module">import RefreshRuntime from "/@react-refresh";RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script><script type="module" src="/@vite/client"></script></head><body><div id="root"></div><script type="module" src="/tests/browser/checklist-b5.fixture.tsx"></script></body></html>'));
 app.get('/__qa', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-category-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center/knowledge');</script>`));
 app.get('/__qa/state', (_req, res) => res.json({
   categoryCreateRequests,
@@ -102,6 +106,8 @@ app.get('/__qa/resource-update-state', (_req, res) => res.json({
 }));
 app.get('/__qa/resource-create-recovery', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-create-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center/knowledge');</script>`));
 app.get('/__qa/resource-update-recovery', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-update-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center/resources/${createdResourceId}?library_type=knowledge');</script>`));
+app.get('/__qa/resource-delete-recovery', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-delete-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});localStorage.setItem('xmt:resource-delete-pending:v1:user:${user.id}',${JSON.stringify(JSON.stringify({ version: 1, actorId: user.id, resourceId: createdResourceId, libraryType: 'knowledge', requestId: '67f40ad4-5e91-4d8c-9fd1-282f536f14b2' }))});location.replace('/asset-center/resources/${createdResourceId}?library_type=knowledge');</script>`));
+app.get('/__qa/resource-delete-state', (_req, res) => res.json({ deleteRequests: resourceDeleteRequests, readRequests: resourceReadRequests }));
 app.post('/__qa/release/:action', (req, res) => {
   if (req.params.action === 'category-create') releaseCategoryCreate?.();
   else if (req.params.action === 'category-delete') releaseCategoryDelete?.();
@@ -256,7 +262,9 @@ app.get('/api/resource-center/resources/:id', (req, res) => {
     expectedHttpErrorResponses += 1;
     return res.status(503).json({ message: '模拟详情刷新失败' });
   }
-  if (failNextResourceReadAfterDelete) {
+  if (resourceReadsToSkipBeforeDeleteFailure > 0) {
+    resourceReadsToSkipBeforeDeleteFailure -= 1;
+  } else if (failNextResourceReadAfterDelete) {
     failNextResourceReadAfterDelete = false;
     expectedHttpErrorResponses += 1;
     return res.status(503).json({ message: '模拟删除状态核实读取失败' });
@@ -327,7 +335,7 @@ const address = server.address();
 assert(address && typeof address !== 'string');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 const keepFixtureServer = process.env.XMT_KEEP_RESOURCE_CATEGORY_FIXTURE === '1';
-if (categoryFixtureOnly || resourceCreateRecoveryFixtureMode || resourceUpdateRecoveryFixtureMode || resourceUpdateNotFoundFixtureMode) {
+if (categoryFixtureOnly || resourceCreateRecoveryFixtureMode || resourceUpdateRecoveryFixtureMode || resourceUpdateNotFoundFixtureMode || resourceDeleteRecoveryFixtureMode) {
   if (resourceCreateRecoveryFixtureMode) {
     resourceCreateRequests = 0;
     resourceCreateStatusReads = 0;
@@ -357,6 +365,17 @@ if (categoryFixtureOnly || resourceCreateRecoveryFixtureMode || resourceUpdateRe
     resourceDetail.status = 'published';
     resourceDetail.visibility = 'team';
     console.log(`Resource update recovery MCP fixture ready: ${baseUrl}/__qa/resource-update-recovery (in-memory API; ${resourceUpdateNotFoundFixtureMode ? 'no-commit response loss' : 'committed response loss and one status-read failure'} are injected)`);
+  } else if (resourceDeleteRecoveryFixtureMode) {
+    resourceExists = true;
+    resourceDeleteRequests = 0;
+    resourceReadRequests = 0;
+    resourceDetail.title = '资料删除恢复刷新验收';
+    resourceDetail.summary = '仅用于核对刷新后的只读恢复锁';
+    resourceDetail.content_text = '删除请求未提交，预置一条待核实标记。';
+    resourceDetail.status = 'published';
+    resourceReadsToSkipBeforeDeleteFailure = 1;
+    failNextResourceReadAfterDelete = true;
+    console.log(`Resource delete recovery MCP fixture ready: ${baseUrl}/__qa/resource-delete-recovery (in-memory API; first post-refresh detail read succeeds, recovery read fails once)`);
   } else {
   console.log(`isolated category fixture ready at ${baseUrl}/__qa`);
   }
@@ -447,6 +466,60 @@ const browser = await chromium.launch({ headless: true });
 try {
   const context = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   const page = await context.newPage();
+  await openKnowledgePage(page);
+  await page.goto(`${baseUrl}/__qa/editor-accessibility`);
+  const outlineEditor = page.getByRole('textbox', { name: '选题大纲', exact: true });
+  const bodyEditor = page.getByRole('textbox', { name: '正文编辑区', exact: true });
+  const legacyEditor = page.getByRole('textbox', { name: '旧版选题大纲', exact: true });
+  const readonlyEditor = page.getByRole('textbox', { name: '历史只读正文', exact: true });
+  const basicToolbarEditor = page.getByRole('textbox', { name: '基础工具栏验收', exact: true });
+  await outlineEditor.waitFor();
+  await bodyEditor.waitFor();
+  await legacyEditor.waitFor();
+  await readonlyEditor.waitFor();
+  await basicToolbarEditor.waitFor();
+  assert.equal(await outlineEditor.getAttribute('aria-multiline'), 'true', 'outline editor exposes its multiline textbox semantics');
+  assert.equal(await readonlyEditor.getAttribute('aria-readonly'), 'true', 'historical textboxes expose their readonly state');
+  const basicToolbarGroup = page.getByRole('group', { name: '基础富文本工具栏', exact: true });
+  assert.equal(await basicToolbarGroup.count(), 1, 'the basic editor toolbar exposes its accessible group name');
+  assert.ok(await basicToolbarGroup.getByRole('button').count() > 0, 'the named basic toolbar group contains its format controls');
+  await outlineEditor.locator('strong').evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  const bubbleBold = page.getByRole('button', { name: '加粗', exact: true });
+  await bubbleBold.waitFor();
+  assert.equal(await bubbleBold.getAttribute('aria-pressed'), 'true', 'floating format controls expose the selected mark');
+  assert.equal(await page.getByRole('button', { name: '斜体', exact: true }).getAttribute('aria-pressed'), 'false', 'floating format controls expose inactive marks');
+  await page.getByRole('button', { name: '文字颜色', exact: true }).last().click();
+  const textColorOptions = page.getByRole('group', { name: '文字颜色选项' }).getByRole('button');
+  const textColorNames = await textColorOptions.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
+  assert.equal(new Set(textColorNames).size, textColorNames.length, 'each floating text color has a distinct accessible name');
+  assert.equal(await textColorOptions.evaluateAll((elements) => elements.filter((element) => element.getAttribute('aria-pressed') === 'true').length), 1, 'the active text color is exposed');
+  await page.getByRole('button', { name: '高亮颜色', exact: true }).last().click();
+  const highlightOptions = page.getByRole('group', { name: '高亮颜色选项' }).getByRole('button');
+  const highlightNames = await highlightOptions.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
+  assert.equal(new Set(highlightNames).size, highlightNames.length, 'each floating highlight color has a distinct accessible name');
+  assert.ok((await highlightOptions.evaluateAll((elements) => elements.every((element) => ['true', 'false'].includes(element.getAttribute('aria-pressed') || '')))), 'highlight color selection is exposed as a pressed state');
+  await legacyEditor.locator('strong').evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  const legacyBold = page.locator('section[aria-labelledby="legacy-title"]').getByRole('button', { name: '加粗', exact: true });
+  await legacyBold.waitFor();
+  assert.equal(await legacyBold.getAttribute('aria-pressed'), 'true', 'legacy topic outline exposes the selected format');
+  const legacyTextColorTrigger = page.locator('section[aria-labelledby="legacy-title"]').getByRole('button', { name: '文字颜色', exact: true });
+  await legacyTextColorTrigger.click();
+  const legacyColorOptions = page.locator('section[aria-labelledby="legacy-title"]').getByRole('group', { name: '文字颜色选项' }).getByRole('button');
+  const legacyColorNames = await legacyColorOptions.evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
+  assert.equal(new Set(legacyColorNames).size, legacyColorNames.length, 'legacy text colors have distinct accessible names');
+  assert.equal(await legacyColorOptions.evaluateAll((elements) => elements.filter((element) => element.getAttribute('aria-pressed') === 'true').length), 1, 'legacy text color selection is exposed');
   await openKnowledgePage(page);
   await page.getByRole('button', { name: '分类管理' }).click();
   await page.getByRole('heading', { name: '知识库分类管理' }).waitFor();
@@ -609,6 +682,48 @@ try {
   await page.waitForURL('**/asset-center/resources/901**');
 
   const detailDelete = page.getByRole('button', { name: '删除', exact: true });
+  await detailDelete.click();
+  await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
+  let abortNextDetailDelete = true;
+  let detailVerificationFailures = 1;
+  let detailReadsToSkipBeforeFailure = 0;
+  await page.route(`**/api/resource-center/resources/${createdResourceId}`, async (route) => {
+    const method = route.request().method();
+    if (method === 'DELETE' && abortNextDetailDelete) {
+      abortNextDetailDelete = false;
+      await route.abort();
+      return;
+    }
+    if (method === 'GET' && detailReadsToSkipBeforeFailure > 0) {
+      detailReadsToSkipBeforeFailure -= 1;
+    } else if (method === 'GET' && detailVerificationFailures > 0) {
+      detailVerificationFailures -= 1;
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+  const networkFailureConfirm = page.getByRole('button', { name: '删除', exact: true }).last();
+  await networkFailureConfirm.click();
+  const networkFailureAlert = page.getByRole('alert').filter({ hasText: '资料状态暂时无法读取' });
+  await networkFailureAlert.waitFor();
+  const networkFailureMessage = await networkFailureAlert.innerText();
+  assert.match(networkFailureMessage, /删除请求未获服务器确认/);
+  assert.match(networkFailureMessage, /请只读重试核实，不要重复删除/);
+  assert.doesNotMatch(networkFailureMessage, /Failed to fetch|TypeError|NetworkError/);
+  assert.equal(resourceDeleteRequests, 1, 'a browser-level delete network failure never reaches the fixture API');
+  assert.equal(await page.getByRole('button', { name: '删除', exact: true }).isDisabled(), true, 'the resource stays locked while its delete outcome is unknown');
+  detailReadsToSkipBeforeFailure = 1;
+  detailVerificationFailures = 1;
+  await page.reload();
+  await page.getByRole('alert').filter({ hasText: '资料状态暂时无法读取' }).getByRole('button', { name: '只读核实资料状态' }).waitFor();
+  assert.equal(resourceDeleteRequests, 1, 'refresh restores the pending marker and never replays DELETE');
+  assert.equal(await page.getByRole('button', { name: '删除', exact: true }).isDisabled(), true, 'the detail stays locked while post-refresh verification is unavailable');
+  await page.getByRole('button', { name: '只读核实资料状态' }).click();
+  await page.getByText('仍未移入回收站', { exact: false }).waitFor();
+  assert.equal(resourceDeleteRequests, 1, 'explicit read-only verification recovers without repeating DELETE');
+  await page.unroute(`**/api/resource-center/resources/${createdResourceId}`);
+
   await detailDelete.click();
   await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
   const confirmDelete = page.getByRole('button', { name: '删除', exact: true }).last();

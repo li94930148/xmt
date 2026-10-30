@@ -1,5 +1,5 @@
 import { createMessage } from '../../utils/messageHelper';
-import { broadcastToRoom } from '../../utils/socket';
+import { broadcastToRoom, pushMessage } from '../../utils/socket';
 import { TopicController } from './topics.controller';
 import { currentTopicPolicy } from './topics.policy';
 import { createLegacyTopicsRouter, createV1TopicsRouter } from './topics.routes';
@@ -14,6 +14,9 @@ export const topicService = new TopicService({
   resolveCreatorTopicSuggestionSource: resolveCreatorTopicSuggestionAttribution,
   notify(message) {
     createMessage(message.userId, message.title, message.content, message.type, message.link);
+  },
+  pushNotification(message) {
+    pushMessage(message.userId, message);
   },
   broadcast: broadcastToRoom,
 });

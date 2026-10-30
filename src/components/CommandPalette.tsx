@@ -22,6 +22,12 @@ interface CommandPaletteProps {
   onClose: () => void;
 }
 
+const resultsListId = 'command-palette-results';
+
+function optionDomId(itemId: string) {
+  return `command-palette-option-${encodeURIComponent(itemId)}`;
+}
+
 function iconForGroup(group: string) {
   if (group === '创作稿件') return <ScrollText className="h-4 w-4 text-studio-cyan" />;
   if (group === '资料') return <BookOpen className="h-4 w-4 text-studio-violet" />;
@@ -179,7 +185,18 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
 
   let globalIndex = -1;
   const normalizedQuery = query.trim();
-  const showNoResults = filteredItems.length === 0 && Array.from(normalizedQuery).length >= 2 && !searching;
+  const showNoResults = filteredItems.length === 0 && Array.from(normalizedQuery).length >= 2 && !searching && unavailableScopes === 0;
+  const activeItem = filteredItems[selectedIndex];
+  const hasResultOptions = filteredItems.length > 0;
+  const emptyMessage = loading
+    ? '正在确认可搜索范围…'
+    : searching
+      ? '正在检索内容…'
+      : unavailableScopes > 0
+        ? '部分搜索范围暂不可用；可使用底部按钮重试。'
+        : showNoResults
+          ? '没有找到匹配结果'
+          : '输入至少 2 个字，搜索你有权查看的内容';
 
   return createPortal((
     <div
@@ -200,9 +217,16 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
             value={query}
             maxLength={100}
             aria-label="全局搜索"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            aria-expanded={hasResultOptions}
+            aria-controls={resultsListId}
+            aria-activedescendant={activeItem ? optionDomId(activeItem.id) : undefined}
+            aria-busy={loading || searching ? true : undefined}
             onChange={(event) => {
               setQuery(event.target.value);
               setSelectedIndex(0);
@@ -213,14 +237,16 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           <kbd className="rounded-md border border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-1.5 py-0.5 font-mono text-[10px] text-studio-text-secondary">ESC</kbd>
         </div>
 
-        <div ref={listRef} className="relative z-[1] max-h-[360px] overflow-y-auto py-2">
-          {filteredItems.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-studio-text-secondary">
-              {loading ? '正在确认可搜索范围…' : searching ? '正在检索内容…' : showNoResults ? '没有找到匹配结果' : '输入至少 2 个字，搜索你有权查看的内容'}
-            </div>
-          ) : (
-            Object.entries(groupedItems).map(([group, items]) => (
-              <div key={group}>
+        <div
+          ref={listRef}
+          id={resultsListId}
+          role="listbox"
+          aria-label="全局搜索结果"
+          hidden={!hasResultOptions}
+          className="relative z-[1] max-h-[360px] overflow-y-auto py-2"
+        >
+          {Object.entries(groupedItems).map(([group, items]) => (
+              <div key={group} role="group" aria-label={group}>
                 <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-studio-text-secondary">{group}</div>
                 {items.map((item) => {
                   globalIndex++;
@@ -230,7 +256,11 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
                   return (
                     <button
                       key={item.id}
+                      id={optionDomId(item.id)}
                       type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      tabIndex={-1}
                       data-index={index}
                       className={`mx-2 flex w-[calc(100%-1rem)] items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-150 ${
                         isSelected
@@ -248,15 +278,25 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
                   );
                 })}
               </div>
-            ))
-          )}
+          ))}
         </div>
+
+        {!hasResultOptions && (
+          <div
+            id="command-palette-empty-state"
+            className="relative z-[1] px-4 py-8 text-center text-sm text-studio-text-secondary"
+            role={loading || searching || showNoResults ? 'status' : undefined}
+            aria-live={loading || searching || showNoResults ? 'polite' : undefined}
+          >
+            {emptyMessage}
+          </div>
+        )}
 
         <div className="relative z-[1] flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-studio-border-soft px-4 py-2.5 text-[11px] text-studio-text-secondary">
           <span className="flex items-center gap-1"><kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">↑↓</kbd> 导航</span>
           <span className="flex items-center gap-1"><kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">↵</kbd> 选择</span>
           <span className="flex items-center gap-1"><kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">ESC</kbd> 关闭</span>
-          {searching && <span role="status">正在检索…</span>}
+          {searching && hasResultOptions && <span role="status">正在检索…</span>}
           {unavailableScopes > 0 && (
             <span role="status" className="ml-auto flex items-center gap-2">
               部分内容暂不可用

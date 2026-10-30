@@ -94,12 +94,17 @@ app.get('/__qa', (req, res) => {
   if (req.query.fail_categories === 'true') failNextCategoryRead = true;
   const route = req.query.view === 'knowledge' ? '/asset-center/knowledge'
     : req.query.view === 'search' ? '/asset-center/search'
+    : req.query.view === 'count-race' ? '/asset-center/resources?library_type=project&keyword=high-count'
     : req.query.view === 'detail' ? `/asset-center/resources/${detailResource.id}`
       : req.query.view === 'race' ? `/asset-center/resources/${raceFirstResource.id}?library_type=project`
       : '/asset-center/resources?library_type=project';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-hover-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(route)});</script>`);
 });
 app.get('/__qa/search-queries', (_req, res) => res.json(resourceSearchQueries));
+app.post('/__qa/fail-next-resource-list-read', (_req, res) => {
+  failNextResourceListRead = true;
+  return res.sendStatus(204);
+});
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['resource:update', 'resource:delete', 'resource:audit']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
@@ -110,9 +115,11 @@ app.get('/api/resource-center/resources', (_req, res) => {
     failNextResourceListRead = false;
     return res.status(503).json({ message: '模拟删除后的列表刷新失败' });
   }
+  const total = existingResourceIds.has(listResource.id) ? (_req.query.keyword === 'high-count' ? 45 : 1) : 0;
+  const requestedPage = Math.max(1, Number(_req.query.page) || 1);
   return res.json({
     data: existingResourceIds.has(listResource.id) ? [listResource] : [],
-    pagination: { page: 1, page_size: 20, total: existingResourceIds.has(listResource.id) ? 1 : 0, total_pages: 1 },
+    pagination: { page: requestedPage, page_size: 20, total, total_pages: Math.max(1, Math.ceil(total / 20)) },
   });
 });
 app.get('/api/resource-center/search', (req, res) => {
@@ -496,21 +503,48 @@ try {
     const selectedCategory = page.getByRole('button', { name: '全部分类', exact: true });
     const collapseRoot = page.getByRole('button', { name: '收起 浅色主题分类', exact: true });
     await collapseRoot.waitFor();
+    assert.equal(await collapseRoot.getAttribute('aria-expanded'), 'true',
+      `${theme} initially expanded knowledge category reports its state`);
     assert.equal(await page.getByRole('button', { name: /^(展开|收起) 子分类$/ }).count(), 0,
       `${theme} leaf knowledge categories do not expose an inert expand/collapse button`);
     await collapseRoot.click();
-    await page.getByRole('button', { name: '展开 浅色主题分类', exact: true }).waitFor();
+    const expandRoot = page.getByRole('button', { name: '展开 浅色主题分类', exact: true });
+    await expandRoot.waitFor();
+    assert.equal(await expandRoot.getAttribute('aria-expanded'), 'false',
+      `${theme} collapsed knowledge category reports its state`);
     assert.equal(await page.getByRole('button', { name: '子分类 1', exact: true }).count(), 0,
       `${theme} collapsing a knowledge category hides its child`);
-    await page.getByRole('button', { name: '展开 浅色主题分类', exact: true }).click();
+    await expandRoot.click();
+    const expandedRoot = page.getByRole('button', { name: '收起 浅色主题分类', exact: true });
+    await expandedRoot.waitFor();
+    assert.equal(await expandedRoot.getAttribute('aria-expanded'), 'true',
+      `${theme} re-expanded knowledge category reports its state`);
     const categoryButton = page.getByRole('button', { name: '浅色主题分类 1', exact: true });
     await categoryButton.waitFor();
+    for (const [name, target] of [
+      ['全部分类', selectedCategory],
+      ['分类展开/收起', expandedRoot],
+      ['分类选择', categoryButton],
+    ] as const) {
+      const bounds = await target.boundingBox();
+      assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40,
+        `${theme} knowledge ${name} control meets the 40×40px touch target: ${JSON.stringify(bounds)}`);
+    }
     const categoryCount = categoryButton.locator('span.text-xs');
     const categoryCountContrast = await renderedContrast(categoryCount);
     assert.ok(categoryCountContrast >= 4.5,
       `${theme} knowledge category count contrast is ${categoryCountContrast.toFixed(2)}:1; expected at least 4.5:1`);
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
+      for (const [name, target] of [
+        ['全部分类', selectedCategory],
+        ['分类展开/收起', expandedRoot],
+        ['分类选择', categoryButton],
+      ] as const) {
+        const bounds = await target.boundingBox();
+        assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40,
+          `${theme} knowledge ${name} control meets the 40×40px touch target at ${width}px: ${JSON.stringify(bounds)}`);
+      }
       const geometry = await selectedCategory.evaluate((element) => ({
         categoryPanelHeight: element.parentElement?.getBoundingClientRect().height ?? 0,
         pageWidth: document.documentElement.scrollWidth,
@@ -597,6 +631,29 @@ try {
   assert.equal(resourceListReads, knowledgeListReadsBeforeFailure + 1, 'knowledge category failure and retry do not duplicate the resource-list request');
   assert.equal(await page.getByRole('button', { name: '分类管理', exact: true }).isDisabled(), false, 'category management becomes available after the directory is restored');
 
+  const listReadsBeforeFilteredFailure = resourceListReads;
+  await page.goto(`${base}/__qa?theme=light&view=count-race`);
+  await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
+  await page.getByText('共 45 条', { exact: true }).waitFor();
+  await page.getByText('1 / 3', { exact: true }).waitFor();
+  failNextResourceListRead = true;
+  const filteredListFailure = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/resource-center/resources?') && response.status() === 503);
+  await page.getByRole('textbox', { name: '搜索资料', exact: true }).fill('new-filter');
+  await filteredListFailure;
+  await page.getByRole('alert').getByRole('button', { name: '重试', exact: true }).waitFor();
+  await page.getByText('共 — 条', { exact: true }).waitFor();
+  await page.getByText('— / —', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '上一页', exact: true }).isDisabled(), true, 'a failed filtered query disables previous-page navigation');
+  assert.equal(await page.getByRole('button', { name: '下一页', exact: true }).isDisabled(), true, 'a failed filtered query cannot paginate using the previous total');
+  const filteredListRecovery = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/resource-center/resources?') && response.status() === 200);
+  await page.getByRole('alert').getByRole('button', { name: '重试', exact: true }).click();
+  await filteredListRecovery;
+  await page.getByText('共 1 条', { exact: true }).waitFor();
+  await page.getByText('1 / 1', { exact: true }).waitFor();
+  assert.equal(resourceListReads, listReadsBeforeFilteredFailure + 3, 'the filtered read failure and explicit recovery perform exactly two GETs after the initial list');
+
   await page.goto(`${base}/__qa?theme=light`);
   await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
   failNextDeleteId = listResource.id;
@@ -619,7 +676,7 @@ try {
   const deleteDialog = page.getByRole('dialog', { name: '删除资料', exact: true });
   assert.equal(await deleteDialog.evaluate((element) => getComputedStyle(element).zIndex), '250', 'the modal layer must consume the shared token');
   await page.keyboard.press('Control+k');
-  const globalSearch = page.getByRole('textbox', { name: '全局搜索' });
+  const globalSearch = page.getByRole('combobox', { name: '全局搜索' });
   await globalSearch.waitFor();
   await globalSearch.click();
   await page.keyboard.type('a');

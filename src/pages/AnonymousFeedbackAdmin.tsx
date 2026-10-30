@@ -3,6 +3,7 @@ import { Check, Eye, EyeOff, MessageSquare, Trash2 } from 'lucide-react';
 import { deleteAnonymousFeedback, getAnonymousFeedback, getAnonymousFeedbackDeleteRequestStatus, getAnonymousFeedbackUpdateRequestStatus, updateAnonymousFeedback, AnonymousFeedbackApiError, type AnonymousFeedback, type AnonymousFeedbackStatus, type AnonymousFeedbackUpdatePayload } from '../api/anonymousFeedback';
 import { fingerprintAnonymousFeedbackUpdateRequest, markAnonymousFeedbackUpdateRecoveryRejected, persistAnonymousFeedbackUpdateRecovery, readAnonymousFeedbackUpdateRecovery, removeAnonymousFeedbackUpdateRecovery, sameAnonymousFeedbackUpdateRecovery, type StoredAnonymousFeedbackUpdateRecovery } from '../api/anonymousFeedbackUpdateRecovery';
 import { useAppStore, useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { formatBeijingDate } from '../lib/utils';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell, ResponsiveTableShell, StatusPill } from '../components/studio';
 import LoadingState from '../components/common/LoadingState';
@@ -23,7 +24,7 @@ interface StoredAnonymousFeedbackDeleteRecovery {
   targetId: number;
 }
 
-type AnonymousFeedbackDeleteRecoveryState = 'checking' | 'submitting' | 'not_found' | 'target_missing' | 'conflict' | 'unavailable' | null;
+type AnonymousFeedbackDeleteRecoveryState = 'checking' | 'submitting' | 'not_found' | 'target_missing' | 'conflict' | 'unavailable' | 'storage_blocked' | null;
 type AnonymousFeedbackUpdateRecoveryState = 'checking' | 'submitting' | 'not_found' | 'target_missing' | 'conflict' | 'unavailable' | 'processed_cleanup' | 'target_missing_cleanup' | 'rejected_cleanup' | 'rejected_mark_failed' | 'storage_blocked' | null;
 
 function getUpdateRecoveryStorage() {
@@ -49,23 +50,28 @@ function anonymousFeedbackDeleteRecoveryKey(actorId: number) {
   return `${DELETE_RECOVERY_KEY_PREFIX}${actorId}`;
 }
 
-function readAnonymousFeedbackDeleteRecovery(actorId: number): StoredAnonymousFeedbackDeleteRecovery | null {
+function readAnonymousFeedbackDeleteRecovery(actorId: number):
+  | { kind: 'ready'; recovery: StoredAnonymousFeedbackDeleteRecovery }
+  | { kind: 'none' }
+  | { kind: 'blocked' } {
   try {
     const raw = window.sessionStorage.getItem(anonymousFeedbackDeleteRecoveryKey(actorId));
-    if (!raw) return null;
+    if (!raw) return { kind: 'none' };
     const value = JSON.parse(raw) as Partial<StoredAnonymousFeedbackDeleteRecovery>;
     if (value.actorId !== actorId || !Number.isSafeInteger(value.targetId) || Number(value.targetId) <= 0
-      || typeof value.requestId !== 'string' || !DELETE_REQUEST_ID_PATTERN.test(value.requestId)) return null;
-    return { actorId, requestId: value.requestId.toLowerCase(), targetId: Number(value.targetId) };
+      || typeof value.requestId !== 'string' || !DELETE_REQUEST_ID_PATTERN.test(value.requestId)) return { kind: 'blocked' };
+    return { kind: 'ready', recovery: { actorId, requestId: value.requestId.toLowerCase(), targetId: Number(value.targetId) } };
   } catch {
-    return null;
+    return { kind: 'blocked' };
   }
 }
 
 function persistAnonymousFeedbackDeleteRecovery(recovery: StoredAnonymousFeedbackDeleteRecovery) {
   try {
-    window.sessionStorage.setItem(anonymousFeedbackDeleteRecoveryKey(recovery.actorId), JSON.stringify(recovery));
-    return true;
+    const key = anonymousFeedbackDeleteRecoveryKey(recovery.actorId);
+    const serialized = JSON.stringify(recovery);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -73,17 +79,21 @@ function persistAnonymousFeedbackDeleteRecovery(recovery: StoredAnonymousFeedbac
 
 function clearAnonymousFeedbackDeleteRecovery(recovery: StoredAnonymousFeedbackDeleteRecovery) {
   try {
-    const current = readAnonymousFeedbackDeleteRecovery(recovery.actorId);
-    if (current?.requestId === recovery.requestId && current.targetId === recovery.targetId) {
-      window.sessionStorage.removeItem(anonymousFeedbackDeleteRecoveryKey(recovery.actorId));
-    }
+    const result = readAnonymousFeedbackDeleteRecovery(recovery.actorId);
+    if (result.kind === 'blocked') return false;
+    if (result.kind === 'none') return true;
+    if (result.recovery.requestId !== recovery.requestId || result.recovery.targetId !== recovery.targetId) return false;
+    const key = anonymousFeedbackDeleteRecoveryKey(recovery.actorId);
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null;
   } catch {
-    // A committed server result remains authoritative even if this tab cannot clear its marker.
+    return false;
   }
 }
 
 export default function AnonymousFeedbackAdmin() {
   const actorId = useAuthStore((state) => Number(state.user?.id) || 0);
+  const [initialDeleteRecoveryRead] = useState(() => actorId > 0 ? readAnonymousFeedbackDeleteRecovery(actorId) : { kind: 'none' as const });
   const [items, setItems] = useState<AnonymousFeedback[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AnonymousFeedback | null>(null);
@@ -95,12 +105,12 @@ export default function AnonymousFeedbackAdmin() {
   const [listError, setListError] = useState('');
   const [refreshNotice, setRefreshNotice] = useState('');
   const [pendingDeleteRecovery, setPendingDeleteRecovery] = useState<StoredAnonymousFeedbackDeleteRecovery | null>(() => (
-    actorId > 0 ? readAnonymousFeedbackDeleteRecovery(actorId) : null
+    initialDeleteRecoveryRead.kind === 'ready' ? initialDeleteRecoveryRead.recovery : null
   ));
   const [deleteRecoveryState, setDeleteRecoveryState] = useState<AnonymousFeedbackDeleteRecoveryState>(() => (
-    actorId > 0 && readAnonymousFeedbackDeleteRecovery(actorId) ? 'checking' : null
+    initialDeleteRecoveryRead.kind === 'ready' ? 'checking' : initialDeleteRecoveryRead.kind === 'blocked' ? 'storage_blocked' : null
   ));
-  const [deleteRecoveryError, setDeleteRecoveryError] = useState('');
+  const [deleteRecoveryError, setDeleteRecoveryError] = useState(() => initialDeleteRecoveryRead.kind === 'blocked' ? '浏览器无法安全读取删除恢复记录。' : '');
   const [deleteOutcomeNotice, setDeleteOutcomeNotice] = useState('');
   const [pendingUpdateRecovery, setPendingUpdateRecovery] = useState<StoredAnonymousFeedbackUpdateRecovery | null>(() => {
     const initialActor = Number(useAuthStore.getState().user?.id) || 0;
@@ -123,7 +133,7 @@ export default function AnonymousFeedbackAdmin() {
   const activeDeleteRecovery = pendingDeleteRecovery?.actorId === actorId ? pendingDeleteRecovery : null;
   const activeUpdateRecovery = pendingUpdateRecovery?.actorId === actorId ? pendingUpdateRecovery : null;
   const updateStorageBlocked = updateRecoveryState === 'storage_blocked';
-  const writeLocked = busy || Boolean(activeDeleteRecovery) || Boolean(activeUpdateRecovery) || updateStorageBlocked;
+  const writeLocked = busy || Boolean(activeDeleteRecovery) || Boolean(activeUpdateRecovery) || updateStorageBlocked || deleteRecoveryState === 'storage_blocked';
 
   const load = useCallback(async () => {
     const requestSequence = ++listRequestSequence.current;
@@ -137,7 +147,7 @@ export default function AnonymousFeedbackAdmin() {
       return true;
     } catch (error) {
       if (requestSequence !== listRequestSequence.current || Number(useAuthStore.getState().user?.id) !== requestActorId) return null;
-      setListError(error instanceof Error ? error.message : '无法获取意见');
+      setListError(getUserFacingErrorMessage(error, '匿名意见列表暂不可用，请检查连接后重新加载。'));
       return false;
     }
     finally {
@@ -158,7 +168,7 @@ export default function AnonymousFeedbackAdmin() {
       return nextItems;
     } catch (error) {
       if (requestSequence !== listRequestSequence.current || Number(useAuthStore.getState().user?.id) !== requestActorId) return null;
-      setListError(error instanceof Error ? error.message : '无法获取意见');
+      setListError(getUserFacingErrorMessage(error, '匿名意见列表暂不可用，请检查连接后重新加载。'));
       setLoading(false);
       return null;
     }
@@ -185,9 +195,10 @@ export default function AnonymousFeedbackAdmin() {
       if (state === 'committed') {
         mutationLock.current = true;
         setBusy(true);
-        clearAnonymousFeedbackDeleteRecovery(recovery);
-        setPendingDeleteRecovery(null);
-        setDeleteRecoveryState(null);
+        const recoveryCleared = clearAnonymousFeedbackDeleteRecovery(recovery);
+        setPendingDeleteRecovery(recoveryCleared ? null : recovery);
+        setDeleteRecoveryState(recoveryCleared ? null : 'storage_blocked');
+        setDeleteRecoveryError(recoveryCleared ? '' : '删除结果已确认，但浏览器恢复记录无法清除。请恢复浏览器存储并重试清理；其他写操作继续暂停。');
         setDeleteOutcomeNotice('');
         setDeleting(null);
         setItems((current) => current.filter((item) => item.id !== recovery.targetId));
@@ -206,9 +217,10 @@ export default function AnonymousFeedbackAdmin() {
       if (state === 'target_missing') {
         mutationLock.current = true;
         setBusy(true);
-        clearAnonymousFeedbackDeleteRecovery(recovery);
-        setPendingDeleteRecovery(null);
-        setDeleteRecoveryState(null);
+        const recoveryCleared = clearAnonymousFeedbackDeleteRecovery(recovery);
+        setPendingDeleteRecovery(recoveryCleared ? null : recovery);
+        setDeleteRecoveryState(recoveryCleared ? null : 'storage_blocked');
+        setDeleteRecoveryError(recoveryCleared ? '' : '目标已不存在，但浏览器恢复记录无法清除。请恢复浏览器存储并重试清理；其他写操作继续暂停。');
         setDeleting(null);
         setItems((current) => current.filter((item) => item.id !== recovery.targetId));
         setSelected((current) => current?.id === recovery.targetId ? null : current);
@@ -227,11 +239,26 @@ export default function AnonymousFeedbackAdmin() {
     } catch (error) {
       if (!isActive() || Number(useAuthStore.getState().user?.id) !== recovery.actorId) return null;
       setDeleteRecoveryState('unavailable');
-      setDeleteRecoveryError(error instanceof Error ? error.message : '暂时无法读取删除结果');
+      setDeleteRecoveryError(getUserFacingErrorMessage(error, '暂时无法读取删除结果，请只读重新核实；不要重复删除。'));
       await load();
       return 'unavailable';
     }
   }, [addNotification, load]);
+
+  const retryDeleteRecoveryCleanup = () => {
+    if (!activeDeleteRecovery) {
+      window.location.reload();
+      return;
+    }
+    if (!clearAnonymousFeedbackDeleteRecovery(activeDeleteRecovery)) {
+      setDeleteRecoveryError('浏览器恢复记录仍无法安全清除，所有写操作继续暂停。');
+      return;
+    }
+    setPendingDeleteRecovery(null);
+    setDeleteRecoveryState(null);
+    setDeleteRecoveryError('');
+    setDeleting(null);
+  };
 
   const setUpdateRecovery = (recovery: StoredAnonymousFeedbackUpdateRecovery, state: AnonymousFeedbackUpdateRecoveryState) => {
     updateRecoveryRef.current = recovery;
@@ -389,7 +416,7 @@ export default function AnonymousFeedbackAdmin() {
     } catch (error) {
       if (!isCurrentUpdateRecovery(recovery, isActive)) return null;
       setUpdateRecoveryState('unavailable');
-      setUpdateRecoveryError(error instanceof Error ? error.message : '暂时无法核实意见修改结果');
+      setUpdateRecoveryError(getUserFacingErrorMessage(error, '暂时无法核实意见修改结果，请只读重新核实。'));
       return 'unavailable';
     }
   }, [addNotification, clearUpdateRecovery, completeProcessedUpdate, readCurrentItems, releaseRejectedUpdate]);
@@ -400,7 +427,8 @@ export default function AnonymousFeedbackAdmin() {
   }, [clearUpdateRecovery]);
 
   useEffect(() => {
-    if (actorId > 0 && readAnonymousFeedbackDeleteRecovery(actorId)) return undefined;
+    const deleteRecovery = actorId > 0 ? readAnonymousFeedbackDeleteRecovery(actorId) : { kind: 'none' as const };
+    if (deleteRecovery.kind === 'ready') return undefined;
     if (actorId > 0) {
       const updateRecovery = readBrowserUpdateRecovery(actorId);
       if (updateRecovery.kind !== 'none') return undefined;
@@ -417,7 +445,14 @@ export default function AnonymousFeedbackAdmin() {
       return undefined;
     }
     let active = true;
-    const recovery = readAnonymousFeedbackDeleteRecovery(actorId);
+    const result = readAnonymousFeedbackDeleteRecovery(actorId);
+    if (result.kind === 'blocked') {
+      setPendingDeleteRecovery(null);
+      setDeleteRecoveryState('storage_blocked');
+      setDeleteRecoveryError('浏览器无法安全读取删除恢复记录，所有写操作已暂停。请恢复浏览器存储后重新检查。');
+      return () => { active = false; };
+    }
+    const recovery = result.kind === 'ready' ? result.recovery : null;
     setPendingDeleteRecovery(recovery);
     setDeleteRecoveryState(recovery ? 'checking' : null);
     setDeleteRecoveryError('');
@@ -545,9 +580,9 @@ export default function AnonymousFeedbackAdmin() {
         releaseRejectedUpdate(recovery, '意见内容已被其他管理员更新，本次请求未写入。请重新读取后编辑。');
       } else if (apiError?.status === 409) {
         setUpdateRecoveryState('conflict');
-        setUpdateRecoveryError(apiError.message || '请求编号冲突，修改结果保持锁定，只能只读核实。');
+        setUpdateRecoveryError(getUserFacingErrorMessage(apiError, '请求编号冲突，修改结果保持锁定，只能只读核实。'));
       } else if (apiError && [400, 401, 403, 404, 405, 413, 415, 422].includes(apiError.status)) {
-        releaseRejectedUpdate(recovery, apiError.message || '服务器拒绝了本次修改，未自动重试。');
+        releaseRejectedUpdate(recovery, getUserFacingErrorMessage(apiError, '服务器拒绝了本次修改，未自动重试。'));
       } else {
         await verifyUpdateRecovery(recovery);
       }
@@ -616,7 +651,7 @@ export default function AnonymousFeedbackAdmin() {
       await executeUpdateRequest(recovery, false, true);
     } catch (error) {
       setUpdateRecoveryState(activeUpdateRecovery ? 'unavailable' : null);
-      addNotification({ title: '无法安全修改', message: error instanceof Error ? error.message : '恢复信息准备失败，因此没有发送请求。', type: 'error' });
+      addNotification({ title: '无法安全修改', message: getUserFacingErrorMessage(error, '恢复信息准备失败，因此没有发送请求。请检查浏览器存储后重试。'), type: 'error' });
     } finally {
       if (generation === mutationGeneration.current) {
         mutationLock.current = false;
@@ -673,7 +708,7 @@ export default function AnonymousFeedbackAdmin() {
   };
 
   const remove = async () => {
-    if (mutationLock.current || activeUpdateRecovery || updateStorageBlocked) return;
+    if (mutationLock.current || activeUpdateRecovery || updateStorageBlocked || deleteRecoveryState === 'storage_blocked') return;
     const targetId = deleting?.id ?? activeDeleteRecovery?.targetId;
     if (!targetId || actorId <= 0) return;
     if (activeDeleteRecovery && (deleteRecoveryState !== 'not_found' || activeDeleteRecovery.targetId !== targetId)) return;
@@ -692,6 +727,8 @@ export default function AnonymousFeedbackAdmin() {
       if (!persistAnonymousFeedbackDeleteRecovery(recovery)) {
         mutationLock.current = false;
         setBusy(false);
+        setDeleteRecoveryState('storage_blocked');
+        setDeleteRecoveryError('浏览器无法保存并核验删除恢复记录，因此本次删除请求未发送。请取消确认并重新检查浏览器存储。');
         addNotification({ title: '无法安全删除', message: '浏览器无法保存本次删除恢复信息，因此没有发送删除请求。', type: 'error' });
         return;
       }
@@ -701,9 +738,10 @@ export default function AnonymousFeedbackAdmin() {
     try {
       await deleteAnonymousFeedback(targetId, recovery.requestId);
       invalidatePendingListRequests();
-      clearAnonymousFeedbackDeleteRecovery(recovery);
-      setPendingDeleteRecovery(null);
-      setDeleteRecoveryState(null);
+      const recoveryCleared = clearAnonymousFeedbackDeleteRecovery(recovery);
+      setPendingDeleteRecovery(recoveryCleared ? null : recovery);
+      setDeleteRecoveryState(recoveryCleared ? null : 'storage_blocked');
+      setDeleteRecoveryError(recoveryCleared ? '' : '删除结果已确认，但浏览器恢复记录无法清除。请恢复浏览器存储并重试清理；其他写操作继续暂停。');
       setDeleteOutcomeNotice('');
       setItems((current) => current.filter((item) => item.id !== targetId));
       setSelected((current) => current?.id === targetId ? null : current);
@@ -716,7 +754,7 @@ export default function AnonymousFeedbackAdmin() {
       } else if (status === 'conflict') {
         addNotification({ title: '删除请求冲突', message: '请求编号与操作者或目标意见不匹配，已锁定写操作以避免重复删除。', type: 'error' });
       } else if (status === 'unavailable') {
-        addNotification({ title: '删除结果待核实', message: deleteRecoveryError || (error instanceof Error ? error.message : '请重新核实结果'), type: 'error' });
+        addNotification({ title: '删除结果待核实', message: deleteRecoveryError || getUserFacingErrorMessage(error, '暂时无法核实删除结果，请只读重新核实；不要重复删除。'), type: 'error' });
       }
     }
     finally {
@@ -775,14 +813,22 @@ export default function AnonymousFeedbackAdmin() {
           ? '删除请求编号与操作者或目标意见不匹配，无法安全判断结果；所有写操作保持锁定。'
           : deleteRecoveryState === 'unavailable'
             ? '删除结果暂时无法核实。请勿重复操作；所有写操作保持锁定。'
-            : '正在核实上次删除结果；核实完成前，其他写操作保持锁定。'}</p>
+            : deleteRecoveryState === 'storage_blocked'
+              ? '删除结果已确认，但浏览器恢复记录无法安全清除。恢复记录清理前，其他写操作保持锁定。'
+              : '正在核实上次删除结果；核实完成前，其他写操作保持锁定。'}</p>
       {deleteRecoveryError ? <p className="text-studio-text-secondary">{deleteRecoveryError}</p> : null}
       <div className="flex flex-wrap gap-2">
         {deleteRecoveryState === 'not_found' ? <ActionButton variant="danger" onClick={() => void remove()} disabled={busy}>使用原请求重试</ActionButton> : null}
-        <ActionButton variant="secondary" onClick={retryDeleteStatusCheck} disabled={busy || deleteRecoveryState === 'checking' || deleteRecoveryState === 'submitting'}>
-          {deleteRecoveryState === 'checking' ? '正在核实…' : '只读重新核实'}
-        </ActionButton>
+        {deleteRecoveryState === 'storage_blocked'
+          ? <ActionButton variant="secondary" onClick={retryDeleteRecoveryCleanup} disabled={busy}>{activeDeleteRecovery ? '重试清理恢复记录' : '重新检查'}</ActionButton>
+          : <ActionButton variant="secondary" onClick={retryDeleteStatusCheck} disabled={busy || deleteRecoveryState === 'checking' || deleteRecoveryState === 'submitting'}>
+            {deleteRecoveryState === 'checking' ? '正在核实…' : '只读重新核实'}
+          </ActionButton>}
       </div>
+    </div> : deleteRecoveryState === 'storage_blocked' ? <div role="alert" className="mb-4 space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
+      <p className="font-medium">浏览器恢复信息无法安全读取，因此暂停所有意见写操作。</p>
+      {deleteRecoveryError ? <p className="text-studio-text-secondary">{deleteRecoveryError}</p> : null}
+      <ActionButton variant="secondary" onClick={retryDeleteRecoveryCleanup}>重新检查</ActionButton>
     </div> : null}
     {deleteOutcomeNotice ? <div role="status" className="mb-4 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">{deleteOutcomeNotice}</div> : null}
     {listError ? <div role="alert" className="mb-4 space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
@@ -817,7 +863,7 @@ export default function AnonymousFeedbackAdmin() {
         </table>
       </ResponsiveTableShell>}
     </GlassPanel>
-    <BaseModal open={Boolean(selected)} onClose={() => setSelected(null)} title="意见详情"><div className="space-y-4 text-sm"><p className="whitespace-pre-wrap leading-7 text-studio-text-primary">{selected?.content}</p>{selected?.reply_content ? <div className="rounded-button bg-studio-surface-soft p-4"><p className="mb-2 text-xs text-studio-text-muted">管理员回复</p><p className="whitespace-pre-wrap text-studio-text-secondary">{selected.reply_content}</p></div> : null}</div></BaseModal>
+    <BaseModal open={Boolean(selected)} onClose={() => setSelected(null)} title="意见详情" closeOnEscape><div className="space-y-4 text-sm"><p className="whitespace-pre-wrap leading-7 text-studio-text-primary">{selected?.content}</p>{selected?.reply_content ? <div className="rounded-button bg-studio-surface-soft p-4"><p className="mb-2 text-xs text-studio-text-muted">管理员回复</p><p className="whitespace-pre-wrap text-studio-text-secondary">{selected.reply_content}</p></div> : null}</div></BaseModal>
     <FormModal open={Boolean(replying)} onCancel={() => setReplying(null)} onSubmit={submitReply} loading={writeLocked} title="回复意见" submitText="保存回复">
       <label className="block space-y-2 text-sm text-studio-text-secondary">
         回复内容
@@ -829,10 +875,12 @@ export default function AnonymousFeedbackAdmin() {
       onCancel={() => setDeleting(null)}
       onConfirm={remove}
       loading={busy}
-      confirmDisabled={Boolean(activeUpdateRecovery || updateStorageBlocked || (activeDeleteRecovery && deleteRecoveryState !== 'not_found'))}
+      confirmDisabled={Boolean(activeUpdateRecovery || updateStorageBlocked || deleteRecoveryState === 'storage_blocked' || (activeDeleteRecovery && deleteRecoveryState !== 'not_found'))}
       variant="danger"
       title="删除意见"
-      description={activeDeleteRecovery && deleteRecoveryState === 'not_found'
+      description={deleteRecoveryState === 'storage_blocked' && deleteRecoveryError
+        ? deleteRecoveryError
+        : activeDeleteRecovery && deleteRecoveryState === 'not_found'
         ? '服务端当前没有找到本操作者对这条意见的删除记录。确认后会使用原请求编号重试；其他写操作仍保持锁定。'
         : activeDeleteRecovery
           ? '上次删除结果尚未核实。确认前请先完成只读核实；核实期间不会再次发送删除请求。'

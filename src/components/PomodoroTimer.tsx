@@ -4,6 +4,7 @@ import { useAppStore } from '../store';
 import { Play, Pause, RotateCcw, Timer, CheckCircle, Link } from 'lucide-react';
 import { cancelPomodoro, completePomodoro, getActivePomodoro, getPomodoroStats, startPomodoro } from '../api/pomodoro';
 import { isDesktopNotifyEnabled, isNotificationSupported, notifyDesktop } from '../utils/notification';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 interface PomodoroTimerProps {
   topicId?: number;
@@ -45,7 +46,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
   // Fetch stats
   const refreshStats = useCallback(async () => {
     try { const stats = await getPomodoroStats(); setTodayCount(stats.today); setStatsError(''); }
-    catch (error) { setStatsError(error instanceof Error ? error.message : '获取番茄钟统计失败'); }
+    catch (error) { setStatsError(getUserFacingErrorMessage(error, '番茄钟统计暂时无法加载，请重试。')); }
   }, []);
   useEffect(() => { void refreshStats(); }, [refreshStats]);
 
@@ -245,7 +246,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           </div>
           <div className="flex items-center gap-1.5">
             <CheckCircle className="w-3.5 h-3.5 text-studio-success" />
-            {statsError ? <button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 shrink-0 px-2 text-xs underline ${styles.textSecondary}`}>统计加载失败，重试</button> : <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>}
+            {statsError ? <><p role="alert" aria-atomic="true" className="sr-only">今日番茄钟统计读取失败：{statsError}</p><button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 shrink-0 px-2 text-xs underline ${styles.textSecondary}`}>统计加载失败，重试</button></> : <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>}
           </div>
         </div>
 
@@ -284,7 +285,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
                 disabled={controlsLocked}
                 aria-busy={mutation !== null}
                 aria-label={isRunning ? '暂停番茄钟' : sessionId ? '继续番茄钟' : '开始番茄钟'}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium !min-h-10 ${
                   isRunning ? styles.buttonSecondary : styles.buttonPrimary
                 } transition-all disabled:cursor-not-allowed disabled:opacity-60`}
               >
@@ -330,11 +331,11 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           }`}>
             <Timer className="w-4 h-4 text-studio-coral" />
           </div>
-          <h3 className={`text-base font-semibold ${styles.textPrimary}`}>番茄钟</h3>
+          <h2 id="pomodoro-timer-heading" className={`text-base font-semibold ${styles.textPrimary}`}>番茄钟</h2>
         </div>
         <div className="flex items-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-studio-success" />
-          {statsError ? <button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 px-2 text-sm underline ${styles.textSecondary}`}>统计加载失败，点击重试</button> : <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>}
+          {statsError ? <><p role="alert" aria-atomic="true" className="sr-only">今日番茄钟统计读取失败：{statsError}</p><button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 px-2 text-sm underline ${styles.textSecondary}`}>统计加载失败，点击重试</button></> : <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>}
         </div>
       </div>
 
@@ -383,7 +384,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           disabled={controlsLocked}
           aria-busy={mutation !== null}
           aria-label={isRunning ? '暂停番茄钟' : sessionId ? '继续番茄钟' : '开始番茄钟'}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium ${
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium !min-h-10 ${
             isRunning ? styles.buttonSecondary : styles.buttonPrimary
           } transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60`}
         >

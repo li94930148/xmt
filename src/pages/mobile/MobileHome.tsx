@@ -14,6 +14,8 @@ import { isNative } from '@/platform/runtime';
 import { orderHomeTasks, type HomeTaskCategory } from '@/lib/homeTaskOrdering';
 import { getProductionVersionRoomId } from '@/collaboration/core/events';
 import { getPlatformLabel } from '@/platform/platform-labels';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import HomeCrossModuleOverview from '@/components/home/HomeCrossModuleOverview';
 
 const quickActions = [
   { label: '提报选题', path: '/topics/add', icon: FilePlus2, permission: 'topic:create' },
@@ -65,6 +67,7 @@ const taskToneClasses: Record<HomeTaskCategory, string> = {
   message: 'bg-studio-violet/12 text-studio-violet-contrast',
   sync: 'bg-studio-coral/12 text-studio-coral-contrast',
   attention: 'bg-studio-amber/12 text-studio-amber-contrast',
+  'retro-action': 'bg-studio-violet/12 text-studio-violet-contrast',
   review: 'bg-studio-amber/12 text-studio-amber-contrast',
   'production-review': 'bg-studio-amber/12 text-studio-amber-contrast',
   draft: 'bg-studio-cyan/12 text-studio-cyan-contrast',
@@ -124,7 +127,7 @@ export default function MobileHome() {
     recentActivityCurrent && recentActivitySnapshot?.loading
       || showRecentChanges && userId && token && !recentActivityCurrent,
   );
-  const taskSourcesError = Boolean(attentionError || (isManagementRole && actionableMessages.error));
+  const taskSourcesError = Boolean(attentionError || (attention && !attention.my_retro_actions.available) || (isManagementRole && actionableMessages.error));
 
   const loadAttention = useCallback(async () => {
     request.current?.abort();
@@ -140,7 +143,7 @@ export default function MobileHome() {
       const result = await getHomeAttention(controller.signal);
       if (isCurrent()) setSnapshot({ userId, role, token, data: result, error: '', loading: false });
     } catch (error) {
-      if (isCurrent()) setSnapshot({ userId, role, token, data: null, error: error instanceof Error ? error.message : '关注事项暂时无法加载，请重试。', loading: false });
+      if (isCurrent()) setSnapshot({ userId, role, token, data: null, error: getUserFacingErrorMessage(error, '工作台摘要暂时无法读取，请重试。'), loading: false });
     }
   }, [userId, role, token]);
 
@@ -203,7 +206,7 @@ export default function MobileHome() {
         data: currentSnapshot?.userId === userId && currentSnapshot?.role === role && currentSnapshot?.token === token
           ? currentSnapshot.data
           : null,
-        error: error instanceof Error ? error.message : '最近变化暂时无法读取，请重试。',
+        error: getUserFacingErrorMessage(error, '最近变化暂时无法读取，请重试。'),
         loading: false,
       }));
     }
@@ -225,11 +228,12 @@ export default function MobileHome() {
 
   const isReviewFirst = role === 'admin' || role === 'director' || hasPermission('topic:audit') || hasPermission('production:update');
   const taskHeading = isManagementRole ? '团队今日重点' : isReviewFirst ? '审核与内容推进' : '我的今日任务';
-  const taskDescription = isManagementRole
+  const baseTaskDescription = isManagementRole
     ? '优先处理待办消息和数据异常，再跟进团队选题与审核事项'
     : isReviewFirst
       ? '优先处理待审核内容，再跟进团队卡点和发布安排'
       : '优先继续自己的稿件，再跟进临近事项和发布安排';
+  const taskDescription = `${baseTaskDescription}${attention?.my_retro_actions.available && attention.my_retro_actions.total > 0 ? ` · 我的复盘行动项 ${attention.my_retro_actions.total} 项` : ''}`;
   const todayTasks = useMemo<MobileTask[]>(() => {
     const tasks: MobileTask[] = [];
     if (isManagementRole && actionableMessages.count > 0) tasks.push({
@@ -253,6 +257,11 @@ export default function MobileHome() {
       id: `production-review-${task.id}`, category: 'production-review', label: '待审核稿件', title: task.topic_title,
       detail: `${task.version || '当前版本'} · ${task.assignee_name ? `选题负责人：${task.assignee_name}` : '选题负责人待确认'}`,
       action: '审核稿件', path: `/production/${task.id}?action=review`, tone: taskToneClasses['production-review'],
+    }));
+    (attention?.my_retro_actions.tasks || []).forEach((task) => tasks.push({
+      id: `retro-action-${task.id}`, category: 'retro-action', label: '复盘行动项', title: task.title,
+      detail: `${task.retro_title} · ${task.status === 'doing' ? '进行中' : '待处理'} · ${task.due_date ? `截止 ${formatBeijingDate(task.due_date)}` : '未设置截止日期'}`,
+      action: '去处理', path: `/retrospectives/${task.retro_id}`, tone: taskToneClasses['retro-action'],
     }));
     if (hasPermission('topic:audit')) (attention?.topic_stages.pending.topics || []).forEach((topic) => tasks.push({
       id: `topic-review-${topic.id}`, category: 'review', label: '待审核选题', title: topic.title,
@@ -312,7 +321,7 @@ export default function MobileHome() {
         <p className="text-sm text-studio-coral-contrast">{attentionError}</p>
         <ActionButton variant="secondary" className="mt-3 w-full" onClick={() => void loadAttention()}>重新加载</ActionButton>
       </div> : null}
-      {visibleTodayTasks.length ? <div className="divide-y divide-studio-border-soft" data-testid="mobile-home-priority-tasks">
+      {visibleTodayTasks.length ? <div id="mobile-home-priority-tasks" className="divide-y divide-studio-border-soft" data-testid="mobile-home-priority-tasks">
         {visibleTodayTasks.map((task) => <ActionButton
           key={task.id}
           data-testid="mobile-home-task"
@@ -335,10 +344,14 @@ export default function MobileHome() {
       {remainingTaskCount > 0 ? <ActionButton
         variant="ghost"
         className="mt-2 w-full justify-center py-2 text-sm"
+        aria-expanded={showAllTasks}
+        aria-controls="mobile-home-priority-tasks"
         onClick={() => setShowAllTasks(true)}
       >查看剩余 {remainingTaskCount} 项</ActionButton> : showAllTasks && todayTasks.length > 3 ? <ActionButton
         variant="ghost"
         className="mt-2 w-full justify-center py-2 text-sm"
+        aria-expanded={showAllTasks}
+        aria-controls="mobile-home-priority-tasks"
         onClick={() => setShowAllTasks(false)}
       >收起任务</ActionButton> : null}
     </section>
@@ -361,9 +374,10 @@ export default function MobileHome() {
         </div>)}
       </div>
       <div className="mt-3 rounded-xl border border-studio-border-soft px-3 py-2">
-        <button
+        <ActionButton
+          variant="ghost"
           type="button"
-          className="flex w-full items-center justify-between gap-3 text-left"
+          className="min-h-10 w-full justify-between text-left"
           aria-controls="mobile-home-stage-previews"
           aria-expanded={showStagePreviews}
           onClick={() => setShowStagePreviews((current) => !current)}
@@ -373,7 +387,7 @@ export default function MobileHome() {
             <span className="mt-0.5 block text-xs text-studio-text-secondary">每阶段最多 3 条，含阶段停留时间</span>
           </span>
           <ChevronRight aria-hidden="true" className={`h-4 w-4 shrink-0 text-studio-text-secondary transition-transform ${showStagePreviews ? 'rotate-90' : ''}`} />
-        </button>
+        </ActionButton>
         <div id="mobile-home-stage-previews" className="mt-2 space-y-3 border-t border-studio-border-soft pt-3" hidden={!showStagePreviews}>
           {attentionLoading || inspirationLoading ? <p className="text-sm text-studio-text-secondary" role="status">正在读取阶段最新内容…</p> : (
             <div className="space-y-3" data-testid="mobile-home-stage-preview-list">
@@ -461,7 +475,7 @@ export default function MobileHome() {
         <div>
           {attention ? <p className="text-xs font-medium text-studio-text-secondary">{attention.scope === 'all-visible-content' ? '团队范围' : '个人范围'}</p> : null}
           <h2 id="mobile-home-attention-heading" className="mt-1 text-base font-semibold text-studio-text-primary">
-            {attention?.scope === 'all-visible-content' ? '团队选题关注' : attention ? '我的选题关注' : '选题关注'}
+            {isManagementRole && attention ? '团队工作概览' : attention?.scope === 'all-visible-content' ? '团队选题关注' : attention ? '我的选题关注' : '选题关注'}
           </h2>
         </div>
         <ActionButton variant="ghost" className="px-2 py-1 text-sm" onClick={() => navigate('/topics', { state: { mobileReturnTo: '/' } })}>查看选题</ActionButton>
@@ -470,6 +484,15 @@ export default function MobileHome() {
         <p className="text-sm text-studio-coral-contrast">关注事项暂不可用，请在今日任务卡重试。</p>
       ) : attention ? (
         <>
+          {isManagementRole ? <HomeCrossModuleOverview
+            summary={attention}
+            isManagementRole
+            hasTopicAudit={!permissionsLoading && hasPermission('topic:audit')}
+            hasPublishingAccess={!permissionsLoading && hasPermission('workflow:publishing')}
+            actionableMessageCount={!actionableMessages.loading && !actionableMessages.error ? actionableMessages.count : null}
+            onNavigate={(path) => navigate(path, { state: { mobileReturnTo: '/' } })}
+            compact
+          /> : null}
           <div className="grid grid-cols-3 gap-2" aria-label={`${attention.counts.total} 项需要跟进`}>
             {[
               { label: '逾期', count: attention.counts.overdue },

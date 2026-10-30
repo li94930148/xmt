@@ -22,6 +22,7 @@ import RetroCreateDialog from '../components/retrospectives/RetroCreateDialog';
 import RetroList from '../components/retrospectives/RetroList';
 import { useRetroAssigneeDirectory } from '../components/retrospectives/useRetroAssigneeDirectory';
 import { retroCategoryLabels, toFriendlyRetroError } from '../components/retrospectives/retroLabels';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 const statusOptions: Array<{ value: RetrospectiveStatus | 'all'; label: string }> = [
   { value: 'all', label: '全部状态' },
@@ -221,7 +222,7 @@ export default function RetrospectivesPage() {
       setCreateRecovery({
         actorId,
         status: 'storage_error',
-        message: error instanceof Error ? error.message : '读取本地恢复信息失败',
+        message: getUserFacingErrorMessage(error, '当前浏览器的复盘恢复信息暂时无法读取。'),
       });
       setCreateOpen(true);
       setRecoveryCheckedUserId(actorId);

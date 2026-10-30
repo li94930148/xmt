@@ -2,6 +2,14 @@ import { useAuthStore } from '../store';
 
 const BASE_URL = '/api';
 
+async function getResourceError(response: Response, fallback: string) {
+  const payload = await response.json().catch(() => null);
+  const message = payload && typeof payload === 'object' && 'message' in payload
+    ? String((payload as { message: unknown }).message)
+    : fallback;
+  return Object.assign(new Error(message), { status: response.status });
+}
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -12,7 +20,7 @@ export async function deleteResource(id: number): Promise<{ message: string }> {
     method: 'DELETE',
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error('删除资源失败');
+  if (!response.ok) throw await getResourceError(response, '删除归档失败');
   return response.json();
 }
 
@@ -35,8 +43,9 @@ export async function getArchives(params?: { search?: string; page?: number; lim
 
 export async function getArchiveDetail(id: number): Promise<any> {
   const response = await fetch(`${BASE_URL}/resources/archives/${id}`, {
-    headers: getAuthHeader()
+    headers: getAuthHeader(),
+    cache: 'no-store',
   });
-  if (!response.ok) throw new Error('获取归档详情失败');
+  if (!response.ok) throw await getResourceError(response, '获取归档详情失败');
   return response.json();
 }

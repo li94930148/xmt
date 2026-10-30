@@ -56,6 +56,31 @@ const TOOLBAR_DROPDOWN_WIDTH: Record<ToolbarDropdownKey, number> = {
   more: 224,
 };
 
+function getVisibleBounds(anchor: HTMLElement | null) {
+  const visible = { top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0 };
+  let ancestor = anchor?.parentElement ?? null;
+  while (ancestor && ancestor !== document.body) {
+    const style = window.getComputedStyle(ancestor);
+    const clipsX = style.overflowX !== 'visible';
+    const clipsY = style.overflowY !== 'visible';
+    if (clipsX || clipsY) {
+      const bounds = ancestor.getBoundingClientRect();
+      const left = bounds.left + ancestor.clientLeft;
+      const top = bounds.top + ancestor.clientTop;
+      if (clipsX) {
+        visible.left = Math.max(visible.left, left);
+        visible.right = Math.min(visible.right, left + ancestor.clientWidth);
+      }
+      if (clipsY) {
+        visible.top = Math.max(visible.top, top);
+        visible.bottom = Math.min(visible.bottom, top + ancestor.clientHeight);
+      }
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return visible;
+}
+
 export default function Toolbar({
   editor,
   variant = 'full',
@@ -108,13 +133,14 @@ export default function Toolbar({
     setPainterMode('idle');
   }, [setPainterMode]);
 
-  const positionDropdown = (key: ToolbarDropdownKey, anchor: HTMLDivElement | null) => {
+  const positionDropdown = useCallback((key: ToolbarDropdownKey, anchor: HTMLDivElement | null) => {
     const bounds = anchor?.getBoundingClientRect();
     if (!bounds) return;
-    const spaceAbove = bounds.top;
-    const spaceBelow = window.innerHeight - bounds.bottom;
+    const visibleBounds = getVisibleBounds(anchor);
+    const spaceAbove = bounds.top - visibleBounds.top;
+    const spaceBelow = visibleBounds.bottom - bounds.bottom;
     const zoomScale = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-    const preferredHeight = Math.min(window.innerHeight * 0.7, 448) * zoomScale;
+    const preferredHeight = Math.min((visibleBounds.bottom - visibleBounds.top) * 0.7, 448) * zoomScale;
     const placement = spaceBelow >= preferredHeight
       ? 'below'
       : spaceAbove >= preferredHeight
@@ -122,20 +148,17 @@ export default function Toolbar({
         : spaceAbove > spaceBelow ? 'above' : 'below';
     const availableSpace = placement === 'above' ? spaceAbove : spaceBelow;
     const toolbarBounds = toolbarRef.current?.getBoundingClientRect();
-    const safeLeft = Math.max(8, toolbarBounds?.left ?? 8);
-    const safeRight = Math.max(safeLeft, Math.min(window.innerWidth - 8, toolbarBounds?.right ?? window.innerWidth - 8));
+    const safeLeft = Math.max(8, visibleBounds.left, toolbarBounds?.left ?? 8);
+    const safeRight = Math.max(safeLeft, Math.min(visibleBounds.right - 8, toolbarBounds?.right ?? visibleBounds.right - 8));
     const menuWidth = Math.max(0, Math.min(TOOLBAR_DROPDOWN_WIDTH[key], safeRight - safeLeft));
     const menuLeft = Math.min(Math.max(safeLeft, bounds.right - menuWidth), safeRight - menuWidth) - bounds.left;
-    setDropdownLayouts((current) => ({
-      ...current,
-      [key]: {
-        placement,
-        maxHeight: Math.max(0, Math.min(448, (availableSpace - 8) / zoomScale)),
-        left: menuLeft,
-        width: menuWidth,
-      },
-    }));
-  };
+    const maxHeight = Math.max(0, Math.min(448, (availableSpace - 8) / zoomScale));
+    setDropdownLayouts((current) => {
+      const previous = current[key];
+      if (previous.placement === placement && previous.maxHeight === maxHeight && previous.left === menuLeft && previous.width === menuWidth) return current;
+      return { ...current, [key]: { placement, maxHeight, left: menuLeft, width: menuWidth } };
+    });
+  }, []);
 
   const dropdownPositionStyle = (key: ToolbarDropdownKey) => {
     const layout = dropdownLayouts[key];
@@ -185,11 +208,30 @@ export default function Toolbar({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && formatPainterModeRef.current !== 'idle') stopFormatPainter();
+      if (event.key !== 'Escape') return;
+      const dropdownOpen = showHeadingDropdown || showHighlightPicker || showTextColorPicker || showFileMenu || showMoreMenu;
+      const painterActive = formatPainterModeRef.current !== 'idle';
+      if (!dropdownOpen && !painterActive) return;
+
+      const activeElement = document.activeElement;
+      if (dropdownOpen && activeElement instanceof HTMLElement) {
+        const activeMenuRef = [headingRef, textColorRef, highlightRef, fileMenuRef, moreMenuRef]
+          .find((ref) => ref.current?.contains(activeElement));
+        const trigger = activeMenuRef?.current?.querySelector('button');
+        if (trigger && trigger !== activeElement) trigger.focus();
+      }
+
+      event.preventDefault();
+      setShowHeadingDropdown(false);
+      setShowHighlightPicker(false);
+      setShowTextColorPicker(false);
+      setShowFileMenu(false);
+      setShowMoreMenu(false);
+      if (painterActive) stopFormatPainter();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [stopFormatPainter]);
+  }, [showFileMenu, showHeadingDropdown, showHighlightPicker, showMoreMenu, showTextColorPicker, stopFormatPainter]);
 
   useEffect(() => () => stopFormatPainter(), [stopFormatPainter]);
 
@@ -248,25 +290,59 @@ export default function Toolbar({
     const anchorIsVisible = (anchor: HTMLDivElement | null) => {
       if (!anchor) return false;
       const bounds = anchor.getBoundingClientRect();
-      return bounds.bottom > 0
-        && bounds.top < window.innerHeight
-        && bounds.right > 0
-        && bounds.left < window.innerWidth;
+      const visibleBounds = getVisibleBounds(anchor);
+      return bounds.bottom > visibleBounds.top
+        && bounds.top < visibleBounds.bottom
+        && bounds.right > visibleBounds.left
+        && bounds.left < visibleBounds.right;
     };
     const closeOffscreenDropdowns = () => {
-      if (showHeadingDropdown && !anchorIsVisible(headingRef.current)) setShowHeadingDropdown(false);
-      if (showHighlightPicker && !anchorIsVisible(highlightRef.current)) setShowHighlightPicker(false);
-      if (showTextColorPicker && !anchorIsVisible(textColorRef.current)) setShowTextColorPicker(false);
-      if (showFileMenu && !anchorIsVisible(fileMenuRef.current)) setShowFileMenu(false);
-      if (showMoreMenu && !anchorIsVisible(moreMenuRef.current)) setShowMoreMenu(false);
+      if (showHeadingDropdown) {
+        if (anchorIsVisible(headingRef.current)) positionDropdown('heading', headingRef.current);
+        else setShowHeadingDropdown(false);
+      }
+      if (showHighlightPicker) {
+        if (anchorIsVisible(highlightRef.current)) positionDropdown('highlight', highlightRef.current);
+        else setShowHighlightPicker(false);
+      }
+      if (showTextColorPicker) {
+        if (anchorIsVisible(textColorRef.current)) positionDropdown('textColor', textColorRef.current);
+        else setShowTextColorPicker(false);
+      }
+      if (showFileMenu) {
+        if (anchorIsVisible(fileMenuRef.current)) positionDropdown('file', fileMenuRef.current);
+        else setShowFileMenu(false);
+      }
+      if (showMoreMenu) {
+        if (anchorIsVisible(moreMenuRef.current)) positionDropdown('more', moreMenuRef.current);
+        else setShowMoreMenu(false);
+      }
     };
-    document.addEventListener('scroll', closeOffscreenDropdowns, true);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(closeOffscreenDropdowns);
+    const observeClippingAncestors = (anchor: HTMLDivElement | null) => {
+      let ancestor = anchor?.parentElement ?? null;
+      while (resizeObserver && ancestor && ancestor !== document.body) {
+        const style = window.getComputedStyle(ancestor);
+        if (style.overflowX !== 'visible' || style.overflowY !== 'visible') resizeObserver.observe(ancestor);
+        ancestor = ancestor.parentElement;
+      }
+    };
+    if (showHeadingDropdown) observeClippingAncestors(headingRef.current);
+    if (showHighlightPicker) observeClippingAncestors(highlightRef.current);
+    if (showTextColorPicker) observeClippingAncestors(textColorRef.current);
+    if (showFileMenu) observeClippingAncestors(fileMenuRef.current);
+    if (showMoreMenu) observeClippingAncestors(moreMenuRef.current);
+    if (toolbarRef.current) resizeObserver?.observe(toolbarRef.current);
+    document.addEventListener('scroll', closeOffscreenDropdowns, { capture: true, passive: true });
     window.addEventListener('resize', closeOffscreenDropdowns);
     return () => {
       document.removeEventListener('scroll', closeOffscreenDropdowns, true);
       window.removeEventListener('resize', closeOffscreenDropdowns);
+      resizeObserver?.disconnect();
     };
-  }, [showFileMenu, showHeadingDropdown, showHighlightPicker, showMoreMenu, showTextColorPicker]);
+  }, [positionDropdown, showFileMenu, showHeadingDropdown, showHighlightPicker, showMoreMenu, showTextColorPicker]);
 
   if (!editor) return null;
 
@@ -463,7 +539,7 @@ export default function Toolbar({
     setShowMoreMenu((open) => !open);
   };
 
-  const dropdownClass = `absolute left-0 z-50 rounded-lg shadow-xl border py-1 ${
+  const dropdownClass = `absolute left-0 z-editor-menu rounded-lg shadow-xl border py-1 ${
     isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'
   }`;
 
@@ -474,6 +550,7 @@ export default function Toolbar({
         className={`editor-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-2 ${
           isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-studio-surface'
         }`}
+        role="group"
         aria-label="基础富文本工具栏"
       >
         <button type="button" onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} className={btnClass()} title="撤销 (Ctrl+Z)" aria-label="撤销">
@@ -483,20 +560,20 @@ export default function Toolbar({
           <Redo className="h-4 w-4" />
         </button>
         {divider}
-        <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗 (Ctrl+B)" aria-label="加粗">
+        <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗 (Ctrl+B)" aria-label="加粗" aria-pressed={editor.isActive('bold')}>
           <Bold className="h-4 w-4" />
         </button>
-        <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体 (Ctrl+I)" aria-label="斜体">
+        <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体 (Ctrl+I)" aria-label="斜体" aria-pressed={editor.isActive('italic')}>
           <Italic className="h-4 w-4" />
         </button>
-        <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线 (Ctrl+U)" aria-label="下划线">
+        <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线 (Ctrl+U)" aria-label="下划线" aria-pressed={editor.isActive('underline')}>
           <Underline className="h-4 w-4" />
         </button>
         {divider}
-        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive('bulletList'))} title="项目符号列表" aria-label="项目符号列表">
+        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive('bulletList'))} title="项目符号列表" aria-label="项目符号列表" aria-pressed={editor.isActive('bulletList')}>
           <List className="h-4 w-4" />
         </button>
-        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive('orderedList'))} title="编号列表" aria-label="编号列表">
+        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive('orderedList'))} title="编号列表" aria-label="编号列表" aria-pressed={editor.isActive('orderedList')}>
           <ListOrdered className="h-4 w-4" />
         </button>
         <button type="button" onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接" aria-label="链接">
@@ -540,6 +617,8 @@ export default function Toolbar({
         {groupLabel('标题')}
         <div className="relative" ref={headingRef}>
           <button
+            type="button"
+            aria-expanded={showHeadingDropdown}
             onClick={() => {
               if (!showHeadingDropdown) positionDropdown('heading', headingRef.current);
               setShowHeadingDropdown(!showHeadingDropdown);
@@ -587,16 +666,16 @@ export default function Toolbar({
       {/* 文字组 */}
       <div className="flex items-center gap-0.5">
         {groupLabel('文字')}
-        <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗 (Ctrl+B)">
+        <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗 (Ctrl+B)" aria-pressed={editor.isActive('bold')}>
           <Bold className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体 (Ctrl+I)">
+        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体 (Ctrl+I)" aria-pressed={editor.isActive('italic')}>
           <Italic className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线 (Ctrl+U)">
+        <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线 (Ctrl+U)" aria-pressed={editor.isActive('underline')}>
           <Underline className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} title="删除线">
+        <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} title="删除线" aria-pressed={editor.isActive('strike')}>
           <Strikethrough className="w-4 h-4" />
         </button>
       </div>
@@ -609,6 +688,9 @@ export default function Toolbar({
         {/* 文字颜色 */}
         <div className="relative" ref={textColorRef}>
           <button
+            type="button"
+            aria-label="文字颜色"
+            aria-expanded={showTextColorPicker}
             onClick={() => {
               if (!showTextColorPicker) positionDropdown('textColor', textColorRef.current);
               setShowTextColorPicker(!showTextColorPicker);
@@ -621,18 +703,21 @@ export default function Toolbar({
             <ChevronDown className="w-2.5 h-2.5" />
           </button>
           {showTextColorPicker && (
-            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('textColor'), minWidth: '176px' }}>
+            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('textColor'), minWidth: `${Math.min(176, dropdownLayouts.textColor.width ?? 176)}px` }}>
               <div className="mb-2 text-xs font-medium text-studio-text-secondary">文字颜色</div>
-              <div className="grid grid-cols-4 gap-2.5">
+              <div role="group" aria-label="文字颜色选项" className="grid grid-cols-4 gap-2.5">
                 {TEXT_COLORS.map((c) => (
                   <button
+                    type="button"
                     key={c.value || 'default'}
+                    aria-label={`${c.name}文字颜色`}
+                    aria-pressed={c.value ? editor.isActive('textStyle', { color: c.value }) : !editor.getAttributes('textStyle').color}
                     onClick={() => handleTextColor(c.value)}
                     className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center"
                     style={{ borderColor: 'var(--xmt-border-soft)' }}
                     title={c.name}
                   >
-                    <span
+                      <span aria-hidden="true"
                       className="font-bold text-sm flex items-center justify-center"
                       style={{ color: c.value || 'var(--editor-fg)' }}
                     >
@@ -648,6 +733,9 @@ export default function Toolbar({
         {/* 高亮颜色 */}
         <div className="relative" ref={highlightRef}>
           <button
+            type="button"
+            aria-label="高亮颜色"
+            aria-expanded={showHighlightPicker}
             onClick={() => {
               if (!showHighlightPicker) positionDropdown('highlight', highlightRef.current);
               setShowHighlightPicker(!showHighlightPicker);
@@ -660,12 +748,15 @@ export default function Toolbar({
             <ChevronDown className="w-2.5 h-2.5" />
           </button>
           {showHighlightPicker && (
-            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('highlight'), minWidth: '176px' }}>
+            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('highlight'), minWidth: `${Math.min(176, dropdownLayouts.highlight.width ?? 176)}px` }}>
               <div className="mb-2 text-xs font-medium text-studio-text-secondary">高亮颜色</div>
-              <div className="grid grid-cols-4 gap-2.5 mb-1">
+              <div role="group" aria-label="高亮颜色选项" className="grid grid-cols-4 gap-2.5 mb-1">
                 {HIGHLIGHT_COLORS.map((c) => (
                   <button
+                    type="button"
                     key={c.value}
+                    aria-label={`${c.name}高亮颜色`}
+                    aria-pressed={editor.isActive('highlight', { color: c.value })}
                     onClick={() => handleHighlight(c.value)}
                     className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110"
                     style={{
@@ -706,19 +797,19 @@ export default function Toolbar({
       {/* 段落组 */}
       <div className="flex items-center gap-0.5">
         {groupLabel('段落')}
-        <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={btnClass(editor.isActive({ textAlign: 'left' }))} title="左对齐">
+        <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={btnClass(editor.isActive({ textAlign: 'left' }))} title="左对齐" aria-pressed={editor.isActive({ textAlign: 'left' })}>
           <AlignLeft className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={btnClass(editor.isActive({ textAlign: 'center' }))} title="居中">
+        <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={btnClass(editor.isActive({ textAlign: 'center' }))} title="居中" aria-pressed={editor.isActive({ textAlign: 'center' })}>
           <AlignCenter className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={btnClass(editor.isActive({ textAlign: 'right' }))} title="右对齐">
+        <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={btnClass(editor.isActive({ textAlign: 'right' }))} title="右对齐" aria-pressed={editor.isActive({ textAlign: 'right' })}>
           <AlignRight className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={btnClass(editor.isActive({ textAlign: 'justify' }))} title="两端对齐">
+        <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={btnClass(editor.isActive({ textAlign: 'justify' }))} title="两端对齐" aria-pressed={editor.isActive({ textAlign: 'justify' })}>
           <AlignJustify className="w-4 h-4" />
         </button>
-        <button onClick={toggleFirstLineIndent} className={btnClass(isTextIndentActive())} title="首行缩进">
+        <button onClick={toggleFirstLineIndent} className={btnClass(isTextIndentActive())} title="首行缩进" aria-pressed={isTextIndentActive()}>
           <IndentIncrease className="w-4 h-4" />
         </button>
       </div>
@@ -734,16 +825,16 @@ export default function Toolbar({
         <button onClick={insertTable} className={btnClass()} title="表格">
           <TableIcon className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} title="引用">
+        <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} title="引用" aria-pressed={editor.isActive('blockquote')}>
           <Quote className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleCodeBlock().run()} className={btnClass(editor.isActive('codeBlock'))} title="代码块">
+        <button onClick={() => editor.chain().focus().toggleCodeBlock().run()} className={btnClass(editor.isActive('codeBlock'))} title="代码块" aria-pressed={editor.isActive('codeBlock')}>
           <Code className="w-4 h-4" />
         </button>
         <button onClick={() => editor.chain().focus().setHorizontalRule().run()} className={btnClass()} title="分割线">
           <Minus className="w-4 h-4" />
         </button>
-        <button onClick={() => editor.chain().focus().toggleTaskList().run()} className={btnClass(editor.isActive('taskList'))} title="待办">
+        <button onClick={() => editor.chain().focus().toggleTaskList().run()} className={btnClass(editor.isActive('taskList'))} title="待办" aria-pressed={editor.isActive('taskList')}>
           <CheckSquare className="w-4 h-4" />
         </button>
         <button onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接">
@@ -771,6 +862,8 @@ export default function Toolbar({
           <Printer className="w-4 h-4" />
         </button>
         <button
+          type="button"
+          aria-expanded={showFileMenu}
           onClick={() => {
             if (!showFileMenu) positionDropdown('file', fileMenuRef.current);
             setShowFileMenu(!showFileMenu);
@@ -806,6 +899,8 @@ export default function Toolbar({
           <div className="flex-1" />
           <div className="relative" ref={moreMenuRef}>
             <button
+              type="button"
+              aria-expanded={showMoreMenu}
               onClick={toggleMoreMenu}
               className={btnClass()}
               title="更多操作"
@@ -831,7 +926,7 @@ export default function Toolbar({
                 <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignJustify className="w-4 h-4" /> 两端对齐
                 </button>
-                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary-button text-white') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
+                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary-button text-white') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`} aria-pressed={isTextIndentActive()}>
                   <IndentIncrease className="w-4 h-4" /> 首行缩进
                 </button>
                 <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
@@ -876,6 +971,8 @@ export default function Toolbar({
         {groupLabel('高级')}
         {onToggleToc && (
           <button
+            type="button"
+            aria-expanded={showToc}
             onClick={onToggleToc}
             className={btnClass(showToc)}
             title={showToc ? '隐藏目录' : '显示目录'}

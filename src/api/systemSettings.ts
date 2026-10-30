@@ -4,6 +4,7 @@ import {
   normalizeSystemSettings,
 } from '@/lib/systemSettings';
 import { useAuthStore } from '@/store';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 export type SystemSettingsSaveResult =
   | { kind: 'saved'; settings: ManagedSystemSettings; recovered: boolean }
@@ -49,10 +50,7 @@ function settingsPatchMatches(current: ManagedSystemSettings, patch: Partial<Man
 async function parseSettingsResponse(response: Response) {
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const message =
-      payload && typeof payload === 'object' && 'message' in payload
-        ? String((payload as { message: unknown }).message)
-        : '系统设置请求失败';
+    const message = getUserFacingErrorMessage(payload, '系统设置暂时无法加载，请重试');
     throw new Error(message);
   }
 
@@ -80,9 +78,7 @@ async function getSystemSettingsForVerification(): Promise<ManagedSystemSettings
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    const message = payload && typeof payload === 'object' && 'message' in payload
-      ? String((payload as { message: unknown }).message)
-      : `读取系统设置失败（HTTP ${response.status}）`;
+    const message = getUserFacingErrorMessage(payload, '系统设置暂时无法核实，请稍后重试');
     throw new Error(message);
   }
   const payload = await response.json().catch(() => null) as unknown;
@@ -138,8 +134,6 @@ export async function updateSystemSettings(
   }
 
   const payload = await response.json().catch(() => null) as unknown;
-  const message = payload && typeof payload === 'object' && 'message' in payload
-    ? String((payload as { message: unknown }).message)
-    : `系统设置保存失败（HTTP ${response.status}）`;
+  const message = getUserFacingErrorMessage(payload, '系统设置保存失败，请重试');
   return { kind: 'rejected', message };
 }

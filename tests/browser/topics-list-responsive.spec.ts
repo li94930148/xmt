@@ -6,8 +6,15 @@ import { chromium } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { readFileSync } from 'node:fs';
 import { topicStatusLabel } from '../../src/components/topics/topicStatusLabel';
+import { defaultReactBitsAppearanceConfig, REACT_BITS_APPEARANCE_KEY } from '../../src/features/reactbits-appearance/types';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+const topicSpotlightAppearanceConfig = {
+  ...defaultReactBitsAppearanceConfig,
+  card: { component: 'spotlight-card' as const },
+  motionMode: 'balanced' as const,
+  applyTo: { ...defaultReactBitsAppearanceConfig.applyTo, topics: true },
+};
 assert.deepEqual(
   ['pending', 'approved', 'rejected', 'production', 'shooting', 'publishing', 'completed'].map(topicStatusLabel),
   ['待审核', '已通过', '已驳回', '创作中', '成片制作', '发布中', '已完成'],
@@ -192,6 +199,29 @@ async function assertTopicsBoardContrast(page: import('playwright').Page, theme:
   }
 }
 
+async function assertTopicSpotlightsUseThemeToken(page: import('playwright').Page, theme: string) {
+  const metricSpotlight = page.locator('[data-reactbits-spotlight-card]').first();
+  const prioritySpotlight = page.locator('[aria-labelledby="priority-topics-title"] [data-reactbits-spotlight-card]');
+  await metricSpotlight.waitFor({ state: 'visible' });
+  assert.ok(await page.locator('[data-reactbits-spotlight-card]').count() >= 4, `${theme} fixture renders the ReactBits metric cards and topic spotlight`);
+  assert.equal(await metricSpotlight.evaluate((element) => element.closest('[aria-labelledby="priority-topics-title"]') !== null), false, `${theme} first spotlight is the ReactBitsCardSlot metric path`);
+  const token = await page.locator('html').evaluate((element) => getComputedStyle(element).getPropertyValue('--xmt-cyan-rgb').trim());
+  assert.ok(token, `${theme} topic page exposes the Studio cyan token`);
+
+  for (const [label, card] of [['metric', metricSpotlight], ['priority', prioritySpotlight]] as const) {
+    await card.waitFor({ state: 'visible' });
+    await card.hover();
+    const state = await card.evaluate((element) => {
+      const overlay = element.firstElementChild as HTMLElement | null;
+      return { background: overlay?.style.background ?? '', opacity: overlay ? getComputedStyle(overlay).opacity : '0' };
+    });
+    assert.ok(state.background.includes('var(--xmt-cyan-rgb)'), `${theme} ${label} spotlight glow uses the active Studio cyan token`);
+    assert.equal(state.opacity, '0.6', `${theme} ${label} spotlight glow appears on hover`);
+  }
+
+  return token;
+}
+
 async function assertMainButtonTouchTargets(page: import('playwright').Page, surface: string) {
   const buttons = await page.locator('main button').evaluateAll((elements) => elements.flatMap((element) => {
     const rect = element.getBoundingClientRect();
@@ -221,7 +251,10 @@ app.get('/__qa', (req, res) => {
     delayNextTopicListRead = true;
     topicListReadStarted = false;
   }
-  return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','topics-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics');</script>`);
+  const reactBitsSetup = req.query.spotlight_fixture === 'true'
+    ? `localStorage.setItem(${JSON.stringify(REACT_BITS_APPEARANCE_KEY)},${JSON.stringify(JSON.stringify(topicSpotlightAppearanceConfig))});`
+    : `localStorage.removeItem(${JSON.stringify(REACT_BITS_APPEARANCE_KEY)});`;
+  return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','topics-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});${reactBitsSetup}location.replace('/topics');</script>`);
 });
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
@@ -258,8 +291,8 @@ app.get('/api/topics', async (req, res) => {
     return res.json({ data: filtered, total, page, limit });
   }
   const isBoardRequest = Number(req.query.limit) >= 200;
-  const data = topicExists ? (isBoardRequest ? [topic, boardAuditTopic] : [topic]) : [];
-  return res.json({ data, total: topicExists ? 31 : 30, page: 1, limit: Number(req.query.limit) || 15 });
+  const data = topicExists ? (isBoardRequest ? [topic, boardAuditTopic, mobileAdvanceTopic] : [topic]) : [];
+  return res.json({ data, total: isBoardRequest ? data.length : topicExists ? 31 : 30, page: 1, limit: Number(req.query.limit) || 15 });
 });
 app.get('/__qa/topic-list-state', (_req, res) => res.json({ topicListGetRequests, topicListReadStarted }));
 app.post('/__qa/fail-next-topic-list-read', (_req, res) => {
@@ -569,6 +602,45 @@ try {
   await mobileListFailurePage.screenshot({ path: '/tmp/xmt-mobile-topics-list-recovered.png', fullPage: false });
   await mobileListFailurePage.close();
 
+  const mobileTransportFailurePage = await context.newPage();
+  await mobileTransportFailurePage.setViewportSize({ width: 390, height: 844 });
+  mobileTransportFailurePage.setDefaultTimeout(5000);
+  mobileTransportFailurePage.on('pageerror', (error) => errors.push(error.message));
+  const mobileTransportMethods: string[] = [];
+  mobileTransportFailurePage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') mobileTransportMethods.push(request.method());
+  });
+  let abortFirstTopicListRead = true;
+  await mobileTransportFailurePage.route('**/api/topics?*', async (route) => {
+    if (abortFirstTopicListRead) {
+      abortFirstTopicListRead = false;
+      await route.abort('failed');
+      return;
+    }
+    await route.continue();
+  });
+  const requestsBeforeTransportFailure = await mobileTransportFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json()).then((state) => state.topicListGetRequests);
+  await mobileTransportFailurePage.goto(`${base}/__qa`);
+  await mobileTransportFailurePage.getByRole('alert').getByText('选题列表读取失败：请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await mobileTransportFailurePage.getByText(/Failed to fetch/i).count(), 0, 'mobile topic list hides raw browser transport errors');
+  assert.equal(await mobileTransportFailurePage.getByText('没有符合条件的选题', { exact: true }).count(), 0, 'a transport failure is not reported as an empty list');
+  const mobileTransportFailureLayout = await mobileTransportFailurePage.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  assert.equal(mobileTransportFailureLayout.viewport, 390);
+  assert.equal(mobileTransportFailureLayout.document, 390, 'mobile topic transport failure has no horizontal overflow');
+  await mobileTransportFailurePage.screenshot({ path: '/tmp/xmt-mobile-topics-transport-failure.png', fullPage: false });
+  const recoveredMobileTransportRead = mobileTransportFailurePage.waitForResponse((response) => new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
+  await mobileTransportFailurePage.getByRole('button', { name: '重试加载选题', exact: true }).click();
+  await recoveredMobileTransportRead;
+  await mobileTransportFailurePage.getByRole('heading', { name: topic.title, exact: true }).waitFor();
+  const mobileTransportStateAfterRetry = await mobileTransportFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+  assert.equal(mobileTransportStateAfterRetry.topicListGetRequests, requestsBeforeTransportFailure + 1, 'only the explicit retry reaches the API after the aborted read');
+  assert.deepEqual(mobileTransportMethods, ['GET', 'GET'], 'the aborted read and explicit retry remain read-only');
+  assert.deepEqual(errors, [], 'mobile topic transport failure and recovery render without application errors');
+  await mobileTransportFailurePage.close();
+
   await page.goto(`${base}/__qa`);
   await page.getByRole('table').getByText('创作中', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '选题管理' }).waitFor();
@@ -592,6 +664,17 @@ try {
   await page.getByRole('button', { name: '重新加载选题详情', exact: true }).click();
   await page.getByRole('heading', { name: topic.title, exact: true }).waitFor();
   assert.equal((await page.request.get(`${base}/__qa/topic-detail-state`).then((response) => response.json())).topicDetailReadCount, detailReadCountBefore + 2, 'retry performs one additional read and recovers the topic');
+  for (const sectionName of ['项目背景', '目标受众', '剧本大纲', '关联资料', '流程进度', '操作', '历史记录']) {
+    assert.equal(await page.getByRole('heading', { name: sectionName, level: 2, exact: true }).count(), 1, `${sectionName} is a level-two topic section`);
+  }
+  assert.equal(await page.getByRole('heading', { name: '版本历史', level: 3, exact: true }).count(), 1, 'outline version history is nested under the outline section');
+  const deadlineEditButton = page.getByRole('button', { name: '2026/10/20，编辑截止时间', exact: true });
+  await deadlineEditButton.waitFor();
+  assert.equal((await deadlineEditButton.innerText()).trim(), '2026/10/20', 'the deadline button keeps its visible date in the accessible name');
+  assert.equal(await deadlineEditButton.evaluate((element) => element.tabIndex), 0, 'the clickable deadline is in the keyboard tab order');
+  await deadlineEditButton.focus();
+  await page.keyboard.press('Enter');
+  await page.locator('#topic-deadline').waitFor();
   assert.deepEqual(topicDetailMethods, ['GET', 'GET'], 'detail failure recovery performs no topic mutation');
   page.off('request', topicDetailRequestListener);
   await page.goto(`${base}/topics/999999`);
@@ -616,6 +699,22 @@ try {
     if (message.text().includes('503 (Service Unavailable)') || message.text().includes('404 (Not Found)')) expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
+  await mobileDetailPage.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    const state = { calls: [] as Array<{ method: string; failed: boolean }>, failed: false };
+    (window as Window & { __mobileTopicResourcesQa?: typeof state }).__mobileTopicResourcesQa = state;
+    window.fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (/\/api\/topics\/\d+\/resources(?:\?|$)/.test(url)) {
+        state.calls.push({ method: init?.method ?? 'GET', failed: !state.failed });
+        if (!state.failed) {
+          state.failed = true;
+          throw new TypeError('Failed to fetch');
+        }
+      }
+      return originalFetch(input, init);
+    };
+  });
   await mobileDetailPage.goto(`${base}/__qa?theme=dark`);
   const mobileDetailReadCountBefore = (await mobileDetailPage.request.get(`${base}/__qa/topic-detail-state`).then((response) => response.json())).topicDetailReadCount;
   const mobileTopicDetailMethods: string[] = [];
@@ -637,6 +736,14 @@ try {
   assert.equal(await mobileTopicTitle.inputValue(), topic.title, 'mobile retry restores the loaded topic title');
   assert.equal((await mobileDetailPage.request.get(`${base}/__qa/topic-detail-state`).then((response) => response.json())).topicDetailReadCount, mobileDetailReadCountBefore + 2, 'mobile retry performs one additional read and recovers the topic');
   assert.deepEqual(mobileTopicDetailMethods, ['GET', 'GET'], 'mobile detail failure recovery performs no topic mutation');
+  const mobileResourceError = mobileDetailPage.getByRole('alert').getByText('关联资料读取失败：请检查连接后重试。', { exact: true });
+  await mobileResourceError.waitFor();
+  assert.equal(await mobileDetailPage.getByText(/Failed to fetch/i).count(), 0, 'mobile topic resource reads hide raw browser transport errors');
+  assert.equal(await mobileDetailPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, 'the 320px mobile resource error has no horizontal overflow');
+  await mobileDetailPage.getByRole('button', { name: '重新加载资料', exact: true }).click();
+  await mobileDetailPage.getByText('暂无关联资料', { exact: true }).waitFor();
+  const mobileResourceCalls = await mobileDetailPage.evaluate(() => (window as Window & { __mobileTopicResourcesQa?: { calls: Array<{ method: string; failed: boolean }> } }).__mobileTopicResourcesQa?.calls ?? []);
+  assert.deepEqual(mobileResourceCalls, [{ method: 'GET', failed: true }, { method: 'GET', failed: false }], 'mobile resource failure retries only after explicit read-only action');
   await mobileDetailPage.goto(`${base}/topics/999999`);
   await mobileDetailPage.getByRole('status').getByText('未找到该选题，或记录当前不可访问。', { exact: true }).waitFor();
   assert.equal(await mobileDetailPage.getByRole('button', { name: '重新加载选题详情', exact: true }).count(), 0, 'mobile confirmed 404 does not offer a transient-error retry');
@@ -654,6 +761,12 @@ try {
   await mobileDetailPage.close();
   await page.goto(`${base}/topics`);
   await page.getByRole('heading', { name: '选题管理' }).waitFor();
+
+  const desktopViewToggle = page.getByRole('group', { name: '选题视图切换', exact: true });
+  await desktopViewToggle.waitFor();
+  assert.equal(await desktopViewToggle.getByRole('button').count(), 2, 'the desktop view group exposes list and board controls');
+  assert.equal(await desktopViewToggle.getByRole('button', { name: '列表', exact: true }).getAttribute('aria-pressed'), 'true', 'the desktop topic list initially exposes list as selected');
+  assert.equal(await desktopViewToggle.getByRole('button', { name: '看板', exact: true }).getAttribute('aria-pressed'), 'false', 'the desktop topic list exposes board as unselected');
 
   const statusFilter = page.getByRole('combobox', { name: '按状态筛选选题' });
   await statusFilter.waitFor();
@@ -701,8 +814,14 @@ try {
   });
   await boardPage.goto(`${base}/__qa`);
   await boardPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  const desktopBoardViewToggle = boardPage.getByRole('group', { name: '选题视图切换', exact: true });
+  await desktopBoardViewToggle.waitFor();
+  assert.equal(await desktopBoardViewToggle.getByRole('button', { name: '列表', exact: true }).getAttribute('aria-pressed'), 'true', 'a fresh desktop page starts in list mode');
+  assert.equal(await desktopBoardViewToggle.getByRole('button', { name: '看板', exact: true }).getAttribute('aria-pressed'), 'false', 'a fresh desktop page starts with board mode unselected');
   await boardPage.request.post(`${base}/__qa/fail-next-topic-list-read`);
   await boardPage.getByRole('button', { name: '看板', exact: true }).click();
+  assert.equal(await desktopBoardViewToggle.getByRole('button', { name: '列表', exact: true }).getAttribute('aria-pressed'), 'false', 'switching to desktop board mode clears list selection');
+  assert.equal(await desktopBoardViewToggle.getByRole('button', { name: '看板', exact: true }).getAttribute('aria-pressed'), 'true', 'switching to desktop board mode exposes its selected state');
   const boardReadError = boardPage.getByTestId('topics-board-read-error');
   await boardReadError.waitFor();
   assert.match(await boardReadError.innerText(), /看板读取失败，仍显示上次成功读取的结果/);
@@ -854,6 +973,46 @@ try {
   await mobileStatusRecoveryPage.goto(`${base}/topics?view=board`);
   const mobileStatusCard = mobileStatusRecoveryPage.locator('article').filter({ hasText: boardAuditTopic.title });
   await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).waitFor();
+  assert.equal(await mobileStatusRecoveryPage.getByText(/看板最多显示最近 200 个选题/).count(), 0, 'board fixture reports the same count as its returned topics and does not add a false limit notice');
+  await mobileStatusRecoveryPage.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    const state = { calls: [] as Array<{ method: string; failed: boolean }>, failed: false, auditRejected: false };
+    (window as Window & { __mobileTopicFlowQa?: typeof state }).__mobileTopicFlowQa = state;
+    window.fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/workflow/shooting?topic_id=953')) {
+        state.calls.push({ method: init?.method ?? 'GET', failed: !state.failed });
+        if (!state.failed) {
+          state.failed = true;
+          throw new TypeError('Failed to fetch');
+        }
+      }
+      if (url.endsWith('/api/topics/952/audit') && (init?.method ?? 'GET') === 'POST' && !state.auditRejected) {
+        state.auditRejected = true;
+        state.calls.push({ method: 'POST', failed: true });
+        return new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+      return originalFetch(input, init);
+    };
+  });
+  const mobileFlowTopicCard = mobileStatusRecoveryPage.locator('article').filter({ hasText: mobileAdvanceTopic.title });
+  await mobileFlowTopicCard.getByRole('button', { name: mobileAdvanceTopic.title, exact: true }).click();
+  await mobileStatusRecoveryPage.getByText('暂时无法打开流程详情，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await mobileStatusRecoveryPage.getByText(/Failed to fetch/i).count(), 0, 'mobile workflow detail lookup hides raw browser transport errors');
+  assert.equal(new URL(mobileStatusRecoveryPage.url()).pathname, '/topics/953', 'failed workflow lookup returns to the topic detail');
+  await mobileStatusRecoveryPage.goto(`${base}/topics?view=board`);
+  await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).waitFor();
+  await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).click();
+  await mobileStatusRecoveryPage.getByText('请检查权限或当前阶段后重试。', { exact: true }).waitFor();
+  assert.equal(await mobileStatusRecoveryPage.getByText('Forbidden', { exact: true }).count(), 0, 'mobile board does not expose technical permission text');
+  const mobileTopicsFlowCalls = await mobileStatusRecoveryPage.evaluate(() => (window as Window & { __mobileTopicFlowQa?: { calls: Array<{ method: string; failed: boolean }> } }).__mobileTopicFlowQa?.calls ?? []);
+  assert.deepEqual(mobileTopicsFlowCalls, [
+    { method: 'GET', failed: true },
+    { method: 'POST', failed: true },
+  ], 'mobile board feedback preserves one read lookup and one rejected audit without automatic retry');
+  await mobileStatusRecoveryPage.request.post(`${base}/__qa/reset-board-audit`);
+  await mobileStatusRecoveryPage.goto(`${base}/topics?view=board`);
+  await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).waitFor();
   await mobileStatusRecoveryPage.request.post(`${base}/__qa/commit-next-board-audit-then-fail`);
   const mobileCommittedBefore = await mobileStatusRecoveryPage.request.get(`${base}/__qa/board-audit-state`).then((response) => response.json());
   await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).click();
@@ -862,6 +1021,29 @@ try {
   assert.equal(mobileCommittedAfter.status, 'approved', 'mobile board read-back confirms a transition committed before its response was lost');
   assert.equal(mobileCommittedAfter.boardAuditAttempts - mobileCommittedBefore.boardAuditAttempts, 1, 'mobile board never resends a committed transition with an ambiguous response');
   assert.equal(mobileCommittedAfter.boardAuditWrites - mobileCommittedBefore.boardAuditWrites, 1, 'mobile board committed transition is written exactly once');
+
+  await mobileStatusRecoveryPage.request.post(`${base}/__qa/reset-board-audit`);
+  await mobileStatusRecoveryPage.goto(`${base}/topics?view=board`);
+  await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).waitFor();
+  await mobileStatusRecoveryPage.request.post(`${base}/__qa/commit-next-board-audit-then-fail`);
+  await mobileStatusRecoveryPage.request.post(`${base}/__qa/fail-next-topic-list-read`);
+  const mobileListRefreshFailureBefore = await mobileStatusRecoveryPage.request.get(`${base}/__qa/board-audit-state`).then((response) => response.json());
+  await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).click();
+  await mobileStatusRecoveryPage.getByText('状态已确认，列表待刷新', { exact: true }).waitFor();
+  await mobileStatusRecoveryPage.getByRole('alert').filter({ hasText: '服务端状态已核实为已通过，列表待刷新' }).waitFor();
+  const lockedAfterRefreshFailure = mobileStatusCard.getByRole('button', { name: '通过', exact: true });
+  assert.equal(await lockedAfterRefreshFailure.isDisabled(), true, 'mobile board keeps the stale card action locked after read-back confirms a write but list refresh fails');
+  const mobileListRefreshFailureAfter = await mobileStatusRecoveryPage.request.get(`${base}/__qa/board-audit-state`).then((response) => response.json());
+  assert.equal(mobileListRefreshFailureAfter.status, 'approved', 'the service confirms the write while the old pending card remains visible');
+  assert.equal(mobileListRefreshFailureAfter.boardAuditAttempts - mobileListRefreshFailureBefore.boardAuditAttempts, 1, 'failed list refresh does not trigger another board write');
+  assert.equal(mobileListRefreshFailureAfter.boardAuditWrites - mobileListRefreshFailureBefore.boardAuditWrites, 1, 'the committed write remains exactly once while its list snapshot is stale');
+  const mobileReadAndRefresh = mobileStatusRecoveryPage.getByRole('alert').getByRole('button', { name: '只读核实并刷新列表', exact: true });
+  await mobileReadAndRefresh.click();
+  await mobileStatusRecoveryPage.getByText('状态更新已确认', { exact: false }).waitFor();
+  assert.equal(await mobileStatusCard.getByRole('button', { name: '通过', exact: true }).count(), 0, 'a successful read and list refresh removes the stale transition action');
+  const mobileAfterReadAndRefresh = await mobileStatusRecoveryPage.request.get(`${base}/__qa/board-audit-state`).then((response) => response.json());
+  assert.equal(mobileAfterReadAndRefresh.boardAuditAttempts, mobileListRefreshFailureAfter.boardAuditAttempts, 'read-only refresh sends no additional audit request');
+  assert.equal(mobileAfterReadAndRefresh.boardAuditWrites, mobileListRefreshFailureAfter.boardAuditWrites, 'read-only refresh does not repeat the committed write');
 
   await mobileStatusRecoveryPage.request.post(`${base}/__qa/reset-board-audit`);
   await mobileStatusRecoveryPage.goto(`${base}/topics?view=board`);
@@ -987,6 +1169,8 @@ try {
   await mobileTopicFilters.waitFor();
   await mobileViewToggle.waitFor();
   assert.equal(await mobileTopicFilters.getByRole('button').count(), 5, 'the mobile topic filter group exposes all five filter buttons');
+  assert.equal(await mobileViewToggle.getByRole('button', { name: '列表', exact: true }).getAttribute('aria-pressed'), 'true', 'the mobile topic list initially exposes list as selected');
+  assert.equal(await mobileViewToggle.getByRole('button', { name: '看板', exact: true }).getAttribute('aria-pressed'), 'false', 'the mobile topic list exposes board as unselected');
   for (const width of [390, 320]) {
     await mobileListPage.setViewportSize({ width, height: 844 });
     await assertMainButtonTouchTargets(mobileListPage, `topic list at ${width}px`);
@@ -1166,6 +1350,19 @@ try {
   await page.waitForTimeout(250);
   const titleContrast = await textContrast(topicTitle);
   assert.ok(titleContrast.ratio >= 4.5, `选题标题悬停文字需保持 4.5:1 对比度，实际 ${titleContrast.ratio.toFixed(2)}:1 on ${titleContrast.rowBackground}`);
+  const defaultSortButton = page.getByRole('button', { name: '提交时间，当前按降序排列；再次选择切换为升序排列', exact: true });
+  const defaultSortHeader = page.locator('thead th').nth(4);
+  assert.equal(await defaultSortHeader.getAttribute('aria-sort'), 'descending', 'the visible submission-time column exposes the default descending sort');
+  await defaultSortButton.click();
+  const ascendingSubmissionButton = page.getByRole('button', { name: '提交时间，当前按升序排列；再次选择切换为降序排列', exact: true });
+  await ascendingSubmissionButton.waitFor();
+  assert.equal(await defaultSortHeader.getAttribute('aria-sort'), 'ascending', 'activating the current sort announces the updated direction');
+  const titleSortButton = page.getByRole('button', { name: '选题，未排序；选择后按升序排列', exact: true });
+  await titleSortButton.click();
+  assert.equal(await page.locator('#topics-sort-status').textContent(), '选题列表已按选题升序排列。', 'changing the sort field announces the new ordering');
+  const activeTitleSortHeader = page.locator('thead th').nth(1);
+  assert.equal(await activeTitleSortHeader.getAttribute('aria-sort'), 'ascending', 'the active title column exposes its current sort direction');
+  assert.equal(await defaultSortHeader.getAttribute('aria-sort'), null, 'only the active sort column advertises aria-sort');
   const sortButton = page.locator('thead th button').filter({ hasText: '选题' });
   await sortButton.hover();
   await page.waitForTimeout(250);
@@ -1354,6 +1551,23 @@ try {
   assert.equal(await page.getByRole('heading', { name: '暂无选题', level: 3 }).count(), 0, 'the empty topic-list title follows the page heading hierarchy');
 
   await page.screenshot({ path: '/tmp/xmt-topics-list-responsive-1366.png', fullPage: true });
+  const spotlightContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const lightSpotlightPage = await spotlightContext.newPage();
+  lightSpotlightPage.on('pageerror', (error) => errors.push(error.message));
+  lightSpotlightPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await lightSpotlightPage.goto(`${base}/__qa?theme=light&spotlight_fixture=true`);
+  await lightSpotlightPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  const lightTopicSpotlightToken = await assertTopicSpotlightsUseThemeToken(lightSpotlightPage, 'light desktop');
+
+  const darkSpotlightPage = await spotlightContext.newPage();
+  darkSpotlightPage.on('pageerror', (error) => errors.push(error.message));
+  darkSpotlightPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await darkSpotlightPage.goto(`${base}/__qa?theme=dark&spotlight_fixture=true`);
+  await darkSpotlightPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  const darkTopicSpotlightToken = await assertTopicSpotlightsUseThemeToken(darkSpotlightPage, 'dark desktop');
+  assert.notEqual(darkTopicSpotlightToken, lightTopicSpotlightToken, 'light and dark topic spotlight effects use their respective Studio cyan tokens');
+  await spotlightContext.close();
+
   assert.deepEqual(errors, [], 'Topics list should render without browser errors');
   assert.equal(expectedHttpErrors.length, 29, 'the isolated board, topic mutation, detail, and desktop/mobile list-recovery fixtures return only their expected 503 responses and confirmed missing-topic 404s');
   await context.close();

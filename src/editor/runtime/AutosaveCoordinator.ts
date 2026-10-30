@@ -48,6 +48,7 @@ export class RuntimeAutosaveCoordinator implements AutosaveCoordinator {
   private latestRevision = -1;
   private lastPersistedRevision = -1;
   private failedRequest: SaveRequest | null = null;
+  private readonly discardedInFlightFailures = new Set<number>();
   private lastError: unknown;
   private status: ContentEditorSaveStatus = 'idle';
   private lifecycle: AutosaveLifecycleState = 'active';
@@ -75,6 +76,40 @@ export class RuntimeAutosaveCoordinator implements AutosaveCoordinator {
       this.timer = null;
       void this.startNextSave();
     }, this.delay);
+    return true;
+  }
+
+  confirmPersistedContent(content: string): boolean {
+    if (this.inFlight) return false;
+
+    const matchingPending = this.pending?.content === content ? this.pending : null;
+    const matchingFailed = this.failedRequest?.content === content ? this.failedRequest : null;
+    const outstanding = Boolean(this.pending || this.failedRequest);
+    if (outstanding && !matchingPending && !matchingFailed) return false;
+
+    const confirmedRevision = Math.max(matchingPending?.revision ?? -1, matchingFailed?.revision ?? -1);
+    if (matchingPending) {
+      this.pending = null;
+      this.clearTimer();
+    }
+    if (matchingFailed) this.failedRequest = null;
+    if (confirmedRevision >= 0) {
+      this.lastPersistedRevision = Math.max(this.lastPersistedRevision, confirmedRevision);
+    }
+    if (!this.pending && !this.failedRequest) this.lastError = undefined;
+    if (this.pending) this.setStatus('saving');
+    else if (this.failedRequest) this.setStatus('conflicted');
+    else if (this.latestRevision <= this.lastPersistedRevision) this.setStatus('synced');
+    return true;
+  }
+
+  discardPendingSaves(): boolean {
+    this.clearTimer();
+    if (this.inFlightRevision !== null) this.discardedInFlightFailures.add(this.inFlightRevision);
+    this.pending = null;
+    this.failedRequest = null;
+    this.lastError = undefined;
+    this.setStatus(this.inFlight ? 'conflicted' : 'idle');
     return true;
   }
 
@@ -132,6 +167,7 @@ export class RuntimeAutosaveCoordinator implements AutosaveCoordinator {
     this.lifecycle = 'disposed';
     this.clearTimer();
     this.pending = null;
+    this.discardedInFlightFailures.clear();
     this.setStatus('idle');
   }
 
@@ -142,13 +178,13 @@ export class RuntimeAutosaveCoordinator implements AutosaveCoordinator {
     this.pending = null;
     this.inFlightRevision = request.revision;
 
-    let task: Promise<SaveOutcome>;
-    task = this.persist(request.content, {
+    const task: Promise<SaveOutcome> = this.persist(request.content, {
       reason: 'autosave' satisfies ContentEditorPersistReason,
       documentId: this.documentId,
       contentRevision: request.revision,
     })
       .then(() => {
+        this.discardedInFlightFailures.delete(request.revision);
         if (this.lifecycle !== 'disposed') {
           this.lastPersistedRevision = Math.max(this.lastPersistedRevision, request.revision);
         }
@@ -166,8 +202,9 @@ export class RuntimeAutosaveCoordinator implements AutosaveCoordinator {
         return { status: 'synced' as const, revision: request.revision };
       })
       .catch((error: unknown) => {
-        this.lastError = error;
-        if (this.lifecycle !== 'disposed') this.failedRequest = request;
+        const discarded = this.discardedInFlightFailures.delete(request.revision);
+        if (!discarded) this.lastError = error;
+        if (this.lifecycle !== 'disposed' && !discarded) this.failedRequest = request;
         if (this.lifecycle !== 'disposed' && request.revision === this.latestRevision && !this.pending) {
           this.setStatus('conflicted');
         }

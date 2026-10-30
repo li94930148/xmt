@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import express from 'express';
 import http from 'node:http';
 import { Server as SocketServer } from 'socket.io';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { readFileSync } from 'node:fs';
 
@@ -81,6 +81,27 @@ const withWorkflowTemplateBaseFingerprint = (value: WorkflowMutationFixtureTempl
     nodes: value.nodes || [],
   }),
 });
+
+async function dropRoleRecoveryStorageWrite(page: Page, key: string) {
+  await page.evaluate((markerKey) => {
+    const storage = window.sessionStorage;
+    const originalSetItem = Storage.prototype.setItem.bind(storage);
+    Object.defineProperty(storage, 'setItem', {
+      configurable: true,
+      value: (candidateKey: string, value: string) => {
+        if (candidateKey === markerKey) return;
+        originalSetItem(candidateKey, value);
+      },
+    });
+  }, key);
+}
+
+async function restoreRoleRecoveryStorage(page: Page) {
+  await page.evaluate(() => {
+    Reflect.deleteProperty(window.sessionStorage, 'setItem');
+  });
+}
+
 let workflowMutationFixtureEnabled = false;
 let workflowSuggestionFixtureEnabled = false;
 let workflowMutationTemplates: WorkflowMutationFixtureTemplate[] = [];
@@ -721,6 +742,9 @@ try {
   const expectedWorkflowDetailNetworkErrors: string[] = [];
   const expectedWorkflowCreateRequestFailures: string[] = [];
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const roleCodeInput = page.getByLabel('角色编码', { exact: true });
+  const roleNameInput = page.getByLabel('角色名称', { exact: true });
+  const roleDescriptionInput = page.getByLabel('描述', { exact: true });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('response', (response) => {
     const responseUrl = new URL(response.url());
@@ -950,15 +974,44 @@ try {
         return range.getClientRects().length;
       }), 1, `role names remain on one line at ${width}px`);
     }
+    const newRoleButton = page.getByRole('button', { name: '新建角色', exact: true });
+    await assertWithinViewport(newRoleButton, width, 844, `new role action stays in the ${width}px viewport`);
+    await assertMinimumHitTarget(newRoleButton, `new role action at ${width}px`);
     const editButtons = page.getByTitle('编辑');
     assert.equal(await editButtons.count(), 3, `role edit actions remain available at ${width}px`);
     for (let index = 0; index < await editButtons.count(); index += 1) {
-      const box = await editButtons.nth(index).boundingBox();
-      assert(box && box.x >= 0 && box.x + box.width <= width, `role edit action stays inside the ${width}px viewport`);
+      await assertWithinViewport(editButtons.nth(index), width, 844, `role edit action stays in the ${width}px viewport`);
+      await assertMinimumHitTarget(editButtons.nth(index), `role edit action at ${width}px`);
     }
     const deleteRole = page.getByRole('button', { name: '删除角色 内容运营' });
-    const deleteBox = await deleteRole.boundingBox();
-    assert(deleteBox && deleteBox.x >= 0 && deleteBox.x + deleteBox.width <= width, `custom role delete action stays inside the ${width}px viewport`);
+    await assertWithinViewport(deleteRole, width, 844, `custom role delete action stays in the ${width}px viewport`);
+    await assertMinimumHitTarget(deleteRole, `custom role delete action at ${width}px`);
+
+    const writesBeforeDialog = { creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests };
+    await newRoleButton.click();
+    const roleDialog = page.getByRole('dialog', { name: '新建角色', exact: true });
+    await roleDialog.waitFor();
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+      `role dialog fits a ${width}px viewport without horizontal overflow`);
+    for (const fieldName of ['角色编码', '角色名称', '描述']) {
+      const field = roleDialog.getByLabel(fieldName, { exact: true });
+      await assertMinimumHitTarget(field, `${fieldName} field at ${width}px`);
+      const box = await field.boundingBox();
+      assert(box && box.width >= 200, `${fieldName} field is not compressed at ${width}px: ${JSON.stringify(box)}`);
+    }
+    await assertMinimumHitTarget(roleDialog.getByRole('button', { name: '关闭角色编辑', exact: true }), `role dialog close action at ${width}px`);
+    await assertMinimumHitTarget(roleDialog.getByRole('button', { name: '取消', exact: true }), `role dialog cancel action at ${width}px`);
+    await assertMinimumHitTarget(roleDialog.getByRole('button', { name: '创建', exact: true }), `role dialog create action at ${width}px`);
+    const topicPermissions = roleDialog.getByRole('button', { name: /选题管理/ });
+    await assertMinimumHitTarget(topicPermissions, `permission module expander at ${width}px`);
+    await topicPermissions.click();
+    const permissionCheckbox = roleDialog.getByLabel('创建选题', { exact: true });
+    const permissionLabel = roleDialog.locator('label').filter({ has: permissionCheckbox });
+    await assertMinimumHitTarget(permissionLabel, `permission choice at ${width}px`);
+    assert.deepEqual({ creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests }, writesBeforeDialog,
+      `opening and inspecting the role form at ${width}px does not issue business writes`);
+    await roleDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await roleDialog.waitFor({ state: 'hidden' });
     await page.screenshot({ path: `/tmp/xmt-permission-roles-${width}.png` });
   }
 
@@ -981,22 +1034,73 @@ try {
   await page.getByText('内容运营', { exact: true }).waitFor();
   assert.equal(permissionReadRequests, permissionReadsBeforeRetry + 1, 'permission catalog retry performs one read');
 
+  await page.goto(`${base}/__qa?page=permissions`);
+  await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
+  const roleWritesBeforeCancel = { creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests };
+  const newRoleOpener = page.getByRole('button', { name: '新建角色', exact: true });
+  await newRoleOpener.click();
+  const newRoleDialog = page.getByRole('dialog', { name: '新建角色', exact: true });
+  await newRoleDialog.waitFor();
+  const roleCodeField = newRoleDialog.getByLabel('角色编码', { exact: true });
+  assert.equal(await roleCodeField.evaluate((element) => element === document.activeElement), true, 'opening the create dialog focuses the first role field');
+  assert.equal(await page.locator('#root').evaluate((element) => (element as HTMLElement).inert), true, 'the page behind the role dialog is inert');
+  const closeRoleDialogButton = newRoleDialog.getByRole('button', { name: '关闭角色编辑', exact: true });
+  const createRoleButton = newRoleDialog.getByRole('button', { name: '创建', exact: true });
+  await closeRoleDialogButton.focus();
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await createRoleButton.evaluate((element) => element === document.activeElement), true, 'Shift+Tab wraps from the first dialog action to the last dialog action');
+  await page.keyboard.press('Tab');
+  assert.equal(await closeRoleDialogButton.evaluate((element) => element === document.activeElement), true, 'Tab wraps from the last dialog action to the first dialog action');
+  await page.keyboard.press('Escape');
+  await newRoleDialog.waitFor({ state: 'hidden' });
+  assert.equal(await newRoleOpener.evaluate((element) => element === document.activeElement), true, 'Escape returns focus to the create-dialog opener');
+  assert.equal(await page.locator('#root').evaluate((element) => (element as HTMLElement).inert), false, 'closing the role dialog restores background interaction');
+  assert.deepEqual({ creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests }, roleWritesBeforeCancel, 'opening and closing the role dialog does not issue role writes');
+
+  await newRoleOpener.click();
+  await newRoleDialog.waitFor();
+  for (const [label, id, name] of [
+    ['角色编码', 'role-code', 'code'],
+    ['角色名称', 'role-name', 'name'],
+    ['描述', 'role-description', 'description'],
+  ] as const) {
+    const field = newRoleDialog.getByLabel(label, { exact: true });
+    assert.equal(await field.count(), 1, `${label} is associated with exactly one role form input`);
+    assert.equal(await field.getAttribute('id'), id, `${label} uses a stable id`);
+    assert.equal(await field.getAttribute('name'), name, `${label} uses a stable name`);
+  }
+  await newRoleDialog.getByLabel('角色编码', { exact: true }).fill('cancelled_role');
+  await newRoleDialog.getByLabel('角色名称', { exact: true }).fill('取消测试角色');
+  await newRoleDialog.getByLabel('描述', { exact: true }).fill('填写后取消，不应写入');
+  await dropRoleRecoveryStorageWrite(page, 'xmt:role-create-pending:v1:user:96');
+  await createRoleButton.click();
+  await page.getByText('浏览器无法确认角色恢复记录已完整保存，本次未发送创建请求。', { exact: true }).waitFor();
+  assert.deepEqual({ creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests }, roleWritesBeforeCancel,
+    'a silently dropped create recovery marker prevents the role POST');
+  await restoreRoleRecoveryStorage(page);
+  await newRoleDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('heading', { name: '新建角色', exact: true }).waitFor({ state: 'hidden' });
+  assert.deepEqual({ creates: roleCreateRequests, updates: roleUpdateRequests, deletes: roleDeleteRequests }, roleWritesBeforeCancel, 'filling and cancelling the role form does not issue role writes');
+
   await page.goto(`${base}/__qa?page=permissions&createFailOnce=1`);
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '新建角色', exact: true }).click();
   await page.getByRole('heading', { name: '新建角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 editor').fill('retry_create_role');
-  await page.getByPlaceholder('如 编辑').fill('创建失败后重试角色');
+  await roleCodeInput.fill('retry_create_role');
+  await roleNameInput.fill('创建失败后重试角色');
   const failedRoleCreateResponse = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'POST' && response.status() === 503);
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await failedRoleCreateResponse;
   await page.getByRole('alert').getByText('角色创建结果尚未确认。请只读核实服务器角色列表；核实期间所有角色写入均已暂停。', { exact: true }).waitFor();
-  assert.equal(await page.getByRole('heading', { name: '新建角色', exact: true }).count(), 1, 'a rejected create keeps its form open for retry');
+  const lockedCreateDialog = page.getByRole('dialog', { name: '新建角色', exact: true });
+  assert.equal(await lockedCreateDialog.count(), 1, 'a rejected create keeps its form open for retry');
+  await page.keyboard.press('Escape');
+  assert.equal(await lockedCreateDialog.isVisible(), true, 'Escape cannot close the dialog while the create result is unresolved');
   const pendingRoleCreateDialog = page.getByRole('dialog', { name: '新建角色', exact: true });
   assert.equal(await pendingRoleCreateDialog.count(), 1, 'the pending create retains its accessible dialog');
-  assert.equal(await page.getByPlaceholder('如 editor').isDisabled(), true, 'a create with an ambiguous server result cannot be edited before readback');
-  assert.equal(await page.getByPlaceholder('如 editor').inputValue(), 'retry_create_role', 'the locked create form retains the original role code');
-  assert.equal(await page.getByPlaceholder('如 编辑').inputValue(), '创建失败后重试角色', 'the locked create form retains the original role name');
+  assert.equal(await roleCodeInput.isDisabled(), true, 'a create with an ambiguous server result cannot be edited before readback');
+  assert.equal(await roleCodeInput.inputValue(), 'retry_create_role', 'the locked create form retains the original role code');
+  assert.equal(await roleNameInput.inputValue(), '创建失败后重试角色', 'the locked create form retains the original role name');
   assert.equal(roleCreateRequests, 1, 'the rejected create issues exactly one request before explicit retry');
   assert.equal(permissionRoles.length, 3, 'a rejected create does not mutate the server role fixture');
   assert.equal(permissionRoles.some((role) => role.code === 'retry_create_role'), false, 'a failed create is absent from the server role fixture');
@@ -1013,8 +1117,8 @@ try {
   const restoreRoleFormButton = pendingRoleCreateDialog.getByRole('button', { name: '恢复原表单后手动重试', exact: true });
   assert.equal(await restoreRoleFormButton.isVisible(), true, 'the safe recovery action stays inside the active dialog');
   await restoreRoleFormButton.click();
-  assert.equal(await page.getByPlaceholder('如 editor').inputValue(), 'retry_create_role', 'the confirmed-absent recovery restores the original role code');
-  assert.equal(await page.getByPlaceholder('如 编辑').inputValue(), '创建失败后重试角色', 'the confirmed-absent recovery restores the original role name');
+  assert.equal(await roleCodeInput.inputValue(), 'retry_create_role', 'the confirmed-absent recovery restores the original role code');
+  assert.equal(await roleNameInput.inputValue(), '创建失败后重试角色', 'the confirmed-absent recovery restores the original role name');
 
   const retriedRoleCreate = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'POST' && response.status() === 200);
   await page.getByRole('button', { name: '创建', exact: true }).click();
@@ -1029,8 +1133,8 @@ try {
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '新建角色', exact: true }).click();
   await page.getByRole('heading', { name: '新建角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 editor').fill('committed_create_role');
-  await page.getByPlaceholder('如 编辑').fill('响应丢失后核实创建角色');
+  await roleCodeInput.fill('committed_create_role');
+  await roleNameInput.fill('响应丢失后核实创建角色');
   const committedButUnconfirmedCreate = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'POST' && response.status() === 503);
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await committedButUnconfirmedCreate;
@@ -1062,8 +1166,8 @@ try {
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '新建角色', exact: true }).click();
   await page.getByRole('heading', { name: '新建角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 editor').fill('conflicted_create_role');
-  await page.getByPlaceholder('如 编辑').fill('本次创建的名称');
+  await roleCodeInput.fill('conflicted_create_role');
+  await roleNameInput.fill('本次创建的名称');
   const conflictedRoleCreate = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'POST' && response.status() === 503);
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await conflictedRoleCreate;
@@ -1083,8 +1187,8 @@ try {
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '新建角色', exact: true }).click();
   await page.getByRole('heading', { name: '新建角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 editor').fill('qa_role');
-  await page.getByPlaceholder('如 编辑').fill('隔离测试角色');
+  await roleCodeInput.fill('qa_role');
+  await roleNameInput.fill('隔离测试角色');
   const roleCreateResponse = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'POST' && response.status() === 200);
   const failedRoleListRefresh = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'GET' && response.status() === 503);
   await page.getByRole('button', { name: '创建', exact: true }).evaluate((button) => {
@@ -1107,14 +1211,62 @@ try {
   await page.getByRole('button', { name: '编辑角色 内容运营' }).click();
   await page.getByRole('heading', { name: '编辑角色', exact: true }).waitFor();
   const editRoleDialog = page.getByRole('dialog', { name: '编辑角色' });
-  await page.getByPlaceholder('如 编辑').fill('编辑失败后重试角色');
+  assert.equal(await editRoleDialog.getByLabel('角色名称', { exact: true }).evaluate((element) => element === document.activeElement), true, 'opening the edit dialog focuses the editable role name');
+  const topicPermissionModule = editRoleDialog.getByRole('button', { name: /选题管理/ });
+  const topicPermissionPanelId = await topicPermissionModule.getAttribute('aria-controls');
+  assert.ok(topicPermissionPanelId, 'the module disclosure names its controlled permission panel');
+  const topicPermissionPanel = editRoleDialog.locator(`#${topicPermissionPanelId}`);
+  const topicPermissionCheckboxes = topicPermissionPanel.locator('input[type="checkbox"]');
+  assert.equal(await topicPermissionPanel.count(), 1, 'the module control points to one stable panel in the dialog');
+  assert.equal(await topicPermissionModule.getAttribute('aria-expanded'), 'true', 'the topic permission module starts expanded');
+  assert.equal(await topicPermissionPanel.isVisible(), true, 'the expanded controlled permission panel is visible');
+  const topicPermissionModuleHitAreaHeight = await topicPermissionModule.evaluate((button) => button.getBoundingClientRect().height);
+  assert.ok(topicPermissionModuleHitAreaHeight >= 40, `the permission module disclosure preserves a 40px touch target: ${topicPermissionModuleHitAreaHeight}px`);
+  assert.equal(await topicPermissionCheckboxes.count(), 1, 'the expanded fixture module renders its permission checkbox');
+  assert.equal(await topicPermissionCheckboxes.isChecked(), true, 'the existing role permission starts selected');
+  await topicPermissionModule.focus();
+  await topicPermissionModule.press('Space');
+  assert.equal(await topicPermissionModule.getAttribute('aria-expanded'), 'false', 'Space collapses the focused permission module');
+  assert.equal(await topicPermissionPanel.isVisible(), false, 'the controlled permission panel is hidden while collapsed');
+  assert.equal(await topicPermissionCheckboxes.count(), 1, 'collapsing the module keeps its controlled panel mounted');
+  assert.equal(await topicPermissionCheckboxes.isChecked(), true, 'collapsing the module preserves its permission value');
+  await topicPermissionModule.press('Enter');
+  assert.equal(await topicPermissionModule.getAttribute('aria-expanded'), 'true', 'Enter re-expands the focused permission module');
+  assert.equal(await topicPermissionPanel.isVisible(), true, 'Enter restores the controlled permission panel');
+  assert.equal(await topicPermissionCheckboxes.count(), 1, 're-expanding the module restores its permission checkbox');
+  assert.equal(await topicPermissionCheckboxes.isChecked(), true, 'collapsing and reopening preserves the selected permission value');
+  const selectAllButton = editRoleDialog.getByRole('button', { name: '取消全选', exact: true });
+  const selectAllTarget = await selectAllButton.boundingBox();
+  assert.ok(selectAllTarget && selectAllTarget.width >= 40 && selectAllTarget.height >= 40,
+    `the independent select-all action preserves a 40x40px target: ${JSON.stringify(selectAllTarget)}`);
+  const roleUpdatesBeforeModuleDisclosure = roleUpdateRequests;
+  await selectAllButton.click();
+  assert.equal(await topicPermissionModule.getAttribute('aria-expanded'), 'true', 'the select-all action does not collapse the permission module');
+  assert.equal(await topicPermissionCheckboxes.isChecked(), false, '取消全选 only changes the module permission selection');
+  await editRoleDialog.getByRole('button', { name: '全选', exact: true }).click();
+  assert.equal(await topicPermissionModule.getAttribute('aria-expanded'), 'true', '全选 does not collapse the permission module');
+  assert.equal(await topicPermissionCheckboxes.isChecked(), true, '全选 restores the original permission selection');
+  assert.equal(roleUpdateRequests, roleUpdatesBeforeModuleDisclosure, 'module disclosure and selection checks issue no role update');
+  await roleNameInput.fill('恢复记录丢写时不得更新');
+  await dropRoleRecoveryStorageWrite(page, 'xmt:role-update-pending:v1:user:96');
+  await editRoleDialog.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('浏览器无法确认角色恢复记录已完整保存，本次未发送更新请求。', { exact: true }).waitFor();
+  assert.equal(roleUpdateRequests, 0, 'a silently dropped update recovery marker prevents the role PUT');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:role-update-pending:v1:user:96')), null, 'a failed update pre-write leaves no falsely verified recovery marker');
+  assert.equal(permissionRoles.find((role) => role.id === 3)?.name, '内容运营', 'a failed recovery pre-write leaves the server role unchanged');
+  await restoreRoleRecoveryStorage(page);
+  await roleNameInput.fill('内容运营');
+  await roleNameInput.fill('编辑失败后重试角色');
   const failedRoleUpdateResponse = page.waitForResponse((response) => response.url().endsWith('/api/roles/3') && response.request().method() === 'PUT' && response.status() === 503);
   await editRoleDialog.getByRole('button', { name: '保存', exact: true }).click();
   await failedRoleUpdateResponse;
   await editRoleDialog.getByRole('alert').getByText('角色更新结果尚未确认。请只读核实服务器当前角色状态；核实完成前，所有角色写入均已暂停。', { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => JSON.parse(sessionStorage.getItem('xmt:role-update-pending:v1:user:96') || 'null')),
+    { roleId: 3, name: '编辑失败后重试角色', description: '', permissionIds: [11] },
+    'the unresolved update retains the exact actor-scoped request snapshot for refresh recovery');
   assert.equal(await page.getByRole('heading', { name: '编辑角色', exact: true }).count(), 1, 'a rejected update keeps its form open for retry');
-  assert.equal(await page.getByPlaceholder('如 编辑').inputValue(), '编辑失败后重试角色', 'a rejected update retains the edited role name');
-  assert.equal(await page.getByPlaceholder('如 编辑').isDisabled(), true, 'an unconfirmed update locks the retained form');
+  assert.equal(await roleNameInput.inputValue(), '编辑失败后重试角色', 'a rejected update retains the edited role name');
+  assert.equal(await roleNameInput.isDisabled(), true, 'an unconfirmed update locks the retained form');
   assert.equal(await editRoleDialog.getByRole('button', { name: '保存', exact: true }).isDisabled(), true, 'an unconfirmed update cannot be resubmitted before readback');
   assert.equal(await editRoleDialog.getByRole('button', { name: '取消', exact: true }).isDisabled(), true, 'an unconfirmed update cannot discard its retained form');
   assert.equal(await editRoleDialog.getByRole('button', { name: '只读核实角色权限', exact: true }).isVisible(), true, 'read-only recovery is reachable inside the edit dialog');
@@ -1129,8 +1281,8 @@ try {
   const restoreUpdatedRoleFormButton = editRoleDialog.getByRole('button', { name: '恢复原表单后手动重试', exact: true });
   assert.equal(await restoreUpdatedRoleFormButton.isVisible(), true, 'readback makes explicit form recovery available inside the dialog');
   await restoreUpdatedRoleFormButton.click();
-  assert.equal(await page.getByPlaceholder('如 编辑').inputValue(), '编辑失败后重试角色', 'restoring after readback preserves the intended edit');
-  assert.equal(await page.getByPlaceholder('如 编辑').isDisabled(), false, 'the form unlocks only after readback confirms the server state');
+  assert.equal(await roleNameInput.inputValue(), '编辑失败后重试角色', 'restoring after readback preserves the intended edit');
+  assert.equal(await roleNameInput.isDisabled(), false, 'the form unlocks only after readback confirms the server state');
   assert.equal(roleUpdateRequests, 1, 'readback and form restoration do not automatically repeat the update');
 
   const retriedRoleUpdate = page.waitForResponse((response) => response.url().endsWith('/api/roles/3') && response.request().method() === 'PUT' && response.status() === 200);
@@ -1139,6 +1291,7 @@ try {
   await page.getByText('更新成功', { exact: true }).waitFor();
   await page.getByTestId('role-name').filter({ hasText: '编辑失败后重试角色' }).waitFor();
   await page.getByRole('heading', { name: '编辑角色', exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:role-update-pending:v1:user:96')), null, 'a confirmed update response clears its pre-write snapshot');
   assert.equal(roleUpdateRequests, 2, 'an explicit update retry issues exactly one additional request');
   assert.equal(permissionRoles.find((role) => role.id === 3)?.name, '编辑失败后重试角色', 'the explicit update retry changes the server role fixture');
 
@@ -1146,8 +1299,8 @@ try {
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '编辑角色 内容运营' }).click();
   await page.getByRole('heading', { name: '编辑角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 编辑').fill('响应丢失后核实角色');
-  await page.getByPlaceholder('角色描述').fill('只读核实权限集合');
+  await roleNameInput.fill('响应丢失后核实角色');
+  await roleDescriptionInput.fill('只读核实权限集合');
   await page.getByRole('checkbox').first().uncheck();
   const committedButUnconfirmedUpdate = page.waitForResponse((response) => response.url().endsWith('/api/roles/3') && response.request().method() === 'PUT' && response.status() === 503);
   await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -1155,7 +1308,7 @@ try {
   await page.getByRole('alert').getByText('角色更新结果尚未确认。请只读核实服务器当前角色状态；核实完成前，所有角色写入均已暂停。', { exact: true }).waitFor();
   assert.equal(permissionRoles.find((role) => role.id === 3)?.name, '响应丢失后核实角色', 'the isolated server committed the role update before returning 503');
   assert.equal(permissionRoles.find((role) => role.id === 3)?.permissions.length, 0, 'the isolated server committed the updated permission set');
-  assert.equal(await page.getByPlaceholder('如 编辑').isDisabled(), true, 'the unconfirmed role form cannot be changed');
+  assert.equal(await roleNameInput.isDisabled(), true, 'the unconfirmed role form cannot be changed');
   assert.equal(await page.getByRole('button', { name: '保存', exact: true }).isDisabled(), true, 'the unconfirmed role form cannot be resubmitted');
   assert.equal(await page.getByRole('button', { name: '关闭角色编辑', exact: true }).isDisabled(), true, 'the pending role edit cannot be dismissed before readback');
   assert.equal(await page.getByRole('button', { name: '新建角色', exact: true }).isDisabled(), true, 'other role writes stay paused while the update result is unknown');
@@ -1189,7 +1342,7 @@ try {
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
   await page.getByRole('button', { name: '编辑角色 内容运营' }).click();
   await page.getByRole('heading', { name: '编辑角色', exact: true }).waitFor();
-  await page.getByPlaceholder('如 编辑').fill('更新后的内容运营');
+  await roleNameInput.fill('更新后的内容运营');
   const roleUpdateResponse = page.waitForResponse((response) => response.url().endsWith('/api/roles/3') && response.request().method() === 'PUT' && response.status() === 200);
   const failedRoleUpdateRefresh = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'GET' && response.status() === 503);
   await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -1202,6 +1355,19 @@ try {
   await page.getByText('更新后的内容运营', { exact: true }).waitFor();
   assert.equal(roleReadRequests, roleReadsBeforeUpdateRetry + 1, 'update recovery retries only the list read');
   assert.equal(roleUpdateRequests, 1, 'read-only update recovery does not repeat the role update');
+
+  await page.goto(`${base}/__qa?page=permissions`);
+  await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();
+  await page.getByRole('button', { name: '删除角色 内容运营' }).click();
+  await page.getByRole('heading', { name: '确认删除角色', exact: true }).waitFor();
+  await dropRoleRecoveryStorageWrite(page, 'xmt:role-delete-pending:v1:user:96');
+  await page.getByRole('button', { name: '删除角色', exact: true }).click();
+  await page.getByText('浏览器无法确认角色恢复记录已完整保存，本次未发送删除请求。', { exact: true }).waitFor();
+  assert.equal(roleDeleteRequests, 0, 'a silently dropped deletion recovery marker prevents the role DELETE');
+  assert.equal(permissionRoles.some((role) => role.id === 3), true, 'a failed deletion recovery pre-write leaves the server role unchanged');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:role-delete-pending:v1:user:96')), null, 'a failed deletion pre-write leaves no falsely verified recovery marker');
+  await restoreRoleRecoveryStorage(page);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
 
   await page.goto(`${base}/__qa?page=permissions&deleteFailOnce=1`);
   await page.getByRole('heading', { name: '角色权限管理', exact: true }).waitFor();

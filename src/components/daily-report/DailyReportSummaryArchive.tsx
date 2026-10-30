@@ -10,6 +10,7 @@ import { dateKeyBjt } from '@shared/time';
 import { formatBeijingTime } from '../../lib/utils';
 import ErrorState from '../common/ErrorState';
 import { dailyReportStatusLabel } from './dailyReportStatusLabel';
+import { getUserFacingErrorMessage } from '../../lib/userFacingError';
 
 type Props = { canViewArchive: boolean; canViewOwnDaily: boolean; onView: (report: DailyReport) => void };
 type ArchiveKind = 'daily' | 'monthly' | 'yearly';
@@ -85,7 +86,7 @@ export default function DailyReportSummaryArchive({ canViewArchive, canViewOwnDa
         setSummary(null);
       }
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : '加载归档失败');
+      setLoadError(getUserFacingErrorMessage(error, '日报归档加载失败，请检查连接后重试。'));
     } finally {
       setLoading(false);
     }
@@ -109,9 +110,9 @@ export default function DailyReportSummaryArchive({ canViewArchive, canViewOwnDa
           <p className="mt-1 text-sm text-studio-text-muted">按类型、日期和成员筛选日报、月报、年报。</p>
         </div>
         <div className="flex flex-wrap items-end gap-3 border-b border-studio-border-soft px-5 py-4">
-          <div className="flex gap-2">
+          <div role="group" aria-label="归档周期" className="flex flex-wrap gap-2">
             {(['daily', 'monthly', 'yearly'] as const).map((value) => (
-              <button key={value} type="button" disabled={!canViewArchive && value !== 'daily'} onClick={() => setKind(value)} className={`rounded-button px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${kind === value ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>
+              <button key={value} type="button" aria-pressed={kind === value} disabled={!canViewArchive && value !== 'daily'} onClick={() => setKind(value)} className={`xmt-btn min-h-10 inline-flex shrink-0 items-center justify-center rounded-button px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${kind === value ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>
                 {value === 'daily' ? '日报' : value === 'monthly' ? '月报' : '年报'}
               </button>
             ))}

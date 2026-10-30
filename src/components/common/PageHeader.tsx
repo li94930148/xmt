@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../../hooks/useThemeStyles';
+import PageHeading from './PageHeading';
 
 type BackButtonConfig = {
   to?: string;
@@ -21,6 +22,7 @@ interface PageHeaderProps {
 
 export default function PageHeader({
   title,
+  description,
   backButton,
   actions,
   extra,
@@ -71,7 +73,8 @@ export default function PageHeader({
               </button>
             ) : null}
             <div className="min-w-0">
-              <h1 className={styles.pageTitle}>{title}</h1>
+              <PageHeading className={styles.pageTitle}>{title}</PageHeading>
+              {description ? <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-studio-text-secondary">{description}</p> : null}
             </div>
           </div>
           {extra ? <div className="mt-3">{extra}</div> : null}

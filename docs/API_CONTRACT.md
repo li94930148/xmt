@@ -211,6 +211,14 @@ v1 错误响应统一为：
 - `work_performance.published_period_start` 与 `published_period_end` 明确返回计数窗口的含首尾日期。官方流量文件缺失/不完整时，发布作品数仍可用，但官方逐日流量合计必须保持不可用/缺失状态，不能以作品数量填补流量字段。
 - `DELETE /api/announcements/{id}` 结果不明时，客户端将账号和公告 ID 写入当前会话恢复记录，仅以 `GET /api/announcements`（客户端 `cache: no-store`）核实。列表格式无效或读取失败时 fail closed 并保持公告写入锁；目标缺席不归因于本次删除，也不会自动重试，目标仍存在时需用户再次确认。该流程不改变服务端 DELETE 权限或既有响应语义。
 
+### 发布记录编辑并发冲突（Legacy）
+
+- `PUT /api/workflow/publishing/{id}` 继续使用现有登录、`workflow:publishing` 权限及选题编辑范围校验。列表编辑客户端必须提交 `expected_baseline`，其中包含原始 `platform`、`url`、`status`、`publish_time` 和手工指标 `views`、`likes`、`shares`、`comments`；字符串字段按字符串传递，指标使用非负整数或 `null`。服务端只比较本次请求实际提交的编辑字段。
+- 服务端在写事务内读取当前发布记录并核对对应基线，确认后才更新数据及关联状态历史。基线缺失、字段不完整或值类型无效时返回 `409 PUBLISHING_UPDATE_BASELINE_REQUIRED`；基线过期时返回 `409 PUBLISHING_UPDATE_BASELINE_CONFLICT`。这两类 409 均保证本次请求未写入。
+- 旧版列表编辑请求不带 `expected_baseline` 时 fail closed，收到基线错误 409；用户需刷新页面并重新打开记录后再编辑。新版客户端遇到 409 会保留本地草稿和原基线、暂停保存；只有用户明确选择“放弃草稿并载入最新记录”后，才读取最新详情并重置表单。
+- `PublishingDetail` 的剧本保存仍使用 `expected_content` 原稿比较，剧本版本冲突继续返回 `409 VERSION_CONFLICT`；该剧本路径不要求发布字段 `expected_baseline`。
+- 该 legacy PUT 路由不在当前 OpenAPI 登记范围；此处记录其兼容行为，不代表它已纳入 v1 Contract 保证。
+
 ### 主题内容资产可见资料（Legacy）
 
 - `GET /api/resource-center/content-topics` 在主题汇总中返回 `linked_resources` 和 `referenced_resources`，字段均为资料 `id`、显示标题、`library_type` 与 `updated_at`。前者由正式资料关联关系去重；后者仅从当前最新正式稿件解析编辑器标准 `/asset-center/resources/{id}` 且链接文字以“来源：”开头的显式引用，并从中去除已经列入 `linked_resources` 的资料。两者都应用现有资料可见范围；无权访问或已删除的资料不返回。不会解析资料草稿、任意链接或历史稿件来猜测当前选题归属，也不创建资源关系。
@@ -236,3 +244,9 @@ v1 错误响应统一为：
 
 - `GET /api/messages/read-all-requests/{requestId}` 和 `GET /api/messages/clear-requests/{requestId}` 只要求登录，分别按当前操作者读取批量已读或清空回执；未找到或属于其他操作者时统一返回 `not_found`。仅返回最小状态及计数，不返回消息正文、不授予写权限。
 - 两个状态接口在认证中间件前设置 `Cache-Control: no-store`，因此成功、参数错误、未认证和服务端错误响应都禁止缓存。`GET` 仅仅读取既有回执，不会重新标记或删除消息。
+
+### 创作来源快照读取（Legacy）
+
+- `GET /api/workflow/production/{id}/source-snapshot?version={version}` 需要 `production:view`，并要求当前账号可访问服务端从该精确版本记录推导出的来源选题。当前稿来源取 `production.topic_id`；历史稿只取唯一匹配的 `production_history.source_topic_id`。历史来源为 `NULL`、选题不存在或版本匹配不唯一时返回 `404`，不会从当前创作稿回退或推测来源。
+- 可选 `source_topic_id` 仅用于校验客户端持有的来源 ID 与服务端记录一致；它不能选择、重定向或扩大读取范围。当前 production 仍属于来源选题时，现有稿件参与者范围保持一致；稿件改关联到其他选题后，历史版本操作者不会因此自动取得原选题访问权。
+- 响应只返回命中的一个版本快照及来源选题标题，所有成功和错误响应均带 `Cache-Control: no-store`。此接口只读，不扩展旧创作详情/历史接口的访问范围，也不授予编辑、审核或版本创建权限。

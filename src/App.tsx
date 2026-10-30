@@ -99,6 +99,7 @@ const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDet
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
 const ProductionDetail = lazyWithRetry(() => import('@/pages/ProductionDetail'), 'ProductionDetail');
+const ProductionSourceSnapshot = lazyWithRetry(() => import('@/pages/ProductionSourceSnapshot'), 'ProductionSourceSnapshot');
 const Shooting = lazyWithRetry(() => import('@/pages/Shooting'), 'Shooting');
 const ShootingDetail = lazyWithRetry(() => import('@/pages/ShootingDetail'), 'ShootingDetail');
 const Publishing = lazyWithRetry(() => import('@/pages/Publishing'), 'Publishing');
@@ -208,6 +209,7 @@ function AppRoutes() {
                 <Route path="/topics/:id" element={mobileLayout ? <MobileTopicDetail /> : <TopicDetail />} />
                 <Route path="/production" element={mobileLayout ? <MobileWorkHub /> : <Production />} />
                 <Route path="/production/content" element={mobileLayout ? <MobileProduction /> : <Production />} />
+                <Route path="/production/:id/source-snapshot" element={<ProductionSourceSnapshot />} />
                 <Route path="/production/content/:id" element={mobileLayout ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/production/:id" element={mobileLayout ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
@@ -258,8 +260,8 @@ function AppRoutes() {
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:retro:view']} />}>
                   <Route path="/retrospectives" element={<RetrospectivesPage />} />
-                  <Route path="/retrospectives/:id" element={<RetrospectiveDetailPage />} />
                 </Route>
+                <Route path="/retrospectives/:id" element={<RetrospectiveDetailPage />} />
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/content-timeline" element={<ContentTimelineView />} />
                   <Route path="/content-lab" element={<ContentLab />} />

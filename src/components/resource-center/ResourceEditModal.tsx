@@ -4,6 +4,7 @@ import { BaseModal } from '@/components/common';
 import ActionButton from '@/components/studio/ActionButton';
 import { useAuthStore } from '@/store';
 import { useResourceUpdateRecovery } from '@/hooks/useResourceUpdateRecovery';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 interface ResourceEditModalProps {
   open: boolean;
@@ -51,7 +52,7 @@ export default function ResourceEditModal({ open, resource, onClose, onUpdated, 
       setCategoryState('ready');
     } catch (cause) {
       if (requestId !== categoryRequestRef.current) return;
-      setCategoryError(cause instanceof Error ? cause.message : '分类暂时无法读取');
+      setCategoryError(getUserFacingErrorMessage(cause, '分类暂时无法读取，请检查连接后重试。'));
       setCategoryState('error');
     }
   };

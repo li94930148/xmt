@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { Activity, BarChart3, Brain, RefreshCw, Users } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { displayDocId } from '../utils/docIdDisplay';
@@ -54,10 +55,10 @@ export default function ContentIntelligenceDashboard() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容智能理解</p>
-            <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
+            <PageHeading className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
               <Brain className="h-6 w-6 text-studio-primary" />
               内容智能理解
-            </h1>
+            </PageHeading>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker

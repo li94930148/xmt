@@ -6,8 +6,23 @@ import { formatBeijingDate } from '@/lib/utils';
 import { getResourceDetailPath } from '@/platform/resource-navigation';
 import { resourceStatusLabel } from './resourceLabels';
 
-export default function ResourceTable({ items, canEdit, canDelete, onDelete }: { items: ResourceListItem[]; canEdit: boolean; canDelete: boolean; onDelete?: (item: ResourceListItem) => void }) {
-  if (items.length === 0) return <EmptyState title="暂无资料" />;
+type ResourceTableEmptyState = {
+  title: string;
+  description?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
+export default function ResourceTable({ items, canEdit, canDelete, onDelete, emptyState }: { items: ResourceListItem[]; canEdit: boolean; canDelete: boolean; onDelete?: (item: ResourceListItem) => void; emptyState?: ResourceTableEmptyState }) {
+  if (items.length === 0) {
+    const state = emptyState || { title: '暂无资料' };
+    return (
+      <div>
+        {emptyState ? <p role="status" aria-live="polite" className="sr-only">{state.title}{state.description ? `。${state.description}` : ''}</p> : null}
+        <EmptyState {...state} />
+      </div>
+    );
+  }
   return (
     <ResponsiveTableShell>
       <table className="w-full min-w-[760px] text-left text-sm">

@@ -10,7 +10,9 @@ import Pagination from '../components/Pagination';
 import { usePermission } from '../hooks/usePermission';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { getRoleDisplayName } from '../lib/roles';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
+import { persistVerifiedUserRecovery } from './users/userRecoveryStorage';
 import { useAppStore, useAuthStore } from '../store';
 import type { ActivityLog, User } from '../types';
 
@@ -145,7 +147,7 @@ function persistUserCreateRecovery(userId: number, requestId: string, formData: 
     role: formData.role,
     name: formData.name,
   };
-  window.sessionStorage.setItem(userCreateRecoveryStorageKey(userId), JSON.stringify(recovery));
+  persistVerifiedUserRecovery(window.sessionStorage, userCreateRecoveryStorageKey(userId), recovery);
 }
 
 function clearUserCreateRecovery(userId: number | null | undefined) {
@@ -214,7 +216,7 @@ function persistUserEditRecovery(actorId: number, targetUser: User, requestId: s
     enabled: formData.enabled,
     hasPassword: Boolean(formData.password),
   };
-  window.sessionStorage.setItem(userEditRecoveryStorageKey(actorId), JSON.stringify(recovery));
+  persistVerifiedUserRecovery(window.sessionStorage, userEditRecoveryStorageKey(actorId), recovery);
 }
 
 function clearUserEditRecovery(actorId: number | null | undefined) {
@@ -273,7 +275,7 @@ function persistUserDeleteRecovery(actorId: number, targetUser: User, requestId:
     username: targetUser.username,
     ...(requireTargetAbsenceCheck ? { requireTargetAbsenceCheck: true } : {}),
   };
-  window.sessionStorage.setItem(userDeleteRecoveryStorageKey(actorId), JSON.stringify(recovery));
+  persistVerifiedUserRecovery(window.sessionStorage, userDeleteRecoveryStorageKey(actorId), recovery);
 }
 
 function clearUserDeleteRecovery(actorId: number | null | undefined) {
@@ -324,7 +326,7 @@ function readUserToggleRecovery(actorId: number): StoredUserToggleRecovery | nul
 
 function persistUserToggleRecovery(recovery: StoredUserToggleRecovery) {
   if (typeof window === 'undefined') throw new Error('当前环境无法安全保存启停请求编号');
-  window.sessionStorage.setItem(userToggleRecoveryStorageKey(recovery.actorId), JSON.stringify(recovery));
+  persistVerifiedUserRecovery(window.sessionStorage, userToggleRecoveryStorageKey(recovery.actorId), recovery);
 }
 
 function clearUserToggleRecovery(actorId: number | null | undefined) {
@@ -549,7 +551,7 @@ export default function Users() {
       }));
       return roleList;
     } catch (error) {
-      addNotification({ title: '获取角色失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '获取角色失败', message: getUserFacingErrorMessage(error, '可分配角色列表暂时无法读取，请稍后重试。'), type: 'error' });
       return [];
     }
   };
@@ -620,12 +622,13 @@ export default function Users() {
         setLogsLoadError(null);
       } catch (error) {
         if (!isCurrentRequest()) return;
-        if (activeTab === 'users') {
-          setUsersLoadError(error instanceof Error ? error.message : '请检查网络后重试');
-        } else {
-          setLogsLoadError(error instanceof Error ? error.message : '请检查网络后重试');
-        }
-        addNotification({ title: '获取数据失败', message: error instanceof Error ? error.message : '请检查网络后重试', type: 'error' });
+        const message = getUserFacingErrorMessage(
+          error,
+          activeTab === 'users' ? '用户列表暂时无法读取，请检查网络后重试。' : '操作日志暂时无法读取，请检查网络后重试。',
+        );
+        if (activeTab === 'users') setUsersLoadError(message);
+        else setLogsLoadError(message);
+        addNotification({ title: '获取数据失败', message, type: 'error' });
       } finally {
         if (isCurrentRequest()) setLoading(false);
       }
@@ -700,7 +703,7 @@ export default function Users() {
       return 'loaded';
     } catch (error) {
       if (!isCurrentRequest()) return 'stale';
-      setUsersLoadError(error instanceof Error ? error.message : '请检查网络后重试');
+      setUsersLoadError(getUserFacingErrorMessage(error, '用户列表暂时无法读取，请检查网络后重试。'));
       return 'failed';
     } finally {
       if (isCurrentRequest()) setUsersRefreshing(false);
@@ -883,7 +886,7 @@ export default function Users() {
       setLogsLoadError(null);
       return true;
     } catch (error) {
-      setLogsLoadError(error instanceof Error ? error.message : '请检查网络后重试');
+      setLogsLoadError(getUserFacingErrorMessage(error, '操作日志暂时无法读取，请检查网络后重试。'));
       return false;
     } finally {
       setLogsRefreshing(false);
@@ -1138,7 +1141,7 @@ export default function Users() {
       } else if (status >= 400 && status < 500) {
         clearUserCreateRecovery(currentUserId);
         setPendingUserCreateRequest(null);
-        addNotification({ title: '创建未完成', message: (error as Error).message, type: 'error' });
+        addNotification({ title: '创建未完成', message: getUserFacingErrorMessage(error, '用户创建失败，请检查权限和填写内容后重试。'), type: 'error' });
       } else {
         setPendingUserCreateRequest({ requestId });
         setUsersMutationNotice('用户创建结果尚未确认；创建表单已锁定，请在窗口中安全重试，其他人员修改暂不可用。');
@@ -1240,7 +1243,7 @@ export default function Users() {
       } else if (status >= 400 && status < 500) {
         clearUserEditRecovery(currentUserId);
         setPendingUserEditRequest(null);
-        addNotification({ title: '更新未完成', message: (error as Error).message, type: 'error' });
+        addNotification({ title: '更新未完成', message: getUserFacingErrorMessage(error, '用户信息更新失败，请检查权限和当前记录后重试。'), type: 'error' });
       } else {
         const recovery = readUserEditRecovery(currentUserId);
         if (recovery) setPendingUserEditRequest(recovery);
@@ -1405,7 +1408,7 @@ export default function Users() {
         type="button"
         onClick={() => setActiveTab('users')}
         aria-pressed={activeTab === 'users'}
-        className={`rounded-lg px-4 py-2 transition-colors ${activeTab === 'users' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
+        className={`xmt-btn rounded-lg px-4 py-2 transition-colors ${activeTab === 'users' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
       >
         用户列表
       </button>
@@ -1414,7 +1417,7 @@ export default function Users() {
           type="button"
           onClick={() => setActiveTab('logs')}
           aria-pressed={activeTab === 'logs'}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${activeTab === 'logs' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
+          className={`xmt-btn flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${activeTab === 'logs' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
         >
           <History className="h-4 w-4" />
           操作日志
@@ -1427,11 +1430,14 @@ export default function Users() {
     <div className="relative">
       <Search className={`absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 ${styles.textSecondary}`} />
       <input
+        id="users-admin-search"
+        name="users-search"
         type="text"
         value={searchTerm}
         onChange={(event) => setSearchTerm(event.target.value)}
+        aria-label={activeTab === 'users' ? '搜索用户名、姓名或邮箱' : '搜索操作、用户或目标'}
         placeholder={activeTab === 'users' ? '搜索用户名、姓名或邮箱...' : '搜索操作、用户或目标...'}
-        className={`w-full rounded-lg py-2 pl-10 pr-4 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
+        className={`xmt-field w-full rounded-lg py-2 pl-10 pr-4 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
       />
     </div>
   );
@@ -1442,7 +1448,7 @@ export default function Users() {
       value={formData.role}
       disabled={Boolean(pendingUserCreateRequest || activePendingUserEditRequest)}
       onChange={(event) => setFormData({ ...formData, role: event.target.value })}
-      className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
+      className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
     >
       {roles.map((role) => (
         <option key={role.id} value={role.code}>
@@ -1460,7 +1466,7 @@ export default function Users() {
           description={canManageRoles ? '管理系统用户、角色分配和操作日志' : '查看系统用户和可访问的操作信息'}
           actions={
             activeTab === 'users' && canResolveUserCreate ? (
-              <button type="button" disabled={loading || userMutationPending || usersRefreshing || userMutationResolutionPending} onClick={() => void openCreateModal()} className={`flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonPrimary} transition-colors disabled:cursor-not-allowed disabled:opacity-50`}>
+              <button type="button" disabled={loading || userMutationPending || usersRefreshing || userMutationResolutionPending} onClick={() => void openCreateModal()} className={`xmt-btn flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonPrimary} !min-h-10 transition-colors disabled:cursor-not-allowed disabled:opacity-50`}>
                 <Plus className="h-5 w-5" />
                 添加用户
               </button>
@@ -1494,7 +1500,7 @@ export default function Users() {
                 onClick={() => activePendingUserDeleteRequest.recoveryCheck === 'not_found' && canDeleteUser
                   ? void handleDelete()
                   : void verifyUserDeleteRecovery(activePendingUserDeleteRequest)}
-                className={`self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}
+                className={`xmt-btn self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} min-h-10 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}
               >
                 {userMutationPending || activePendingUserDeleteRequest.recoveryCheck === 'checking'
                   ? '正在核实删除'
@@ -1509,7 +1515,7 @@ export default function Users() {
                 onClick={() => activePendingUserToggleRequest.recoveryCheck === 'not_found' && canUpdateUser
                   ? void handleToggleEnable(recoveredUserFromToggle(activePendingUserToggleRequest))
                   : void verifyUserToggleRecovery(activePendingUserToggleRequest)}
-                className={`self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}
+                className={`xmt-btn self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} min-h-10 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}
               >
                 {permissionsLoading || userMutationPending || activePendingUserToggleRequest.recoveryCheck === 'checking'
                   ? '正在核实启停'
@@ -1519,7 +1525,7 @@ export default function Users() {
               </button>
             ) : (
               canViewUsers ? (
-                <button type="button" disabled={loading || usersRefreshing} onClick={() => void refreshUsers()} className={`self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}>
+                <button type="button" disabled={loading || usersRefreshing} onClick={() => void refreshUsers()} className={`xmt-btn self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} min-h-10 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}>
                   {usersRefreshing ? '正在重新加载' : '重新加载列表'}
                 </button>
               ) : null
@@ -1531,7 +1537,7 @@ export default function Users() {
           <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
             <p className="min-w-0">操作日志暂不可用：{logsLoadError}</p>
             {canViewLogs ? (
-              <button type="button" disabled={loading || logsRefreshing} onClick={() => void refreshLogs()} className={`self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}>
+              <button type="button" disabled={loading || logsRefreshing} onClick={() => void refreshLogs()} className={`xmt-btn self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} min-h-10 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}>
                 {logsRefreshing ? '正在重新加载' : '重新加载日志'}
               </button>
             ) : null}
@@ -1670,7 +1676,7 @@ export default function Users() {
         allowChildrenWhenLocked={Boolean(pendingUserCreateRequest?.requiresPasswordReentry)}
         allowSubmitWhenLocked={canResolveUserCreate && (!pendingUserCreateRequest?.requiresPasswordReentry || Boolean(formData.password))}
       >
-        <div className="space-y-4">
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleCreate(); }}>
           {pendingUserCreateRequest ? (
             <p role="alert" className="rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast">
               {!canResolveUserCreate
@@ -1692,25 +1698,25 @@ export default function Users() {
           ) : null}
           <div>
             <label htmlFor="create-user-username" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名 *</label>
-            <input id="create-user-username" type="text" value={formData.username} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, username: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入用户名" />
+            <input id="create-user-username" type="text" autoComplete="username" value={formData.username} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, username: event.target.value })} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入用户名" />
           </div>
           <div>
             <label htmlFor="create-user-password" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码 *</label>
-            <input id="create-user-password" type="password" value={formData.password} disabled={Boolean(pendingUserCreateRequest && (!pendingUserCreateRequest.requiresPasswordReentry || !canResolveUserCreate))} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder={pendingUserCreateRequest?.requiresPasswordReentry ? '请输入上次创建时使用的密码' : '请输入密码'} />
+            <input id="create-user-password" type="password" autoComplete="new-password" value={formData.password} disabled={Boolean(pendingUserCreateRequest && (!pendingUserCreateRequest.requiresPasswordReentry || !canResolveUserCreate))} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder={pendingUserCreateRequest?.requiresPasswordReentry ? '请输入上次创建时使用的密码' : '请输入密码'} />
           </div>
           <div>
             <label htmlFor="create-user-name" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input id="create-user-name" type="text" value={formData.name} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入姓名" />
+            <input id="create-user-name" type="text" autoComplete="name" value={formData.name} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入姓名" />
           </div>
           <div>
             <label htmlFor="create-user-email" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input id="create-user-email" type="email" value={formData.email} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入邮箱" />
+            <input id="create-user-email" type="email" autoComplete="email" value={formData.email} disabled={Boolean(pendingUserCreateRequest)} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder="请输入邮箱" />
           </div>
           <div>
             <label htmlFor="user-role" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
             {renderRoleSelect}
           </div>
-        </div>
+        </form>
       </FormModal>
 
       <FormModal
@@ -1725,7 +1731,7 @@ export default function Users() {
         allowChildrenWhenLocked={Boolean(activePendingUserEditRequest?.recoveryCheck)}
         allowSubmitWhenLocked={pendingEditCanSubmit}
       >
-        <div className="space-y-4">
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleEdit(); }}>
           {activePendingUserEditRequest ? (
             <p role="alert" className="rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast">
               {activePendingUserEditRequest.recoveryCheck === 'checking'
@@ -1738,7 +1744,7 @@ export default function Users() {
                     ? '当前暂时无法核实上次更新结果。原字段已锁定；请只读重新核实，暂不重发更新。'
                     : '上次保存结果尚未确认。为避免重复修改密码、角色或会话，表单已锁定；再次保存会安全重试同一请求。'}
               {activePendingUserEditRequest.recoveryCheck === 'unavailable' ? (
-                <button type="button" disabled={permissionsLoading || userMutationPending} onClick={() => void verifyUserEditRecovery(activePendingUserEditRequest)} className={`ml-2 min-h-10 rounded-lg px-3 py-1 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50`}>
+                <button type="button" disabled={permissionsLoading || userMutationPending} onClick={() => void verifyUserEditRecovery(activePendingUserEditRequest)} className={`xmt-btn ml-2 rounded-lg px-3 py-1 ${styles.buttonSecondary} min-h-10 disabled:cursor-not-allowed disabled:opacity-50`}>
                   {userMutationPending ? '正在核实' : '只读重新核实'}
                 </button>
               ) : null}
@@ -1746,29 +1752,29 @@ export default function Users() {
           ) : null}
           <div>
             <label htmlFor="edit-user-username" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名</label>
-            <input id="edit-user-username" type="text" value={formData.username} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`} disabled />
+            <input id="edit-user-username" type="text" autoComplete="username" value={formData.username} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`} disabled />
           </div>
           <div>
             <label htmlFor="edit-user-password" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码（留空则不修改）</label>
-            <input id="edit-user-password" type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} disabled={Boolean(activePendingUserEditRequest && !(activePendingUserEditRequest.requiresPasswordReentry && activePendingUserEditRequest.recoveryCheck === 'not_found'))} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder={activePendingUserEditRequest?.requiresPasswordReentry ? '请输入上次更新时使用的密码' : '留空则不修改密码'} />
+            <input id="edit-user-password" type="password" autoComplete="new-password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} disabled={Boolean(activePendingUserEditRequest && !(activePendingUserEditRequest.requiresPasswordReentry && activePendingUserEditRequest.recoveryCheck === 'not_found'))} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} placeholder={activePendingUserEditRequest?.requiresPasswordReentry ? '请输入上次更新时使用的密码' : '留空则不修改密码'} />
           </div>
           <div>
             <label htmlFor="edit-user-name" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input id="edit-user-name" type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={Boolean(activePendingUserEditRequest)} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} />
+            <input id="edit-user-name" type="text" autoComplete="name" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} disabled={Boolean(activePendingUserEditRequest)} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} />
           </div>
           <div>
             <label htmlFor="edit-user-email" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input id="edit-user-email" type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={Boolean(activePendingUserEditRequest)} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} />
+            <input id="edit-user-email" type="email" autoComplete="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} disabled={Boolean(activePendingUserEditRequest)} className={`xmt-field w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} />
           </div>
           <div>
             <label htmlFor="user-role" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
             {renderRoleSelect}
           </div>
-          <div className="flex items-center gap-3">
+          <label htmlFor="enabled" className={`flex min-h-10 items-center gap-3 ${styles.textSecondary}`}>
             <input type="checkbox" id="enabled" checked={formData.enabled} onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })} disabled={Boolean(activePendingUserEditRequest)} className={`h-5 w-5 rounded ${styles.borderInput} ${styles.bgInput} text-studio-primary focus:ring-studio-primary disabled:cursor-not-allowed disabled:opacity-60`} />
-            <label htmlFor="enabled" className={styles.textSecondary}>启用用户</label>
-          </div>
-        </div>
+            <span>启用用户</span>
+          </label>
+        </form>
       </FormModal>
 
       <ConfirmModal

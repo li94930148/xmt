@@ -3,18 +3,20 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import express from 'express';
 import { Server } from 'socket.io';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { buildCreatorTopicSuggestions } from '../../api/services/creatorTopicSuggestions.js';
 import { analyzeDouyinWorks } from '../../api/services/douyinOperationsAnalytics.js';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const user = { id: 1, username: 'suggestion-qa', role: 'admin', name: '创作建议验收', enabled: true, force_change_password: false };
-let mode: 'ready' | 'failed' | 'empty' | 'no-create' | 'no-view' | 'feedback-failed' | 'feedback-delayed' = 'ready';
+let mode: 'ready' | 'failed' | 'empty' | 'no-create' | 'no-view' | 'feedback-delayed' = 'ready';
 let dashboardRequests = 0;
 let feedbackOutcome: 'adopted' | 'not_adopted' | null = null;
-let feedbackFailures = 0;
 let feedbackRequests = 0;
+let feedbackPostMode: 'ready' | 'not-committed' | 'committed-response-lost' = 'ready';
+let feedbackReadFailures = 0;
+let feedbackReadbackOverride: 'normal' | 'stale-evidence' | 'other-outcome' = 'normal';
 let topicWrites = 0;
 const topicCreateReceipts = new Map<string, { actorId: number; topicId: number }>();
 const topicRequestIds: string[] = [];
@@ -113,6 +115,11 @@ app.get('/api/creator-agent/douyin/dashboard', async (req, res) => {
   dashboardRequests++;
   if (mode === 'failed') { res.status(503).json({ message: '验收模拟：创作数据暂不可用' }); return; }
   const requestedAccountId = String(req.query.account_id || data.account_uid);
+  if (requestedAccountId === data.account_uid && feedbackReadFailures > 0) {
+    feedbackReadFailures--;
+    res.status(503).json({ message: '验收模拟：反馈状态暂不可用' });
+    return;
+  }
   if (requestedAccountId !== data.account_uid) {
     if (requestedAccountId !== 'slow-account' && requestedAccountId !== 'fast-account') { res.status(404).json({ message: '账号不可用' }); return; }
     const delayMs = requestedAccountId === delayedDashboardAccount ? delayDashboardMs : 0;
@@ -121,16 +128,22 @@ app.get('/api/creator-agent/douyin/dashboard', async (req, res) => {
     res.json({ account: { nickname: slow ? '慢速账号' : '快速账号', douyin_uid: requestedAccountId }, metrics: { fans_count: null, works_count: 0, play_count: slow ? 111 : 222, interaction_rate: 0, share_rate: 0, viral_works_count: 0 }, data_status: 'partial', data_source: 'douyin_creator_center_collection', last_success_at: now.toISOString(), top_works: [], snapshot_count: 0, topic_suggestions: { ...data, account_uid: requestedAccountId, status: 'empty', items: [] } });
     return;
   }
-  const feedback = { my_outcome: feedbackOutcome, adopted_count: feedbackOutcome === 'adopted' ? 1 : 0, not_adopted_count: feedbackOutcome === 'not_adopted' ? 1 : 0 };
-  const suggestions = { ...data, items: data.items.map(item => ({ ...item, feedback })) };
+  const dashboardFeedbackOutcome = feedbackReadbackOverride === 'other-outcome'
+    ? feedbackOutcome === 'adopted' ? 'not_adopted' : 'adopted'
+    : feedbackOutcome;
+  const feedback = { my_outcome: dashboardFeedbackOutcome, adopted_count: dashboardFeedbackOutcome === 'adopted' ? 1 : 0, not_adopted_count: dashboardFeedbackOutcome === 'not_adopted' ? 1 : 0 };
+  const suggestions = { ...data, items: data.items.map(item => ({ ...item, evidence_id: feedbackReadbackOverride === 'stale-evidence' && item === data.items[0] ? 'f'.repeat(32) : item.evidence_id, feedback })) };
   res.json({ account: { nickname: '创作建议验收账号', douyin_uid: data.account_uid }, metrics: { fans_count: null, works_count: 6, play_count: 12000, interaction_rate: 0, share_rate: 0, viral_works_count: 0 }, data_status: 'partial', data_source: 'douyin_creator_center_collection', last_success_at: now.toISOString(), top_works: [], snapshot_count: 0, topic_suggestions: mode === 'empty' ? { ...suggestions, items: [], status: 'insufficient_data' } : suggestions });
 });
 app.post('/api/creator-agent/douyin/suggestions/:id/feedback', async (req, res) => {
   feedbackRequests++;
+  const responseMode = feedbackPostMode;
+  feedbackPostMode = 'ready';
   if (mode === 'feedback-delayed') await new Promise(resolve => setTimeout(resolve, 150));
-  if (mode === 'feedback-failed' && feedbackFailures === 0) { feedbackFailures++; res.status(503).json({ message: '验收模拟：反馈保存暂不可用' }); return; }
+  if (responseMode === 'not-committed') { res.status(503).json({ message: '验收模拟：反馈明确未写入' }); return; }
   if (req.params.id !== data.items[0]?.id || req.body?.evidence_id !== data.items[0]?.evidence_id) { res.status(409).json({ message: '样本已更新' }); return; }
   feedbackOutcome = req.body.outcome;
+  if (responseMode === 'committed-response-lost') { res.socket?.destroy(); return; }
   res.json({ feedback: { my_outcome: feedbackOutcome, adopted_count: feedbackOutcome === 'adopted' ? 1 : 0, not_adopted_count: feedbackOutcome === 'not_adopted' ? 1 : 0 } });
 });
 const server = http.createServer(app);
@@ -159,6 +172,40 @@ function contrastRatio(foreground: number[], background: number[]) {
   const backgroundLum = luminance(background);
   return (Math.max(foregroundLum, backgroundLum) + 0.05) / (Math.min(foregroundLum, backgroundLum) + 0.05);
 }
+async function installDashboardCacheSpy(page: Page) {
+  await page.addInitScript(() => {
+    const target = window as Window & { __xmtDashboardFetchCaches?: Array<RequestCache | undefined> };
+    target.__xmtDashboardFetchCaches = [];
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (String(input).includes('/api/creator-agent/douyin/dashboard')) target.__xmtDashboardFetchCaches?.push(init?.cache);
+      return originalFetch(input, init);
+    };
+  });
+}
+async function suppressSessionStorageMarkerWrite(page: Page, key: string) {
+  await page.evaluate((targetKey) => {
+    const original = Storage.prototype.setItem;
+    Object.defineProperty(window, '__xmtOriginalSessionStorageSetItem', { configurable: true, value: original });
+    Object.defineProperty(Storage.prototype, 'setItem', {
+      configurable: true,
+      writable: true,
+      value(this: Storage, itemKey: string, value: string) {
+        if (this === window.sessionStorage && itemKey === targetKey) return;
+        return original.call(this, itemKey, value);
+      },
+    });
+  }, key);
+}
+async function restoreSessionStorageMarkerWrite(page: Page) {
+  await page.evaluate(() => {
+    const target = window as Window & { __xmtOriginalSessionStorageSetItem?: typeof Storage.prototype.setItem };
+    if (target.__xmtOriginalSessionStorageSetItem) {
+      Object.defineProperty(Storage.prototype, 'setItem', { configurable: true, writable: true, value: target.__xmtOriginalSessionStorageSetItem });
+      delete target.__xmtOriginalSessionStorageSetItem;
+    }
+  });
+}
 if (process.env.XMT_TOPIC_QA_SERVE === '1') {
   console.log(`Isolated topic suggestion QA fixture: ${base}/__qa`);
   await new Promise(() => {});
@@ -166,10 +213,11 @@ if (process.env.XMT_TOPIC_QA_SERVE === '1') {
 const browser = await chromium.launch({ headless: true });
 try {
   for (const width of [1440, 390, 320]) {
-    mode = 'ready'; topicWrites = 0; topicCreateReceipts.clear(); topicRequestIds.length = 0; feedbackOutcome = null; feedbackFailures = 0; feedbackRequests = 0; bindingCodeMode = 'ready'; bindingCodeRequests = 0; lastBindingAccountId = ''; bindingReceipts.clear(); bindingDelayByAccount.clear();
+    mode = 'ready'; topicWrites = 0; topicCreateReceipts.clear(); topicRequestIds.length = 0; feedbackOutcome = null; feedbackPostMode = 'ready'; feedbackReadFailures = 0; feedbackReadbackOverride = 'normal'; feedbackRequests = 0; bindingCodeMode = 'ready'; bindingCodeRequests = 0; lastBindingAccountId = ''; bindingReceipts.clear(); bindingDelayByAccount.clear();
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const errors: string[] = [];
     const page = await context.newPage();
+    await installDashboardCacheSpy(page);
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error' && !message.text().includes('503') && !message.text().includes('ERR_EMPTY_RESPONSE') && !message.text().includes('ERR_CONNECTION_RESET')) errors.push(message.text()); });
     await page.goto(`${base}/__qa`);
@@ -177,6 +225,15 @@ try {
     await page.getByText('约 3 倍。', { exact: false }).waitFor();
     const notAdopted = page.getByRole('button', { name: '暂不采用', exact: true });
     if (width === 1440) {
+      const bindingRecoveryKey = `xmt.creator-agent.binding-recovery.v1:1:${encodeURIComponent(data.account_uid)}`;
+      const bindingRequestCountBeforeStorageFailure = bindingCodeRequests;
+      await suppressSessionStorageMarkerWrite(page, bindingRecoveryKey);
+      await page.getByRole('button', { name: '创建一次性绑定码', exact: true }).click();
+      await page.getByText('浏览器无法保留安全重试编号，未发送绑定码请求。请允许此站点使用会话存储后重试。', { exact: true }).waitFor();
+      assert.equal(bindingCodeRequests, bindingRequestCountBeforeStorageFailure, 'a silent recovery-marker drop prevents the binding-code POST');
+      assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), bindingRecoveryKey), null, 'a dropped binding recovery marker remains absent');
+      await restoreSessionStorageMarkerWrite(page);
+
       bindingCodeMode = 'delayed';
       const binding = page.getByRole('button', { name: '创建一次性绑定码', exact: true });
       const bindingBefore = bindingCodeRequests;
@@ -218,13 +275,18 @@ try {
       await page.getByText(`ONE_TIME_${postCountBeforeLostResponse + 1}`, { exact: true }).waitFor();
       assert.equal(bindingCodeRequests, postCountBeforeLostResponse + 1, 'reload recovers the committed code through GET without issuing a duplicate POST');
       mode = 'feedback-delayed';
+      feedbackPostMode = 'committed-response-lost';
       const before = feedbackRequests;
+      const dashboardBefore = dashboardRequests;
       await notAdopted.evaluate(button => {
         button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
         button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       });
       await page.getByText('你已标记为暂不采用', { exact: true }).waitFor();
       assert.equal(feedbackRequests, before + 1, 'same suggestion feedback cannot submit twice while delayed');
+      assert.equal(dashboardRequests, dashboardBefore + 1, 'a lost feedback response is followed by one dashboard read, not a second POST');
+      const cacheModes = await page.evaluate(() => (window as Window & { __xmtDashboardFetchCaches?: Array<RequestCache | undefined> }).__xmtDashboardFetchCaches || []);
+      assert.equal(cacheModes.at(-1), 'no-store', 'feedback recovery bypasses the browser HTTP cache');
     } else {
       await notAdopted.click();
     }
@@ -334,6 +396,7 @@ try {
   }
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
+  await installDashboardCacheSpy(page);
   await page.goto(`${base}/__qa`);
   await page.getByRole('button', { name: '以此新建选题', exact: true }).waitFor();
   mode = 'failed';
@@ -346,24 +409,34 @@ try {
   await page.getByRole('button', { name: '重试创作依据' }).click();
   await page.getByRole('button', { name: '将依据加入项目背景', exact: true }).waitFor();
   assert.equal(dashboardRequests, count + 1);
-  mode = 'feedback-failed'; feedbackOutcome = null; feedbackFailures = 0;
+  mode = 'ready'; feedbackOutcome = null; feedbackPostMode = 'not-committed';
+  const adoptionPostsBeforeRetry = feedbackRequests;
   await page.getByRole('button', { name: '将依据加入项目背景', exact: true }).click();
-  await page.getByText('草稿已更新，但采纳反馈未保存：验收模拟：反馈保存暂不可用', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '重试保存反馈', exact: true }).click();
+  await page.getByText('采纳反馈已核实为尚未记录；依据仍保留在草稿中，确认后可安全重试反馈。', { exact: true }).waitFor();
+  const backgroundInput = page.getByPlaceholder('请详细描述项目背景，包括选题的由来、市场背景、竞品分析、为什么要做这个选题等...');
+  const appliedMarker = `【创作数据参考 ${data.account_uid}/${data.items[0].id}】`;
+  assert((await backgroundInput.inputValue()).includes(appliedMarker), 'failed adoption feedback does not remove evidence already appended to the draft');
+  assert.equal(feedbackRequests, adoptionPostsBeforeRetry + 1, 'the initial ambiguous adoption request is not automatically repeated');
+  await page.getByRole('button', { name: '确认后重试采纳反馈', exact: true }).click();
   await page.getByText('已记录：这条依据已加入选题草稿。', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, adoptionPostsBeforeRetry + 2, 'the second adoption POST occurs only after the user explicitly retries');
+  assert((await backgroundInput.inputValue()).includes(appliedMarker), 'explicit feedback retry keeps the already appended draft content');
   await page.goto(`${base}/analytics/creator-center`);
   await page.getByRole('heading', { name: '数据指导创作', exact: true }).waitFor();
   await page.getByRole('button', { name: '以此新建选题', exact: true }).click();
   const applyEvidence = page.getByRole('button', { name: '将依据加入项目背景', exact: true });
   await applyEvidence.waitFor();
-  mode = 'feedback-delayed';
+  mode = 'feedback-delayed'; feedbackPostMode = 'committed-response-lost';
   const beforeAdoption = feedbackRequests;
+  const dashboardBeforeAdoption = dashboardRequests;
   await applyEvidence.evaluate(button => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
   });
   await page.getByText('已记录：这条依据已加入选题草稿。', { exact: true }).waitFor();
   assert.equal(feedbackRequests, beforeAdoption + 1, 'same suggestion adoption cannot submit twice while delayed');
+  assert.equal(dashboardRequests, dashboardBeforeAdoption + 1, 'the AddTopic adoption flow recovers a committed response loss with one dashboard read');
+  assert((await page.getByPlaceholder('请详细描述项目背景，包括选题的由来、市场背景、竞品分析、为什么要做这个选题等...').inputValue()).includes(appliedMarker), 'a lost adoption response does not remove evidence already appended to the draft');
   mode = 'ready';
   mode = 'empty'; await page.reload();
   await page.getByText('这条建议已不满足当前样本条件或不可用', { exact: false }).waitFor();
@@ -407,6 +480,13 @@ try {
   failNextUserDirectoryRead = true;
   await page.goto(`${base}/topics/add`);
   await page.getByPlaceholder('请输入选题标题').waitFor();
+  await page.getByLabel('选题标题', { exact: true }).waitFor();
+  await page.getByLabel('发布平台', { exact: true }).waitFor();
+  await page.getByLabel('截止日期', { exact: true }).waitFor();
+  await page.getByLabel('负责人', { exact: true }).waitFor();
+  await page.getByLabel('项目背景', { exact: true }).waitFor();
+  await page.getByLabel('目标受众', { exact: true }).waitFor();
+  await page.getByRole('textbox', { name: '选题大纲', exact: true }).waitFor();
   await page.getByRole('alert').filter({ hasText: '负责人名单暂时无法读取' }).waitFor();
   assert.equal(userDirectoryReads, userDirectoryReadsBefore + 1, 'the failed owner list is an independent read');
   await page.getByRole('button', { name: '重新加载负责人名单', exact: true }).click();
@@ -414,6 +494,79 @@ try {
   assert.equal(await page.getByRole('alert').filter({ hasText: '负责人名单暂时无法读取' }).count(), 0, 'successful owner-list retry clears the warning');
   assert.equal(userDirectoryReads, userDirectoryReadsBefore + 2, 'owner-list retry performs one additional GET');
   assert.equal(topicWrites, topicWritesBeforeUserDirectoryRecovery, 'owner-list failure and recovery do not submit a topic');
+
+  const mobileTopicContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    const mobileTopicPage = await mobileTopicContext.newPage();
+    await mobileTopicPage.goto(`${base}/__qa`);
+    await mobileTopicPage.goto(`${base}/topics`);
+    await mobileTopicPage.getByRole('button', { name: '新建选题', exact: true }).click();
+    await mobileTopicPage.getByRole('heading', { name: '提报选题', level: 2, exact: true }).waitFor();
+    await mobileTopicPage.waitForFunction(() => document.activeElement?.matches('[data-mobile-page-heading]'));
+    assert.equal(await mobileTopicPage.getByRole('heading', { level: 1 }).count(), 1, 'mobile topic creation retains a single shell-level heading');
+    assert.equal(await mobileTopicPage.getByRole('heading', { name: '选题', level: 1, exact: true }).count(), 1, 'mobile shell exposes the selected section as the only H1');
+    assert.equal(await mobileTopicPage.getByRole('heading', { name: '提报选题', level: 2, exact: true }).count(), 1, 'the specific page title remains a level-two heading');
+    const mobileTopicTitle = mobileTopicPage.getByLabel('选题标题', { exact: true });
+    await mobileTopicTitle.waitFor();
+    assert.equal(await mobileTopicTitle.getAttribute('id'), 'mobile-topic-title', 'mobile topic title has a stable id');
+    assert.equal(await mobileTopicTitle.getAttribute('name'), 'title', 'mobile topic title has a stable field name');
+    assert.equal(await mobileTopicTitle.getAttribute('required'), '', 'mobile topic title exposes its required state');
+    await mobileTopicPage.getByLabel('发布平台', { exact: true }).waitFor();
+    await mobileTopicPage.getByLabel('截止日期', { exact: true }).waitFor();
+    await mobileTopicPage.getByLabel('项目背景', { exact: true }).waitFor();
+    await mobileTopicPage.getByLabel('目标受众', { exact: true }).waitFor();
+    await mobileTopicPage.getByLabel('大纲结构', { exact: true }).waitFor();
+    const topicWritesBeforeEmptyMobileSubmit = topicWrites;
+    await mobileTopicPage.getByRole('button', { name: '提交选题', exact: true }).click();
+    await mobileTopicPage.getByRole('status').filter({ hasText: '请输入选题标题' }).waitFor();
+    assert.equal(topicWrites, topicWritesBeforeEmptyMobileSubmit, 'empty mobile topic submission shows guidance without sending a create request');
+    assert.equal(await mobileTopicPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, 'mobile topic form has no horizontal overflow at 390px');
+  } finally {
+    await mobileTopicContext.close();
+  }
+
+  mode = 'ready'; feedbackOutcome = null; feedbackPostMode = 'ready'; feedbackReadbackOverride = 'normal';
+  await page.goto(`${base}/__qa`);
+  await page.getByRole('heading', { name: '数据指导创作', exact: true }).waitFor();
+  const recoveryNotAdopted = page.getByRole('button', { name: '暂不采用', exact: true });
+  const postsBeforeUnreadableRecovery = feedbackRequests;
+  const dashboardBeforeUnreadableRecovery = dashboardRequests;
+  feedbackPostMode = 'not-committed'; feedbackReadFailures = 1;
+  await recoveryNotAdopted.click();
+  await page.getByText('反馈结果暂未确认，状态读取失败；只读重新核实前不会再次提交。', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, postsBeforeUnreadableRecovery + 1, 'a failed readback does not automatically repeat the feedback POST');
+  assert.equal(dashboardRequests, dashboardBeforeUnreadableRecovery + 1, 'a failed POST is followed by one read-only dashboard verification');
+  await page.getByRole('button', { name: '只读重新核实反馈状态', exact: true }).click();
+  await page.getByText('只读核实确认暂不采用反馈尚未记录；确认后可安全重试。', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, postsBeforeUnreadableRecovery + 1, 'manual re-verification remains GET-only');
+  assert.equal(dashboardRequests, dashboardBeforeUnreadableRecovery + 2, 'manual re-verification makes one additional dashboard GET');
+  const recoveryCacheModes = await page.evaluate(() => (window as Window & { __xmtDashboardFetchCaches?: Array<RequestCache | undefined> }).__xmtDashboardFetchCaches || []);
+  assert.equal(recoveryCacheModes.at(-1), 'no-store', 'manual feedback re-verification bypasses the browser HTTP cache');
+  await page.getByRole('button', { name: '确认后重试暂不采用', exact: true }).click();
+  await page.getByText('你已标记为暂不采用', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, postsBeforeUnreadableRecovery + 2, 'a confirmed-missing feedback is written only after explicit retry');
+
+  feedbackOutcome = null; feedbackPostMode = 'ready'; feedbackReadbackOverride = 'normal';
+  await page.goto(`${base}/__qa`);
+  await page.getByRole('heading', { name: '数据指导创作', exact: true }).waitFor();
+  const staleEvidenceButton = page.getByRole('button', { name: '暂不采用', exact: true });
+  const postsBeforeStaleEvidence = feedbackRequests;
+  feedbackReadbackOverride = 'stale-evidence'; feedbackPostMode = 'committed-response-lost';
+  await staleEvidenceButton.click();
+  await page.getByText('创作建议样本或反馈状态已变化，未再次提交。请刷新数据后核实。', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, postsBeforeStaleEvidence + 1, 'stale evidence recovery never replays the feedback POST');
+  assert.equal(await page.getByRole('button', { name: '确认后重试暂不采用', exact: true }).count(), 0, 'stale evidence does not expose a retry action');
+
+  feedbackOutcome = null; feedbackReadbackOverride = 'normal'; feedbackPostMode = 'ready';
+  await page.goto(`${base}/__qa`);
+  await page.getByRole('heading', { name: '数据指导创作', exact: true }).waitFor();
+  const changedOutcomeButton = page.getByRole('button', { name: '暂不采用', exact: true });
+  const postsBeforeChangedOutcome = feedbackRequests;
+  feedbackReadbackOverride = 'other-outcome'; feedbackPostMode = 'not-committed';
+  await changedOutcomeButton.click();
+  await page.getByText('创作建议样本或反馈状态已变化，未再次提交。请刷新数据后核实。', { exact: true }).waitFor();
+  assert.equal(feedbackRequests, postsBeforeChangedOutcome + 1, 'another stored outcome blocks retry and leaves the write count unchanged');
+  assert.equal(await page.getByRole('button', { name: '确认后重试暂不采用', exact: true }).count(), 0, 'another outcome does not expose a retry action');
   await context.close();
   console.log('Creator topic suggestions browser passed: evidence → authorized handoff → draft-preserving apply/adoption feedback, explicit non-adoption feedback and retry; failed submit recovery, stale evidence, sample gates and permissions; 1440/390/320px; AddTopic owner-list 503 and read-only retry.');
 } finally {

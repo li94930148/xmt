@@ -589,6 +589,36 @@ try {
   assert.deepEqual(feedbackUpdateRequestBodies.at(-1), feedbackUpdateRequestBodies.at(-2), 'retry uses the exact persisted payload and fingerprints');
   assert.equal(await recoveryPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-update-pending:actor:98')), null, 'successful explicit retry clears its marker');
 
+  await recoveryPage.request.post(`${base}/__qa/reset`);
+  await recoveryPage.goto(`${base}/__qa?actorId=98`);
+  await recoveryPage.getByRole('heading', { name: '匿名意见管理' }).waitFor();
+  const deletesBeforeStorageDrop = feedbackDeleteCount;
+  await recoveryPage.evaluate(() => {
+    const targetKey = 'xmt:anonymous-feedback-delete-pending:actor:98';
+    const original = Storage.prototype.setItem;
+    let dropped = false;
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      if (key === targetKey && !dropped) {
+        dropped = true;
+        return;
+      }
+      original.call(this, key, value);
+    };
+  });
+  await recoveryPage.getByTestId(`feedback-row-actions-${feedback.id}`).getByRole('button', { name: `删除匿名意见：${feedback.content}`, exact: true }).click();
+  const storageDropDialog = recoveryPage.getByRole('dialog', { name: '删除意见' });
+  await storageDropDialog.getByRole('button', { name: '删除', exact: true }).click();
+  await storageDropDialog.getByText(/本次删除请求未发送/).waitFor();
+  assert.equal(feedbackDeleteCount, deletesBeforeStorageDrop, '静默丢失删除恢复标记时不会发送 DELETE');
+  assert.equal(await recoveryPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-delete-pending:actor:98')), null, '未读回的删除恢复标记不会被当成成功');
+  assert.equal(await storageDropDialog.getByRole('button', { name: '删除', exact: true }).isDisabled(), true, '无法验证恢复记录时禁用删除确认');
+  await storageDropDialog.getByRole('button', { name: '取消' }).click();
+  await recoveryPage.getByRole('alert').filter({ hasText: '浏览器恢复信息无法安全读取' }).waitFor();
+  await recoveryPage.reload({ waitUntil: 'domcontentloaded' });
+  await recoveryPage.getByTestId(`feedback-row-actions-${feedback.id}`).getByRole('button', { name: `标记为处理中：${feedback.content}`, exact: true }).waitFor();
+  assert.equal(feedbackDeleteCount, deletesBeforeStorageDrop, '重载恢复只读取列表，不重复删除');
+  assert.equal(await recoveryPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-delete-pending:actor:98')), null);
+
   await recoveryPage.close();
   assert.deepEqual(errors, [], 'anonymous feedback admin has no browser errors');
   assert.equal(feedbackListConditionalRequestCount, 0, 'admin feedback list requests bypass cached 304 responses so first load always reads a usable body');

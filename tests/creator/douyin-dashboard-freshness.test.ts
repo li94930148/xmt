@@ -71,6 +71,10 @@ async function insertOfficialPeriodFacts(
     const chunk = rows.slice(index, index + 30);
     const valuesSql = chunk.map(() => '(?,?,?,?,?,?,?,?,?,?)').join(',');
     await execute(`INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at) VALUES${valuesSql}`, chunk.flat());
+    const observationValuesSql = chunk.map(() => "(?,NULL,'projection_backfill',?,?,?,?,?,?,?,?,?)").join(',');
+    await execute(`INSERT INTO creator_official_daily_metric_observations(
+      account_id,batch_id,source_kind,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at
+    ) VALUES${observationValuesSql}`, chunk.flat());
   }
 }
 
@@ -107,6 +111,17 @@ async function insertOfficial90dFacts(accountId: number, dates: string[], option
       return [accountId, metricDate, period, code, valueText, valueNumber, 'count', sourceHash, 'fixture-v3', collectedAt];
     });
     await execute(`INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at) VALUES${valuesSql}`, values);
+    const observationValuesSql = chunk.map(() => "(?,NULL,'projection_backfill',?,?,?,?,?,?,?,'fixture-v3',?)").join(',');
+    const observationValues = chunk.flatMap(([metricDate, period, code, valueText, valueNumber, sourceHash]) => {
+      const dateIndex = dates.indexOf(String(metricDate));
+      const batchIndex = dateIndex < 0 ? 3 : Math.floor(dateIndex / 30);
+      const collectedOn = dates[Math.min((batchIndex + 1) * 30 - 1, dates.length - 1)] || dates[dates.length - 1];
+      const collectedAt = new Date(`${collectedOn}T12:00:00+08:00`).toISOString();
+      return [accountId, metricDate, period, code, valueText, valueNumber, 'count', sourceHash, collectedAt];
+    });
+    await execute(`INSERT INTO creator_official_daily_metric_observations(
+      account_id,batch_id,source_kind,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at
+    ) VALUES${observationValuesSql}`, observationValues);
   }
 }
 
@@ -224,12 +239,20 @@ try {
   const dates90d = expected90dDates();
   const validTrendAccountId = await createAccount('official-90-day-complete', '2026-10-19T00:00:00.000Z', 99, false);
   await insertOfficial90dFacts(validTrendAccountId, dates90d);
+  const precedenceDate = dates90d[10];
+  await execute(`INSERT INTO creator_official_daily_metric_observations(
+    account_id,batch_id,source_kind,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at
+  ) VALUES(?,NULL,'projection_backfill',?,'30d','views','9876',9876,'count',?,'fixture-v3','2026-10-28T00:00:00.000Z'),
+    (?,NULL,'projection_backfill',?,'30d','views','9877',9877,'count',?,'fixture-v3','2026-10-28T08:00:00+08:00'),
+    (?,NULL,'projection_backfill',?,'30d','views','1001',1001,'count',?,'fixture-v3','2026-10-27T00:00:00.000Z')`,
+  [validTrendAccountId,precedenceDate,'e'.repeat(64),validTrendAccountId,precedenceDate,'f'.repeat(64),validTrendAccountId,precedenceDate,'a'.repeat(64)]);
   const validTrend = await getDouyinTrends(validTrendAccountId, '90d');
   assert.equal(validTrend.data_status, 'ready', 'a complete Beijing-time 90-day date window is ready');
   assert.equal(validTrend.snapshots.length, 90);
   assert.equal(validTrend.snapshots[0].snapshot_date, dates90d[0]);
   assert.equal(validTrend.snapshots[89].snapshot_date, shanghaiToday(), 'the 90-day window includes today in Beijing time');
   assert.equal(validTrend.snapshots[0].comment_count, -1, 'official negative comment corrections remain unchanged');
+  assert.equal(validTrend.snapshots[10].play_count, 9877, '90-day reconstruction chooses the newest absolute collection instant and ignores a stale observation inserted later');
 
   const gapTrendAccountId = await createAccount('official-90-day-gap', '2026-10-19T00:00:00.000Z', 99, true);
   await insertOfficial90dFacts(gapTrendAccountId, dates90d, { omitDate: dates90d[45] });

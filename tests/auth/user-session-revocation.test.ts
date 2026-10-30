@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { io as connect, type Socket } from 'socket.io-client';
+import { formatBjtDatabase } from '../../shared/time/index.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-user-revocation-'));
+const replayTimestamp = formatBjtDatabase();
 process.env.XMT_DB_PATH = path.join(directory, 'security.test.db');
 process.env.JWT_SECRET = 'user-revocation-test-secret';
 process.env.NODE_ENV = 'test';
@@ -144,16 +146,16 @@ try {
   await execute('UPDATE users SET enabled=0,auth_version=auth_version+1 WHERE id=?', [updateReplayTargetId]);
   await execute(
     'UPDATE auth_sessions SET revoked_at=?,revoke_reason=? WHERE user_id=? AND revoked_at IS NULL',
-    ['2026-10-22 10:00:00', 'user_disabled', updateReplayTargetId],
+    [replayTimestamp, 'user_disabled', updateReplayTargetId],
   );
   await execute(
     `INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
-    [adminId, 'update', 'user', '更新用户: revocation-update-replay-target', '2026-10-22 10:00:00'],
+    [adminId, 'update', 'user', '更新用户: revocation-update-replay-target', replayTimestamp],
   );
   await execute(
     `INSERT INTO user_update_request_keys(client_request_id,actor_id,target_user_id,request_fingerprint,created_at)
      VALUES(?,?,?,?,?)`,
-    [updateReplayRequestId, adminId, updateReplayTargetId, updateReplayFingerprint, '2026-10-22 10:00:00'],
+    [updateReplayRequestId, adminId, updateReplayTargetId, updateReplayFingerprint, replayTimestamp],
   );
   const updateReplayDisconnected = waitFor(updateReplaySocket, 'disconnect');
   const updateReplayResponse = await fetch(`${base}/api/users/${updateReplayTargetId}`, {
@@ -182,12 +184,12 @@ try {
   await execute('UPDATE users SET name=? WHERE id=?', [profilePayload.name, profileReplayTargetId]);
   await execute(
     `INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
-    [adminId, 'update', 'user', '更新用户: revocation-profile-replay-target', '2026-10-22 10:00:01'],
+    [adminId, 'update', 'user', '更新用户: revocation-profile-replay-target', replayTimestamp],
   );
   await execute(
     `INSERT INTO user_update_request_keys(client_request_id,actor_id,target_user_id,request_fingerprint,created_at)
      VALUES(?,?,?,?,?)`,
-    [profileReplayRequestId, adminId, profileReplayTargetId, profileReplayFingerprint, '2026-10-22 10:00:01'],
+    [profileReplayRequestId, adminId, profileReplayTargetId, profileReplayFingerprint, replayTimestamp],
   );
   const profileReplayResponse = await fetch(`${base}/api/users/${profileReplayTargetId}`, {
     method: 'PUT',
@@ -235,8 +237,8 @@ try {
   await execute('DELETE FROM users WHERE id=?', [replayTargetId]);
   await execute(
     `INSERT INTO user_delete_request_keys(client_request_id,actor_id,target_user_id,request_fingerprint,created_at)
-     VALUES(?,?,?,?, '2026-10-22 10:00:00')`,
-    [replayRequestId, adminId, replayTargetId, replayFingerprint],
+     VALUES(?,?,?,?, ?)`,
+    [replayRequestId, adminId, replayTargetId, replayFingerprint, replayTimestamp],
   );
   const replayDisconnected = waitFor(replaySocket, 'disconnect');
   const replayResponse = await fetch(`${base}/api/users/${replayTargetId}`, {

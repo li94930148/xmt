@@ -38,10 +38,16 @@ try {
       client_request_id TEXT PRIMARY KEY,
       target_feedback_id INTEGER NOT NULL,
       request_fingerprint TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT
     );
     INSERT INTO anonymous_feedback_submission_request_keys VALUES
-      ('private-anonymous-feedback-key', 1, 'private-anonymous-feedback-fingerprint', '2026-10-25 01:00:00');
+      ('private-anonymous-feedback-key', 1, 'private-anonymous-feedback-fingerprint', '2026-10-25 01:00:00'),
+      ('private-anonymous-feedback-key-utc', 1, 'private-anonymous-feedback-fingerprint-utc', '2026-10-25T01:00:00.000Z'),
+      ('private-anonymous-feedback-key-offset', 1, 'private-anonymous-feedback-fingerprint-offset', '2026-10-25T09:00:00+08:00'),
+      ('private-anonymous-feedback-key-invalid', 1, 'private-anonymous-feedback-fingerprint-invalid', 'not-a-date'),
+      ('private-anonymous-feedback-key-invalid-offset', 1, 'private-anonymous-feedback-fingerprint-invalid-offset', '2026-10-25T09:00:00+99:99'),
+      ('private-anonymous-feedback-key-invalid-utc', 1, 'private-anonymous-feedback-fingerprint-invalid-utc', '2026-00-25T00:00:00Z'),
+      ('private-anonymous-feedback-key-missing', 1, 'private-anonymous-feedback-fingerprint-missing', NULL);
   `);
 
   const beforeHash = crypto.createHash('sha256').update(fs.readFileSync(databasePath)).digest('hex');
@@ -52,10 +58,25 @@ try {
   assert.equal(inventory.cleanupPerformed, false);
   assert.equal(inventory.tables.length, 3, 'unrelated and expiring recovery tables are out of scope');
   assert.deepEqual(inventory.tables.map((table) => [table.table, table.rowCount]), [
-    ['anonymous_feedback_submission_request_keys', 1],
+    ['anonymous_feedback_submission_request_keys', 7],
     ['inspiration_comments', 1],
     ['retrospective_update_request_keys', 2],
   ]);
+  assert.deepEqual(inventory.tables[0].timestampProfile, {
+    utcSuffixCount: 1,
+    explicitOffsetCount: 1,
+    timezoneNaiveParseableCount: 1,
+    unsupportedOrMissingCount: 4,
+    hasMixedRepresentations: true,
+  }, 'receipt timestamps report format counts without inferring timezone or expiry');
+  assert.deepEqual(inventory.tables[1].timestampProfile, {
+    utcSuffixCount: 0,
+    explicitOffsetCount: 0,
+    timezoneNaiveParseableCount: 1,
+    unsupportedOrMissingCount: 0,
+    hasMixedRepresentations: false,
+  }, 'embedded comment receipts are scoped to rows with a request key');
+  assert.match(inventory.timestampNote, /not assumed to be UTC or Beijing time/);
   assert.equal(inventory.tables[0].kind, 'request_receipt');
   assert.equal(inventory.tables[1].kind, 'embedded_request_key');
   assert.equal(inventory.tables[2].oldestCreatedAtRaw, '2026-10-20 01:00:00');

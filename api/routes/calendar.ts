@@ -95,7 +95,10 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-router.get('/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/create-request/:requestId', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '日历事件请求编号无效' });

@@ -1,5 +1,28 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B8：日历创建结果核实防缓存（v10.1.54）
+
+- **发现与改造**：日历创建状态端点返回当前账号可核实的事件状态，但没有明确禁止缓存；客户端状态 GET 也未设置 `cache: no-store`。现在服务端先于认证中间件统一设置 `Cache-Control: no-store`，覆盖成功、无记录、已删除、无效请求及未登录响应；客户端状态读取绕过浏览器缓存。
+- **回归与数据边界**：`tests/calendar/calendar-permissions.test.ts` 检查 200/404/410/400/401 响应均带 no-store，并验证前端请求设置 `cache: no-store`。既有用例继续验证创建者隔离、同请求幂等回放、删除墓碑及禁止复活；只在临时测试数据库运行。
+- **验证**：`npm run test:calendar-permissions`、`npm run test:idempotency-receipt-inventory`、`npm run version:check`（v10.1.54）、`npm run test:version-governance`、`npm run test:changelog-governance`（732 个版本）、`npm run test:android-runtime`、`npm run check -- --pretty false`、全量 ESLint、`npm run build`、生产依赖高危审计与 `git diff --check` 均通过。构建保留已有 >500 kB 分包提示；PR 检查、主分支 CI 与部署证据记录在关联 GitHub 发布 PR。
+- **范围与版本**：无 API 载荷、权限、数据库结构或真实业务数据变化；Android 元数据为 10.1.54 / 100154，未构建 APK。
+
+## 2026-10-31 清单 B8：幂等回执时间有效性分类（v10.1.53，随 v10.1.54 完整版发布）
+
+- **发现与修正**：v10.1.52 盘点器按尾缀和偏移字符形态分类，可能把 `2026-00-25T00:00:00Z` 或 `+99:99` 之类无法解析的值误报为有效 UTC/偏移。现在分类先要求 SQLite `datetime(...)` 解析成功；无效日期/偏移及缺失值计入无效/缺失。
+- **回归与数据边界**：合成 SQLite 增加无效月份、超范围偏移和 NULL 时间样例；断言有效 UTC/偏移和无时区值仍归类正确，异常值全部落入无效/缺失，敏感字段不输出且数据库文件 SHA-256 前后不变。没有读取本机或线上真实业务数据库。
+- **验证**：`npm run test:idempotency-receipt-inventory`、`npm run version:check`（v10.1.53）、`npm run test:version-governance`、`npm run test:changelog-governance`（731 个版本）、`npm run test:android-runtime`、`npm run check -- --pretty false`、改动文件 ESLint、`npm run build` 与 `git diff --check` 均通过；本项随 v10.1.54 完整版接受发布 CI。
+- **范围与版本**：无 API、权限、数据库结构、保留期限或真实业务数据变化；Android 元数据为 10.1.53 / 100153，未构建 APK。该版本未单独部署。
+
+## 2026-10-31 清单 B8：幂等回执时间表示只读盘点（v10.1.52，随 v10.1.54 完整版发布）
+
+- **盘点问题与改造**：原只读工具只汇总 `created_at` 的原始最小/最大值，无法显示表内 UTC `Z`、显式时区偏移、无时区时间和无效值是否混用。现在每张目标回执表额外返回四类数量及混合表示标记；保留原始范围值，不将无时区数据解释为 UTC 或北京时间，不推断回执年龄/期限，也不做清理。
+- **隐私与数据边界**：只输出既有表名、行数、原始时间范围及新增分类计数，不输出请求编号、指纹、用户、载荷或正文。测试仅使用临时合成 SQLite；未读取本机既有业务数据库、线上数据库或写入真实数据。
+- **自动回归**：隔离测试覆盖 UTC 后缀、`+08:00` 偏移、可解析无时区、无效文本，验证混合标记、异常 schema 失败关闭、拒绝清理参数、敏感字段不输出及数据库字节前后不变。新增 `npm run test:idempotency-receipt-inventory` 到 `core-security-contract`。
+- **验证与工程门禁**：`npm run test:idempotency-receipt-inventory`、`npm run version:check`（v10.1.52）、版本治理、更新说明治理（730 个版本）、Android runtime 合同、测试入口检查（321 个文件）、`npm run check -- --pretty false`、改动文件 ESLint、`git diff --check` 与生产构建通过。构建保留现有 >500 kB 分包提示；本轮没有浏览器界面改动，未运行浏览器套件。CI 变更已加入 `core-security-contract`，本项随 v10.1.54 完整版接受发布 CI。
+- **范围与版本**：无 API、权限、数据库结构或业务数据变化；Android 元数据为 10.1.52 / 100152，未构建 APK。该版本未单独部署。
+- **后续开放项**：仍需基于获准的本地匿名统计报告判断实际时间表示分布；在语义、所有者范围与保留规则明确前，不设置统一 TTL 或自动清理。B8 其他写入/恢复闭环、B4/B5 全站主题和响应式验收、等待可信来源的 G 口径以及用户后置的 Android 专项继续开放。
+
 ## 2026-10-31 清单 B4/B5：创作者驾驶舱响应式信息层级（v10.1.51）
 
 - **发现与改造**：窄屏原先沿用竖版 ReactBits 资料卡，长海报占据首屏且把指标推远；粉丝、作品数、播放数又在账号资料卡和下方指标区重复。现保留桌面资料卡，在 1024px 以下改用紧凑头像/名称/UID/数据状态/“查看作品”行；粉丝、作品、播放集中在账号概览，互动率/分享率/爆款作品归入“互动表现”，数据来源状态行不再重复作品数。Creator Agent 设备和绑定详情移到数据、周期/作品表现及创作建议之后；顶部简短状态仍保留。窄屏时桌面 ProfileCard 不挂载，避免隐藏卡片继续启动倾斜动画。官方导出场景继续将作品数标为“官方作品”。

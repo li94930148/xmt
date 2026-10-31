@@ -78,6 +78,8 @@ jobs:
       - run: npm run test:backup-lock
       - run: npm run test:backup-inventory
       - run: npm run test:backup-restore-drill
+      - run: npm run test:idempotency-receipt-inventory
+      - run: npm run test:calendar-permissions
       - run: npm run test:content-document
       - run: npm run test:migration-readiness
       - run: npm run test:version-governance

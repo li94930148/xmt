@@ -35,6 +35,7 @@ export async function getCalendarEventCreateStatus(clientRequestId: string): Pro
   | { status: 'created'; eventId: number }
 > {
   const response = await fetch(`${BASE_URL}/calendar/create-request/${encodeURIComponent(clientRequestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (response.status === 404) return { status: 'missing' };

@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "10.1.47",
+  "version": "10.1.48",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -220,6 +220,7 @@
     "test:native-auth-runtime-integration": "tsx tests/auth/native-auth-runtime-integration.test.ts",
     "test:mobile-device-registry": "tsx tests/notifications/mobile-device-registry.test.ts",
     "test:notification-routing": "tsx tests/notifications/realtime-toast-routing.test.ts",
+    "test:realtime-toast-accessibility": "tsx --test tests/components/realtime-toast-accessibility.test.tsx",
     "test:message-notification": "tsx tests/notifications/message-notification.test.ts",
     "test:notification-settings-load": "tsx tests/notifications/notification-settings-load.test.ts",
     "test:daily-report-permissions": "tsx tests/daily/daily-report-permissions.test.ts",

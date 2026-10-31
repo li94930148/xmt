@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.48',
+    date: '2026-10-31',
+    title: '实时提示无障碍播报与触控',
+    impactScope: ['实时通知', '无障碍体验', '减少动态效果'],
+    changes: [
+      { type: 'improvement', description: '实时提示以常驻礼貌播报区报告最新内容，重复文案重新播报；关闭按钮具备明确名称和 40×40px 触控区域，入场动画尊重减少动态效果设置。' },
+    ],
+  },
+  {
     version: '10.1.47',
     date: '2026-10-31',
     title: '首页跨模块待办摘要优化',

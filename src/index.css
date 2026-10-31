@@ -125,6 +125,12 @@
   animation: slide-in 0.28s var(--xmt-ease-out);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in {
+    animation: none;
+  }
+}
+
 @keyframes slideInFromTop {
   from {
     opacity: 0;

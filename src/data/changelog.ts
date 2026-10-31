@@ -11,6 +11,33 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.54',
+    date: '2026-10-31',
+    title: '日历结果核实状态防缓存',
+    impactScope: ['排期日历', '创建结果核实'],
+    changes: [
+      { type: 'fix', description: '日历事件创建结果核实始终读取最新状态，不使用浏览器缓存；无记录、已删除和错误响应同样不会缓存。' },
+    ],
+  },
+  {
+    version: '10.1.53',
+    date: '2026-10-31',
+    title: '回执时间有效性分类修正',
+    impactScope: ['B8 写入结果恢复', '运维只读盘点'],
+    changes: [
+      { type: 'fix', description: '回执盘点先校验时间有效性，再识别 UTC 或明确时区偏移；无效日期、偏移及缺失值均归入无效/缺失，避免按文本外观误判。' },
+    ],
+  },
+  {
+    version: '10.1.52',
+    date: '2026-10-31',
+    title: '幂等回执时间表示只读盘点',
+    impactScope: ['B8 写入结果恢复', '运维只读盘点'],
+    changes: [
+      { type: 'improvement', description: '幂等回执只读报告新增 UTC 后缀、显式偏移、可解析无时区及无效/缺失时间计数和混合表示标记；不猜测无时区语义，不推断保留期限或清理记录。' },
+    ],
+  },
+  {
     version: '10.1.51',
     date: '2026-10-31',
     title: '创作者驾驶舱信息层级与移动布局',

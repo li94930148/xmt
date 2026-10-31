@@ -117,9 +117,17 @@ try {
   assert.equal(conflictingReplay.status, 409, 'reusing a request ID for a different payload is rejected');
   const ownerStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(ownerId) });
   assert.equal(ownerStatus.status, 200);
+  assert.equal(ownerStatus.headers.get('Cache-Control'), 'no-store', 'confirmed creation status must not be cached');
   assert.equal((await ownerStatus.json() as { eventId: number }).eventId, firstResult.id);
   const outsiderStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(outsiderId) });
   assert.equal(outsiderStatus.status, 404, 'create status cannot reveal another account\'s event');
+  assert.equal(outsiderStatus.headers.get('Cache-Control'), 'no-store', 'owner-scoped missing status must not be cached');
+  const invalidStatus = await fetch(`${base}/create-request/not-a-uuid`, { headers: headers(ownerId) });
+  assert.equal(invalidStatus.status, 400);
+  assert.equal(invalidStatus.headers.get('Cache-Control'), 'no-store', 'invalid status responses must not be cached');
+  const unauthenticatedStatus = await fetch(`${base}/create-request/${createRequestId}`);
+  assert.equal(unauthenticatedStatus.status, 401);
+  assert.equal(unauthenticatedStatus.headers.get('Cache-Control'), 'no-store', 'authentication failures must not be cached');
   const createdCount = await queryOne<{ total: number }>(
     `SELECT COUNT(*) AS total FROM calendar_events WHERE title=? AND creator_id=?`,
     [createPayload.title, ownerId],
@@ -130,6 +138,7 @@ try {
   assert.equal(deleteIdempotentEvent.status, 200);
   const deletedStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(ownerId) });
   assert.equal(deletedStatus.status, 410, 'deleted request remains a tombstone');
+  assert.equal(deletedStatus.headers.get('Cache-Control'), 'no-store', 'deleted status tombstones must not be cached');
   const deletedReplay = await idempotentCreate();
   assert.equal(deletedReplay.status, 410, 'a late replay cannot recreate a deleted calendar event');
   const noResurrection = await queryOne<{ total: number }>(
@@ -144,7 +153,14 @@ try {
 
 const originalFetch = globalThis.fetch;
 try {
-  const { getCalendarEvents } = await import('../../src/api/calendar.js');
+  const { getCalendarEvents, getCalendarEventCreateStatus } = await import('../../src/api/calendar.js');
+  let statusRequestInit: RequestInit | undefined;
+  globalThis.fetch = (async (_input, init) => {
+    statusRequestInit = init;
+    return { ok: true, status: 200, json: async () => ({ eventId: 32 }) } as Response;
+  }) as typeof fetch;
+  assert.deepEqual(await getCalendarEventCreateStatus('a01b2c3d-4e5f-4678-8a9b-0c1d2e3f4a50'), { status: 'created', eventId: 32 });
+  assert.equal(statusRequestInit?.cache, 'no-store', 'client recovery reads must bypass the browser cache');
   globalThis.fetch = (async () => ({ ok: true, json: async () => ({ data: 'not-an-array' }) }) as Response) as typeof fetch;
   await assert.rejects(getCalendarEvents({ year: 2026, month: 10 }), /日历数据格式不正确/);
 } finally {

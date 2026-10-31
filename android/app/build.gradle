@@ -7,8 +7,8 @@ android {
         applicationId "com.lanyaomedia.xmt"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 100151
-        versionName "10.1.51"
+        versionCode 100154
+        versionName "10.1.54"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

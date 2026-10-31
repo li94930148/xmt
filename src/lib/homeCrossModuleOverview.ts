@@ -26,13 +26,17 @@ export function buildHomeCrossModuleMetrics(
 ): HomeCrossModuleMetric[] {
   if (!summary) return [];
 
-  const metrics: HomeCrossModuleMetric[] = [{
+  const metrics: HomeCrossModuleMetric[] = [];
+
+  // Both desktop and mobile Home already render a dedicated, actionable topic
+  // attention section. Keep the cross-module summary focused on other queues.
+  if (!options.isManagementRole) metrics.push({
     id: 'topic-attention',
     label: '选题卡点',
     count: summary.counts.total,
     detail: `逾期 ${summary.counts.overdue} · 卡点 ${summary.counts.stalled} · 临近 ${summary.counts.due_soon}`,
     path: '/topics',
-  }];
+  });
 
   if (options.hasTopicAudit) metrics.push({
     id: 'topic-review',

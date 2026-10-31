@@ -406,12 +406,10 @@ export default function Home() {
     : canReviewTopics || canReviewProductions
       ? '优先处理待审核内容，再跟进团队卡点和发布安排'
       : '优先继续自己的稿件，再跟进临近事项和发布安排';
-  let taskDescription = hasPermission('workflow:publishing') && (attention?.today_publishing.total || 0) > 0
+  let taskDescription = !isManagementRole && hasPermission('workflow:publishing') && (attention?.today_publishing.total || 0) > 0
     ? `${baseTaskDescription} · 今日待处理发布 ${attention?.today_publishing.total} 项`
     : baseTaskDescription;
-  if (isManagementRole && actionableMessages.count > 0) taskDescription += ` · 待处理消息 ${actionableMessages.count} 条`;
-  if (isManagementRole && attention?.sync_anomalies.total) taskDescription += ` · 同步异常 ${attention.sync_anomalies.total} 个账号`;
-  if (attention?.production_reviews.available && attention.production_reviews.total > 0) taskDescription += ` · 待审稿件 ${attention.production_reviews.total} 篇（按现有权限范围）`;
+  if (!isManagementRole && attention?.production_reviews.available && attention.production_reviews.total > 0) taskDescription += ` · 待审稿件 ${attention.production_reviews.total} 篇（按现有权限范围）`;
   if (attention?.my_retro_actions.available && attention.my_retro_actions.total > 0) taskDescription += ` · 我的复盘行动项 ${attention.my_retro_actions.total} 项`;
 
   const reloadAttention = async () => {

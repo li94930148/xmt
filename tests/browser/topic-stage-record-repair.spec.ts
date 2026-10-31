@@ -1736,13 +1736,17 @@ try {
   assert.match(await desktopManagerPriorityTasks.nth(3).getAttribute('aria-label') || '', /^开始审核：/);
   await managerHome.getByRole('heading', { name: '团队工作概览' }).waitFor();
   const managerCrossModuleOverview = managerHome.getByTestId('home-cross-module-overview');
-  await managerCrossModuleOverview.getByRole('button', { name: '选题卡点：2 项，逾期 1 · 卡点 1 · 临近 1' }).waitFor();
+  assert.equal(await managerCrossModuleOverview.getByTestId('home-cross-module-metric').count(), 5, 'the compact cross-module summary omits topic attention already shown below');
+  assert.equal(await managerCrossModuleOverview.getByRole('button', { name: /选题卡点/ }).count(), 0, 'topic attention is not repeated in the cross-module summary');
   await managerCrossModuleOverview.getByRole('button', { name: '待审选题：4 项，进入选题审核' }).waitFor();
   await managerCrossModuleOverview.getByRole('button', { name: '待审稿件：1 项，按现有稿件权限范围' }).waitFor();
   await managerCrossModuleOverview.getByRole('button', { name: '今日待发布：1 项，按现有发布权限范围' }).waitFor();
   await managerCrossModuleOverview.getByRole('button', { name: '同步异常：1 项，失败或未完整的账号' }).waitFor();
   await managerCrossModuleOverview.getByRole('button', { name: '待办消息：1 项，未读且可跟进' }).waitFor();
   await managerCrossModuleOverview.getByText('各项目按当前账号已有权限与可见范围统计。', { exact: true }).waitFor();
+  await managerHome.getByText('优先处理待办消息和数据异常，再跟进团队选题与审核事项', { exact: true }).waitFor();
+  const desktopMetricHeights = await managerCrossModuleOverview.getByTestId('home-cross-module-metric').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  assert(desktopMetricHeights.every((height) => height <= 44), `cross-module metrics stay compact and touchable: ${desktopMetricHeights.join(',')}`);
   const userMenuButton = managerHome.locator('button[title="打开用户菜单"]');
   await userMenuButton.waitFor();
   assert.equal(await userMenuButton.getAttribute('title'), '打开用户菜单');
@@ -2032,7 +2036,8 @@ try {
   managerProductionApprovalWrites = 0;
   await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
   const managerMobileOverview = managerMobile.getByTestId('home-cross-module-overview');
-  await managerMobileOverview.getByRole('button', { name: '选题卡点：2 项，逾期 1 · 卡点 1 · 临近 1' }).waitFor();
+  assert.equal(await managerMobileOverview.getByTestId('home-cross-module-metric').count(), 5, 'mobile keeps the same compact cross-module queues without a duplicate topic metric');
+  assert.equal(await managerMobileOverview.getByRole('button', { name: /选题卡点/ }).count(), 0);
   await managerMobileOverview.getByRole('button', { name: '待办消息：1 项，未读且可跟进' }).waitFor();
   const managerQuickActions = managerMobile.getByTestId('mobile-home-quick-action');
   assert(await managerQuickActions.count() >= 3, 'the management mobile Home renders its available quick actions');

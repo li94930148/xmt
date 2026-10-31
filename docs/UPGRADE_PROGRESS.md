@@ -1,5 +1,14 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B4：管理首页跨模块待办摘要与移动触控（v10.1.47）
+
+- **发现与改造**：管理首页“团队今日重点”原先重复陈述发布、消息、同步异常和稿件审核数量；“团队工作概览”跨模块摘要又重复显示首页下方独立、可操作的选题卡点区。现将摘要按钮压缩为至少 40px 高、可换行的紧凑控件；管理角色摘要保留待审选题、待审稿件、今日待发布、同步异常、待办消息五项，继续按原权限范围显示和导航。管理重点说明不再重复摘要数量。非管理角色仍保留选题卡点事项及原有重点说明口径。
+- **Chrome DevTools MCP 隔离验收**：桌面 1440×960 与手机 390×844（DPR 2）使用合成负责人账号和内存数据。桌面、手机均显示五项跨模块摘要且每项 40px 高；管理摘要没有重复选题卡点；手机 `documentElement.scrollWidth` 与 390px 视口一致。无障碍快照保留包含事项、数量和范围说明的按钮名称。只读点击“待审选题”到达 `/topics?status=pending`，审核视图选中；隔离页无控制台错误或业务写入。两种尺寸截图保存在本机临时目录供本次复核，不作为仓库资源。
+- **自动回归与工程检查**：`npm run test:home-dashboard` 通过；`npm run test:home-cross-module-overview` 2/2 通过；`npm run test:version-governance`、`npm run test:changelog-governance`（725 个版本）、`npm run test:android-runtime`、`npm run version:check`、定向 ESLint、`npm run check -- --pretty false`、`npm run build` 与 `git diff --check` 通过。构建仍显示既有的部分资源块超过 500 kB 提示。`npm run test:topic-stage-record-repair-browser` 在 macOS Chromium 启动阶段遇 `bootstrap_check_in ... Permission denied (1100)`，未进入断言；Chrome DevTools MCP 手工验收不记作自动套件通过。
+- **依赖安全审计**：`npm audit --omit=dev --audit-level=moderate` 报告 0 项漏洞。全依赖安装审计报告 16 项 moderate，涉及 ESLint、Capacitor CLI、nodemon、glob/minimatch 等开发工具依赖；本版本未改依赖，部署使用的生产依赖审计结果为 0。
+- **生产只读预检**：预检时生产仍运行 v10.1.46；PM2 `xmt-api` online、Caddy active、`/api/health` 返回正常，SQLite `quick_check` 为 `ok` 且外键违规数为 0。根分区可用 21 GB、inode 使用 11%；三处备份目录可读取，最近主备份为 2026-10-31 03:00；备份保留脚本 dry-run 删除数为 0。此项预检不等同于本次部署后的验收。
+- **范围与发布门禁**：只调整首页显示密度、重复摘要与相应浏览器回归、版本说明；不改 API、工作流权限、数据库或 Android 原生代码。Android 元数据为 10.1.47 / 100147，未构建 APK。推送后仍须核对 PR 的 `fast-gate` 与 `core-security-contract`，对合并后的精确 40 位 SHA 执行安全部署，并完成部署后健康检查，不能以本地预检代替。
+
 ## 2026-10-30 发布准备：依赖安全更新与主题回归稳定性（v10.1.46）
 
 - **依赖风险**：完整依赖审计发现 re2js 2.8.6、qs 6.16.0 与 postcss-selector-parser 的易受影响版本；更新至 re2js 2.9.1、qs 6.17.1、postcss-selector-parser 6.1.5。npm ci 后 npm audit --audit-level=moderate 报告 0 项漏洞；覆盖 GHSA-gg6h-894w-4m9c 与 GHSA-6pq8-jhm2-2vcw。

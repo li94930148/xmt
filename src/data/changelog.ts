@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.47',
+    date: '2026-10-31',
+    title: '首页跨模块待办摘要优化',
+    impactScope: ['管理首页', '移动端首页', '待办概览'],
+    changes: [
+      { type: 'improvement', description: '管理首页的跨模块待办改为紧凑且便于触控的按钮，手机端自动换行；重复的选题卡点摘要及重点说明中的重复数量已移除。' },
+    ],
+  },
+  {
     version: '10.1.46',
     date: '2026-10-30',
     title: '依赖安全、主题回归与发布状态校验',

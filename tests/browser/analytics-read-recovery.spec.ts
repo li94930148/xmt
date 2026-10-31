@@ -67,7 +67,10 @@ let releaseHeldTeamDailyRead: (() => void) | null = null;
 let nextTeamDailyReadStarted: Promise<void> | null = null;
 const app = express();
 
-app.get('/__qa', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','analytics-read-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/analytics');</script>`));
+app.get('/__qa', (req, res) => {
+  const theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','analytics-read-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/analytics');</script>`);
+});
 app.get('/__qa/report-center', (req, res) => {
   fixtureRole = req.query.role === 'director' ? 'director' : user.role;
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify({ ...user, role: fixtureRole }))});localStorage.setItem('xmt_token','analytics-read-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/export');</script>`);
@@ -279,6 +282,72 @@ const analyticsViewportCases = [
     label: `${width}x${height} @ ${zoom}% (CSS viewport equivalent)`,
   }))),
 ];
+
+function parseComputedRgb(color: string): [number, number, number, number] {
+  const match = color.match(/^rgba?\(([^)]+)\)$/);
+  assert.ok(match, `Browser should resolve a concrete RGB color, received ${color}`);
+  const channels = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+  assert.ok(channels.length >= 3, `RGB color should contain three channels, received ${color}`);
+  return [channels[0], channels[1], channels[2], channels[3] ?? 1];
+}
+
+function relativeLuminance([red, green, blue]: [number, number, number, number]) {
+  const linearize = (channel: number) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return linearize(red) * 0.2126 + linearize(green) * 0.7152 + linearize(blue) * 0.0722;
+}
+
+function contrastRatio(foreground: string, background: string) {
+  const [foregroundLuminance, backgroundLuminance] = [relativeLuminance(parseComputedRgb(foreground)), relativeLuminance(parseComputedRgb(background))].sort((a, b) => b - a);
+  return (foregroundLuminance + 0.05) / (backgroundLuminance + 0.05);
+}
+
+async function assertAnalyticsStatColors(page: import('playwright').Page, expectedTheme: 'light' | 'dark') {
+  const colors = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const resolveToken = (token: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${token})`;
+      document.body.appendChild(probe);
+      const resolved = getComputedStyle(probe).color;
+      probe.remove();
+      return resolved;
+    };
+
+    return {
+      theme: rootStyle.colorScheme,
+      surfaces: ['--xmt-app-bg', '--xmt-surface'].map(resolveToken),
+      cards: [...document.querySelectorAll<HTMLElement>('[data-analytics-stat-unit]')].map((unit) => {
+        const tone = unit.dataset.analyticsStatUnit || '';
+        const icon = document.querySelector<HTMLElement>(`[data-analytics-stat-icon="${tone}"]`);
+        return {
+          tone,
+          textColor: getComputedStyle(unit).color,
+          textToken: unit.style.color,
+          iconBackground: icon ? getComputedStyle(icon).backgroundColor : '',
+          iconBackgroundToken: icon?.style.backgroundColor || '',
+          iconColor: icon?.querySelector('svg') ? getComputedStyle(icon.querySelector('svg')!).color : '',
+        };
+      }),
+    };
+  });
+
+  assert.equal(colors.theme, expectedTheme, `${expectedTheme} theme is active for analytics stat colors`);
+  assert.deepEqual(colors.cards.map(({ tone }) => tone).sort(), ['coral', 'primary', 'success', 'violet'], 'all four analytics stat tones are rendered');
+  for (const card of colors.cards) {
+    assert.equal(card.textToken, `var(--xmt-${card.tone}-contrast)`, `${card.tone} unit text uses its theme-aware contrast token`);
+    assert.equal(card.iconBackgroundToken, `var(--xmt-${card.tone}-soft)`, `${card.tone} icon tile uses its theme-aware soft token`);
+    assert.notEqual(card.iconColor, '', `${card.tone} icon resolves a foreground color`);
+    const [, , , alpha] = parseComputedRgb(card.iconBackground);
+    assert.ok(alpha > 0 && alpha < 1, `${card.tone} icon backplate resolves to a visible translucent color: ${card.iconBackground}`);
+    for (const surface of colors.surfaces) {
+      const ratio = contrastRatio(card.textColor, surface);
+      assert.ok(ratio >= 4.5, `${card.tone} unit text contrast is at least 4.5:1 in ${expectedTheme} mode: ${ratio.toFixed(2)}:1`);
+    }
+  }
+}
 
 async function assertControlVisibleAndFocusable(page: import('playwright').Page, control: Locator, label: string, viewportLabel: string) {
   assert.equal(await control.count(), 1, `${viewportLabel}: ${label} exists exactly once`);
@@ -524,6 +593,7 @@ try {
 
   await page.getByRole('button', { name: '重新加载统计', exact: true }).click();
   await page.locator('[data-analytics-metric="本月完成"]').getByText('6', { exact: true }).waitFor();
+  await assertAnalyticsStatColors(page, 'light');
   await assertPageHeadingsAndCopyContrast(page);
   await page.locator('[data-analytics-metric="播放量"]').scrollIntoViewIfNeeded();
   await page.waitForFunction(() => document.querySelector('[data-analytics-metric="播放量"]')?.textContent?.replace(/\D/g, '') === '12345');
@@ -827,6 +897,15 @@ try {
   await restrictedPage.getByRole('heading', { name: '你暂时没有访问这个页面的权限', exact: true }).waitFor();
   assert.equal(await restrictedPage.getByRole('heading', { name: '报告中心', exact: true }).count(), 0, 'analytics:view alone does not grant access to report exports');
   await restrictedPage.close();
+
+  const darkAnalyticsPage = await browser!.newPage({ viewport: { width: 1280, height: 800 } });
+  darkAnalyticsPage.on('pageerror', (error) => errors.push(error.message));
+  await darkAnalyticsPage.goto(`${base}/__qa?theme=dark`);
+  await darkAnalyticsPage.locator('[data-analytics-stat-unit="success"]').waitFor();
+  await assertAnalyticsStatColors(darkAnalyticsPage, 'dark');
+  await darkAnalyticsPage.close();
+
+  assert.equal(apiWrites, 0, 'analytics theme color checks do not issue a business write');
   console.log('Analytics browser test passed: read failures recover truthfully, weekly clipboard fallback reports actual results, and topic/analytics CSV exports preserve failure, retry, and download feedback without writes.');
 } finally {
   await browser?.close();

@@ -62,8 +62,13 @@ const topicFilterFixtureTopics = Array.from({ length: 23 }, (_, index) => ({
   creator_id: index < 21 && index % 2 === 0 ? user.id : 96,
   assignee_id: index < 21 && index % 2 === 1 ? user.id : null,
 }));
+const boardCombinedFilterFixtureTopics = [
+  { ...topic, id: 1101, title: '抖音甲负责人看板选题', platform: '抖音', assignee_id: 96, assignee_name: '甲负责人' },
+  { ...topic, id: 1102, title: '小红书乙负责人看板选题', platform: '小红书', assignee_id: 97, assignee_name: '乙负责人' },
+];
 let topicExists = true;
 let topicFilterFixtureEnabled = false;
+let boardCombinedFilterFixtureEnabled = false;
 let topicListGetRequests = 0;
 let failNextTopicListRead = false;
 let delayNextTopicListRead = false;
@@ -242,6 +247,7 @@ const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
   topicFilterFixtureEnabled = req.query.filter_fixture === 'true';
+  boardCombinedFilterFixtureEnabled = req.query.board_filter_fixture === 'true';
   if (req.query.fail_list_get === 'true') {
     topicListGetRequests = 0;
     failNextTopicListRead = true;
@@ -271,6 +277,11 @@ app.get('/api/topics', async (req, res) => {
   if (failNextTopicListRead) {
     failNextTopicListRead = false;
     return res.status(503).json({ message: '模拟选题列表读取失败' });
+  }
+  if (boardCombinedFilterFixtureEnabled) {
+    const isBoardRequest = Number(req.query.limit) >= 200;
+    const data = isBoardRequest ? boardCombinedFilterFixtureTopics : boardCombinedFilterFixtureTopics.slice(0, 1);
+    return res.json({ data, total: boardCombinedFilterFixtureTopics.length, page: 1, limit: Number(req.query.limit) || 15 });
   }
   if (topicFilterFixtureEnabled) {
     const status = String(req.query.status || '');
@@ -909,6 +920,47 @@ try {
   assert.equal(boardAuditWrites, 2, 'desktop and mobile board audits each write exactly once');
   assert.equal(boardAuditAttempts, mobileAttemptsBefore + 1, 'the mobile board does not issue a duplicate audit write');
   await mobileBoard.close();
+
+  const boardQueryFilterPage = await context.newPage();
+  boardQueryFilterPage.setDefaultTimeout(5000);
+  boardQueryFilterPage.on('pageerror', (error) => errors.push(error.message));
+  const boardQueryFilterMethods: string[] = [];
+  boardQueryFilterPage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') boardQueryFilterMethods.push(request.method());
+  });
+  await boardQueryFilterPage.goto(`${base}/__qa?filter_fixture=true`);
+  await boardQueryFilterPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  await boardQueryFilterPage.getByRole('button', { name: '看板', exact: true }).click();
+  await boardQueryFilterPage.getByRole('combobox', { name: '按状态筛选选题' }).selectOption('completed');
+  const boardQuerySearch = boardQueryFilterPage.getByRole('textbox', { name: '搜索选题标题或描述' });
+  await boardQuerySearch.fill('没有匹配的看板搜索条件');
+  await boardQueryFilterPage.getByRole('heading', { name: '没有匹配当前筛选条件的选题', exact: true }).waitFor();
+  await boardQueryFilterPage.getByText('没有符合当前标题搜索或状态筛选的选题。', { exact: true }).waitFor();
+  await boardQueryFilterPage.getByRole('button', { name: '清除筛选', exact: true }).click();
+  await boardQueryFilterPage.locator('article').first().waitFor();
+  assert.equal(await boardQuerySearch.inputValue(), '', 'clearing the board empty state clears the title search');
+  assert.equal(await boardQueryFilterPage.getByRole('combobox', { name: '按状态筛选选题' }).inputValue(), '', 'clearing the board empty state clears the status filter');
+  assert.ok(boardQueryFilterMethods.length >= 4 && boardQueryFilterMethods.every((method) => method === 'GET'), 'board filter recovery issues only list reads');
+  await boardQueryFilterPage.close();
+
+  const boardLocalFilterPage = await context.newPage();
+  boardLocalFilterPage.setDefaultTimeout(5000);
+  boardLocalFilterPage.on('pageerror', (error) => errors.push(error.message));
+  const boardLocalFilterMethods: string[] = [];
+  boardLocalFilterPage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') boardLocalFilterMethods.push(request.method());
+  });
+  await boardLocalFilterPage.goto(`${base}/__qa?board_filter_fixture=true`);
+  await boardLocalFilterPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  await boardLocalFilterPage.getByRole('button', { name: '看板', exact: true }).click();
+  await boardLocalFilterPage.locator('article').filter({ hasText: '抖音甲负责人看板选题' }).waitFor();
+  await boardLocalFilterPage.getByRole('combobox', { name: '看板平台筛选' }).selectOption('抖音');
+  await boardLocalFilterPage.getByRole('combobox', { name: '看板负责人筛选' }).selectOption('97');
+  await boardLocalFilterPage.getByRole('heading', { name: '没有匹配的选题', exact: true }).waitFor();
+  await boardLocalFilterPage.getByText('调整平台或负责人筛选条件后再试。', { exact: true }).waitFor();
+  assert.equal(await boardLocalFilterPage.getByRole('button', { name: '清除筛选', exact: true }).count(), 0, 'an empty board-local combination keeps the board filter guidance');
+  assert.ok(boardLocalFilterMethods.every((method) => method === 'GET'), 'board-local empty filtering issues no writes');
+  await boardLocalFilterPage.close();
 
   const boardRecoveryPage = await context.newPage();
   boardRecoveryPage.setDefaultTimeout(5000);

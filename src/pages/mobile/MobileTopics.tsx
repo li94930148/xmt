@@ -380,10 +380,15 @@ export default function MobileTopics() {
       topics={visibleTopics}
       total={data?.total ?? 0}
       statusFilter={filter === 'pending' || filter === 'creation' ? filter : ''}
+      hasActiveQueryFilters={Boolean(search.trim() || filter !== 'all')}
       loading={isLoading}
       canUpdate={statusRecoveryReady && !statusRecoveryStorageUnavailable && hasPermission('topic:update')}
       canAudit={statusRecoveryReady && !statusRecoveryStorageUnavailable && hasPermission('topic:audit')}
       statusVerificationIds={statusVerificationIds}
+      onClearQueryFilters={() => {
+        setSearch('');
+        chooseFilter('all');
+      }}
       onOpenTopic={(topic) => { void openBoardTopic(topic); }}
       onTransition={transitionTopic}
     /> : <>

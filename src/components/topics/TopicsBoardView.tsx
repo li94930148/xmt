@@ -42,16 +42,18 @@ export type TopicsBoardViewProps = {
   topics: Topic[];
   total: number;
   statusFilter: string;
+  hasActiveQueryFilters: boolean;
   loading: boolean;
   canUpdate: boolean;
   canAudit: boolean;
   statusVerificationIds?: ReadonlySet<number>;
+  onClearQueryFilters: () => void;
   onOpenTopic: (topic: Topic) => void;
   onTransition: (topic: Topic, status: TopicStatus) => void | Promise<void>;
 };
 
 export default function TopicsBoardView({
-  topics, total, statusFilter, loading, canUpdate, canAudit, statusVerificationIds, onOpenTopic, onTransition,
+  topics, total, statusFilter, hasActiveQueryFilters, loading, canUpdate, canAudit, statusVerificationIds, onClearQueryFilters, onOpenTopic, onTransition,
 }: TopicsBoardViewProps) {
   const [platformFilter, setPlatformFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
@@ -119,7 +121,18 @@ export default function TopicsBoardView({
       {loading ? (
         <div role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-8 text-center text-sm text-studio-text-secondary">正在加载选题看板…</div>
       ) : filteredTopics.length === 0 ? (
-        <EmptyState title="没有匹配的选题" description="调整平台或负责人筛选条件后再试。" />
+        topics.length === 0 && hasActiveQueryFilters ? (
+          <EmptyState
+            title="没有匹配当前筛选条件的选题"
+            description="没有符合当前标题搜索或状态筛选的选题。"
+            actionLabel="清除筛选"
+            onAction={onClearQueryFilters}
+          />
+        ) : topics.length === 0 ? (
+          <EmptyState title="暂无选题" description="提报选题后会在这里进入生产链路。" />
+        ) : (
+          <EmptyState title="没有匹配的选题" description="调整平台或负责人筛选条件后再试。" />
+        )
       ) : (
         <div role="region" className="flex min-w-0 gap-4 overflow-x-auto pb-4" aria-label="选题状态看板">
           {visibleColumns.map((column) => {

@@ -39,6 +39,7 @@ router.use('/create-requests/:requestId', noStoreResponse);
 router.use('/:id/actions/create-requests/:requestId', noStoreResponse);
 router.use('/actions/:actionId/update-requests/:requestId', noStoreResponse);
 router.use('/:id/update-requests/:requestId', noStoreResponse);
+router.get('/:id', noStoreResponse);
 router.use(authenticate);
 
 function getQueryString(req: Request, key: string) {

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { queryAll, execute, runInTransaction } from '../database/utils';
 
 const router = Router();
@@ -42,7 +43,7 @@ router.delete('/mobile-devices/:deviceId', authenticate, async (req, res) => {
 });
 
 // 获取当前用户的通知偏好
-router.get('/preferences', authenticate, async (req, res) => {
+router.get('/preferences', noStoreResponse, authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
 

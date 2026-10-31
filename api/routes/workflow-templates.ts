@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { requirePermission } from '../middleware/permissions';
 import { beijingNow, execute, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { canAccessTopic, canApproveWorkflowNode, getTopicScopeById, getWorkflowNodeById, isPrivilegedUser } from '../utils/access';
@@ -152,7 +153,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const template = await queryOne(`
       SELECT wt.*, u.name as creator_name

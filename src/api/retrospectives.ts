@@ -309,6 +309,10 @@ export function getRetrospectiveDetail(id: number, init?: RequestInit) {
   return requestJson<RetrospectiveDetail>(`/${id}`, '加载复盘详情失败', init);
 }
 
+export function getRetrospectiveDetailForRecovery(id: number) {
+  return getRetrospectiveDetail(id, { cache: 'no-store' });
+}
+
 export function getRetroDailyRisks(id: number) {
   return requestJson<{ risks: RetroDailyRiskItem[] }>(`/${id}/daily-risks`, '加载日报风险失败');
 }

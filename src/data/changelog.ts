@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.57',
+    date: '2026-10-31',
+    title: '恢复核实与复盘弹窗改进',
+    impactScope: ['创作', '复盘', '工作流模板', '消息通知'],
+    changes: [
+      { type: 'fix', description: '恢复操作确认结果时读取最新状态，避免浏览器缓存影响判断。' },
+      { type: 'improvement', description: '新建复盘表单字段和按钮更易触控，键盘焦点清楚可见。' },
+    ],
+  },
+  {
     version: '10.1.56',
     date: '2026-10-31',
     title: '删除与更新结果核实防缓存',

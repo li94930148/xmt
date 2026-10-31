@@ -896,7 +896,7 @@ router.post('/production', authenticate, requirePermission('production:update'),
   }
 });
 
-router.get('/production/:id', authenticate, async (req, res) => {
+router.get('/production/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const production = await queryOne(`SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, origin.source_type as origin_source_type, origin.source_content_snapshot as origin_source_content_snapshot, origin.source_outline_version as origin_source_outline_version, origin.source_topic_id as origin_source_topic_id, origin.captured_at as origin_captured_at, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN production_origin_snapshots origin ON origin.production_id = p.id WHERE p.id = ?`, [req.params.id]);
     if (!production) return res.status(404).json({ message: '创作记录不存在' });

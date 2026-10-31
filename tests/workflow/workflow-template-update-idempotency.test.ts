@@ -81,6 +81,13 @@ const keyedUpdate = (userId: number, id: number, body: unknown, baseFingerprint:
 });
 
 try {
+  const unauthenticatedTemplateDetail = await fetch(`${base}/${templateId}`);
+  assert.equal(unauthenticatedTemplateDetail.status, 401);
+  assert.equal(unauthenticatedTemplateDetail.headers.get('cache-control'), 'no-store');
+  const missingTemplateDetail = await fetch(`${base}/999999`, { headers: headers(editorId) });
+  assert.equal(missingTemplateDetail.status, 404);
+  assert.equal(missingTemplateDetail.headers.get('cache-control'), 'no-store');
+
   const unauthenticatedStatus = await fetch(statusUrl(templateId, requestId, 'a'.repeat(64)));
   assert.equal(unauthenticatedStatus.status, 401);
   assert.equal(unauthenticatedStatus.headers.get('cache-control'), 'no-store');
@@ -97,6 +104,7 @@ try {
 
   const initialDetailResponse = await fetch(`${base}/${templateId}`, { headers: headers(editorId) });
   assert.equal(initialDetailResponse.status, 200);
+  assert.equal(initialDetailResponse.headers.get('cache-control'), 'no-store');
   const initialDetail = await initialDetailResponse.json() as {
     name: string;
     description: string | null;

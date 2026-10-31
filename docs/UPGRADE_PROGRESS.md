@@ -1,19 +1,27 @@
 # XMT 升级阶段记录
 
-## 2026-10-31 清单 B8：删除、完成与更新结果核实防缓存（v10.1.56，本地）
+## 2026-10-31 清单 B8/B4：恢复读取防缓存与复盘弹窗键盘/触控（v10.1.57）
+
+- **发现与改造**：继续 B8 逐条检查写入后的恢复读取，补齐创作/复盘详情、工作流模板详情更新核实、通知偏好与批量消息操作的防缓存；对应服务端响应在认证前禁止缓存，恢复读取显式绕过浏览器缓存。B4 复盘新建表单字段和操作统一至少 40px，移除对全局键盘焦点框的隐藏，并沿用 Studio 焦点样式。
+- **回归与数据边界**：`npm run test:recovery-status-cache`、`npm run test:mobile-device-registry`、`npm run test:topic-production-handoff` 通过；浏览器夹具只使用合成数据、无业务写入。Playwright MCP 与 Chrome DevTools MCP 在 1440/390/320px、浅/深主题下核对弹窗渲染、40px 控件、无横向溢出和键盘焦点环：实测控件均为 40px，焦点环为 2px/偏移 2px，页面宽度等于视口，控制台 0 错误。自动 `test:retrospective-list-responsive-browser` 在 Chromium 启动阶段遇 macOS 权限错误 1100，未进入断言；手工 MCP 证据不记作自动套件通过。
+- **版本与工程门禁**：Android 元数据为 10.1.57 / 100157，未构建 APK。干净依赖安装、版本检查/治理、更新说明治理（735 个版本）、Android runtime 合同、测试入口检查（326 个入口）、`npm run check -- --pretty false`、全仓 ESLint（0 errors / 283 warnings）、生产构建、生产依赖审计（0 vulnerabilities）和 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。
+- **范围与发布状态**：无 API 载荷、权限规则、数据库结构或真实业务数据变化。PR、CI、部署备份/恢复演练及线上核验结果见本版本对应的 GitHub PR；Android 原生专项仍按用户要求后置。
+- **后续方向**：继续 B8 其他恢复与回执路径、B4/B5 全站主题/响应式/键盘/辅助技术验收，以及等待可信口径的 G 项；Android 原生专项后置。
+
+## 2026-10-31 清单 B8：删除、完成与更新结果核实防缓存（v10.1.56）
 
 - **发现与改造**：选题/灵感删除、拍摄删除/完成、发布删除/更新的恢复状态读取复用了普通详情 GET，客户端没有明确绕过浏览器缓存，服务端响应也没有统一禁止缓存。现在这些客户端恢复读取设置 `cache: no-store`；服务端旧版与 v1 选题详情、灵感详情、拍摄详情和发布详情在认证前设置 `Cache-Control: no-store`。选题普通详情读取仍可使用原行为，只有恢复状态调用显式绕过客户端缓存。
-- **回归与数据边界**：`npm run test:recovery-status-cache` 已通过。隔离 API 回归检查旧版/v1 选题详情、灵感详情和拍摄/发布详情的成功、未找到及未登录响应；客户端合同检查 18 个恢复读取函数使用 `cache: no-store`。测试使用临时数据库，没有访问或修改真实业务数据；现有角色范围和发布结果对比语义保持不变。
-- **版本与工程门禁**：Android 元数据为 10.1.56 / 100156，未构建 APK。`npm run test:recovery-status-cache`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（734 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（325 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留已有超过 500 kB 的分包提示。
-- **发布状态**：本次正在执行用户明确授权的推送与部署；提交、PR、CI、备份/恢复演练及线上核验结果完成后补记。
-- **后续方向**：继续 B8 其他写入恢复路径与 B4/B5 全站主题、响应式、键盘及辅助技术验收；需要可信业务指标或外部数据的判断不自行设定，Android 原生专项仍按用户要求后置。
+- **回归与数据边界**：隔离 API 回归检查旧版/v1 选题详情、灵感详情和拍摄/发布详情的成功、未找到及未登录响应；客户端合同检查 18 个恢复读取函数使用 `cache: no-store`。测试使用临时数据库，没有访问或修改真实业务数据；现有角色范围和发布结果对比语义保持不变。
+- **版本与工程门禁**：Android 元数据为 10.1.56 / 100156，未构建 APK。PR #102 与精确合并 SHA `3b0dbf2adeed08c4bdc8b34fa8fbac76c41d06d3` 的 CI 均为 6/6 通过；版本/更新说明治理、Android runtime、测试入口、TypeScript、ESLint（0 errors / 283 warnings）、生产构建和 `git diff --check` 通过。构建保留既有超过 500 kB 的分包提示。
+- **生产发布核验**：已部署到生产，PM2 v10.1.56 online、Caddy active；本机及公网 `/api/health` 健康，首页 HTTP 200，4 条公网内部诊断路径均返回 404；SQLite `quick_check=ok`、外键违规 0。部署前备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261031-140629-3810888.db`，非破坏恢复演练通过，迁移兼容门禁 GO。磁盘可用 20 GB、inode 使用 10%，备份保留 dry-run 未删除文件；生产依赖审计 0 vulnerabilities。
+- **范围与后续**：无数据库迁移、API 载荷或权限语义变化，未构建 APK。v10.1.55 跨模块恢复核实作为同一完整版的一部分随 PR #102 一并部署。继续 B8 其他写入恢复路径与 B4/B5 全站验收；Android 原生专项后置。
 
 ## 2026-10-31 清单 B8：跨模块写入结果恢复状态防缓存（v10.1.55，本地）
 
 - **发现与改造**：灵感创建/投票、复盘创建/更新/行动项创建与更新、成员创建/更新/删除、创作创建、拍摄创建及发布创建的恢复状态读取，原先有的响应可能在认证失败时缺少防缓存头，或客户端没有绕过浏览器缓存。现在服务端状态路由在身份验证前设置 `Cache-Control: no-store`，客户端 12 个状态读取入口均使用 `cache: no-store`。
 - **回归与数据边界**：`npm run test:recovery-status-cache` 通过；隔离 HTTP 测试覆盖成功、无记录/越权隐藏、非法请求、未登录、权限撤销后读回和已删除墓碑响应，客户端合同逐个核验 12 个恢复读取函数的 `RequestInit.cache`。新合同加入 `core-security-contract` CI。所有服务端测试使用临时 SQLite 数据库；未访问或写入本机/生产真实业务数据。
 - **版本与工程门禁**：Android 元数据同步为 10.1.55 / 100155。`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（733 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（323 个测试文件）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。
-- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。v10.1.55 仅为本地未提交改造，未推送或部署。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
+- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。v10.1.55 已随 PR #102 / v10.1.56 完整版合并部署，不曾单独部署。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
 
 ## 2026-10-31 清单 B8：日历创建结果核实防缓存（v10.1.54）
 

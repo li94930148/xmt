@@ -1,11 +1,22 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B4/B5：创作者驾驶舱响应式信息层级（v10.1.51）
+
+- **发现与改造**：窄屏原先沿用竖版 ReactBits 资料卡，长海报占据首屏且把指标推远；粉丝、作品数、播放数又在账号资料卡和下方指标区重复。现保留桌面资料卡，在 1024px 以下改用紧凑头像/名称/UID/数据状态/“查看作品”行；粉丝、作品、播放集中在账号概览，互动率/分享率/爆款作品归入“互动表现”，数据来源状态行不再重复作品数。Creator Agent 设备和绑定详情移到数据、周期/作品表现及创作建议之后；顶部简短状态仍保留。窄屏时桌面 ProfileCard 不挂载，避免隐藏卡片继续启动倾斜动画。官方导出场景继续将作品数标为“官方作品”。
+- **Chrome DevTools MCP 隔离验收**：本地合成账号夹具覆盖 1440×960 桌面深色、390×844 及 320×844 手机浅色/减少动态效果。桌面卡片为 340×474px，外层 1144×516px，账号指标位于右侧；手机账号概览为 186px（390px）及 262px（320px，两列数据卡以保留完整“暂无数据”），页面无横向溢出，头像、名称、UID、数据状态及查看作品操作可见，320px 操作高度 40px。账号指标各出现一次；互动指标不重复账号总量；Creator Agent 位于互动数据下方。当前夹具页面控制台无 error（仅 Socket.IO connected 和 reduced-motion 提示）；网络仅包含合成 API GET 与 Socket.IO 握手 POST，无业务写入或生产请求。
+- **自动回归与工程检查**：新增创作者建议浏览器规格的 1440/390/320px 布局、指标唯一性、触控目标、320px 两列完整数值、窄屏概览高度及信息顺序断言；ReactBits 场景合同更新桌面/紧凑头像和指标分组。`npm run test:creator-topic-suggestions`、`npm run check -- --pretty false`、改动文件 ESLint、`npm run version:check`（v10.1.51）、`npm run test:version-governance`、`npm run test:changelog-governance`（729 个版本）、`npm run test:android-runtime`、`npm run test:studio-token-usage`（39 个令牌色类/28 个透明度值）、`npm run build` 与 `git diff --check` 通过。生产构建保留原有 >500 kB 分包提示。`npm run test:creator-topic-suggestions-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段失败，没有进入 Playwright 自动断言；Chrome DevTools MCP 手工验收不计作自动套件通过。ReactBits 场景端到端套件未运行。
+- **范围与版本**：只改创作者驾驶舱展示组件、对应浏览器断言、版本和说明文件；无 API、权限、数据库结构或 Android 原生逻辑变化。Android 元数据 10.1.51 / 100151，未构建 APK、未做设备专项。发布与部署核验见本版本对应的 GitHub PR；自动浏览器断言和 Android 专项未由生产部署替代。
+- **后续开放项**：继续 B4/B5 全站页面/主题/响应式验收、B8 全量写入和恢复路径盘点、等待可信来源的 G 规则，以及用户要求后置的 Android 专项。
+
 ## 2026-10-31 清单 B4/B5/G：最近变化数据校验与选题看板空状态（v10.1.50）
 
 - **发现与改造**：最近变化客户端过去把 HTTP 200 直接当作有效数据，现按已知事件类型、必需字段、统计范围和站内路由校验响应。桌面/移动选题看板现在分别说明上层搜索/状态筛选无结果、看板平台/负责人筛选无结果和真正空列表；上层筛选无结果提供一键清除搜索与状态筛选。
 - **Chrome DevTools MCP 隔离验收**：隔离内存夹具在桌面看板确认上层无结果显示“没有匹配当前筛选条件的选题”及“清除筛选”；清除后列表恢复。将平台选为抖音、负责人选为乙负责人后显示“没有匹配的选题”及平台/负责人调整说明。移动端确认待审核与不存在标题组合后显示对应上层筛选空状态，清除后筛选恢复。业务 API 请求仅为 GET，Socket.IO 有连接握手 POST；控制台无错误，无业务数据写入。
 - **自动回归与工程检查**：干净依赖安装（使用本机临时 npm 缓存）成功；`npm run test:entrypoints`（321 个文件）、`npm run test:analytics-stat-colors`（1/1）、`npm run test:home-activity-client`（3/3）、`npm run version:check`（v10.1.50）、`npm run test:version-governance`、`npm run test:changelog-governance`（728 个版本）、`npm run test:android-runtime`、`npm run check -- --pretty false`、`npm run lint -- --quiet`、生产依赖高危审计（0 项）、`npm run test:deploy-safety`、`npm run test:internal-exposure-gate`、`npm run build` 与 `git diff --check` 通过。生产构建保留现有 >500 kB 分包提示。自动 `test:topics-responsive-browser` 和 `test:analytics-browser` 在 macOS Chromium 的 `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入自动断言；上文 Chrome DevTools MCP 手工验收不计作自动套件通过。
-- **范围与版本**：本版合并发布 v10.1.49 统计卡浅/深主题颜色、图标底色与对比度修复；不改变权限和数据库结构，无 Android 原生逻辑变化。Android 元数据为 10.1.50 / 100150，未构建 APK。后续继续 B8 全量 mutation/恢复路径盘点、B4/B5 全站主题与响应式验收、G 中等待可信来源的规则，以及用户要求后置的 Android 专项。发布 PR/远端 CI/生产部署证据待补。
+- **范围与版本**：本版合并发布 v10.1.49 统计卡浅/深主题颜色、图标底色与对比度修复；不改变权限和数据库结构，无 Android 原生逻辑变化。Android 元数据为 10.1.50 / 100150；主 CI 的 Debug 验收 APK 构建通过，未签名或发布 Android 安装包，也未做设备专项验收。
+- **PR 与远端 CI**：PR [#99](https://github.com/li94930148/xmt/pull/99) 已合并；PR head `c6467dfd1eea563a6989ccfa7ef887be18d355b7` 的检查 6/6 通过，合并提交 `5d913758308990a5d1e4bc8f6bbdc69df8674585` 的主 CI 6/6 通过。
+- **安全部署与线上核验**：安全部署目标 SHA 为 `5d913758308990a5d1e4bc8f6bbdc69df8674585`；在线备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261031-121819-3805285.db`，Restore Drill PASS；迁移 001–069 readiness GO；运行环境来源检查与读回 PASS，Auth v1/Web/mobile rollout 仍关闭。PM2 `xmt-api` v10.1.50 online、Caddy active；本机与公网 `/api/health` 均返回 v10.1.50 且数据库正常，公网首页 HTTP 200。生产 SQLite `quick_check=ok`、外键违规 0，公网内部暴露检查 4/4 PASS；部署后远端 HEAD 与目标 SHA 一致且工作树干净。生产依赖清理与依赖状态检查通过；npm 生产依赖高危审计为 0，完整开发依赖安装的审计另报 16 项 moderate，本版未更新这些依赖。完整自动/手工浏览器限制与工程检查见上文。
+- **后续开放项**：继续 B8 全量 mutation/恢复路径盘点、B4/B5 全站主题与响应式验收、G 中等待可信来源的规则，以及用户要求后置的 Android 专项。后续改造留在本地，等待用户另行指示再推送或部署。
 
 ## 2026-10-31 清单 B4/B5：分析统计卡片主题对比度（v10.1.49，本地未推送）
 

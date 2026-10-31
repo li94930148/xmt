@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.51',
+    date: '2026-10-31',
+    title: '创作者驾驶舱信息层级与移动布局',
+    impactScope: ['创作者数据驾驶舱', '移动端响应式', '数据摘要'],
+    changes: [
+      { type: 'improvement', description: '手机端以紧凑账号摘要展示创作者身份和查看作品入口，账号指标与互动表现分组呈现，避免重复，并将设备绑定信息放到主要数据和创作建议之后。' },
+    ],
+  },
+  {
     version: '10.1.50',
     date: '2026-10-31',
     title: '最近变化数据校验与选题看板空状态',

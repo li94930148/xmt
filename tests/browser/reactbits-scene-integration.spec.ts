@@ -254,7 +254,10 @@ async function assertCreatorStructure(page: Page) {
   await profile.waitFor({ state: 'visible', timeout: 15_000 });
   const imageDiagnostics = await inspectCreatorProfileImages(profile);
   console.log(`[reactbits-scene] creator-profile images: ${JSON.stringify(imageDiagnostics)}`);
-  const profileAvatar = profile.getByRole('img', { name: /mini avatar$/i });
+  const isDesktop = (page.viewportSize()?.width || 0) >= 1024;
+  const profileAvatar = isDesktop
+    ? profile.getByRole('img', { name: /mini avatar$/i })
+    : profile.getByRole('img', { name: /头像$/ });
   assert(await profileAvatar.count() === 1, 'Creator account avatar is not uniquely available by its accessible name');
   await waitForLoadedImage(profileAvatar);
   const avatar = await profileAvatar.evaluate((node) => {
@@ -277,14 +280,24 @@ async function assertCreatorStructure(page: Page) {
   assert(avatar.width > 0 && avatar.height > 0 && avatar.parentWidth > 0 && avatar.parentHeight > 0, 'Creator account avatar has invalid geometry');
   assert(avatar.width / avatar.height >= 0.95 && avatar.width / avatar.height <= 1.05, `Creator account avatar is no longer square: ${avatar.width}x${avatar.height}`);
 
-  const metrics = page.getByTestId('creator-core-metrics');
-  assert(await metrics.count() === 1, 'Creator core metrics are not uniquely available');
-  for (const label of ['粉丝', '入库作品', '累计播放', '互动率']) {
-    const metric = metrics.getByText(label, { exact: true }).first();
+  const accountMetrics = page.getByTestId('creator-account-metrics');
+  assert(await accountMetrics.count() === 1, 'Creator account metrics are not uniquely available');
+  for (const label of ['粉丝', '累计播放']) {
+    const metric = accountMetrics.getByText(label, { exact: true }).first();
     await metric.waitFor({ state: 'visible', timeout: 10_000 });
     const parent = metric.locator('..');
     const box = await parent.boundingBox();
     assert(box && box.width > 0 && box.height > 0, `Creator metric is not measurable: ${label}`);
+  }
+  const worksMetric = accountMetrics.getByText(/^(入库作品|官方作品)$/).first();
+  await worksMetric.waitFor({ state: 'visible', timeout: 10_000 });
+  const engagementMetrics = page.getByTestId('creator-engagement-metrics');
+  assert(await engagementMetrics.count() === 1, 'Creator engagement metrics are not uniquely available');
+  for (const label of ['互动率', '分享率', '爆款作品']) {
+    const metric = engagementMetrics.getByText(label, { exact: true }).first();
+    await metric.waitFor({ state: 'visible', timeout: 10_000 });
+    const box = await metric.locator('..').boundingBox();
+    assert(box && box.width > 0 && box.height > 0, `Creator engagement metric is not measurable: ${label}`);
   }
 
   const topWorks = page.getByRole('heading', { name: '作品表现 TOP 5', exact: true });

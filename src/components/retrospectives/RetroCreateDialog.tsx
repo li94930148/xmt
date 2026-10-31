@@ -203,7 +203,7 @@ export default function RetroCreateDialog({
             value={title}
             disabled={fieldsDisabled}
             onChange={(event) => setTitle(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
             placeholder="例如：7 月第一周内容运营复盘"
           />
         </label>
@@ -214,7 +214,7 @@ export default function RetroCreateDialog({
             value={category}
             disabled={fieldsDisabled}
             onChange={(event) => setCategory(event.target.value as RetroTemplateCategory)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
           >
             {categories.map((item) => <option key={item} value={item}>{retroCategoryLabels[item]}</option>)}
           </select>
@@ -226,7 +226,7 @@ export default function RetroCreateDialog({
             value={templateId}
             disabled={fieldsDisabled}
             onChange={(event) => setTemplateId(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
           >
             {templates.length === 0 ? <option value="">默认空模板</option> : null}
             {templates.map((template) => (
@@ -241,7 +241,7 @@ export default function RetroCreateDialog({
             value={scopeType}
             disabled={fieldsDisabled}
             onChange={(event) => setScopeType(event.target.value as RetrospectiveScopeType)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
           >
             {scopes.map((item) => <option key={item} value={item}>{retroScopeLabels[item]}</option>)}
           </select>
@@ -254,7 +254,7 @@ export default function RetroCreateDialog({
               value={ownerId}
               disabled={fieldsDisabled}
               onChange={(event) => setOwnerId(event.target.value)}
-              className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+              className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
             >
               <option value="">由后端默认</option>
               {users.map((user) => (
@@ -275,7 +275,7 @@ export default function RetroCreateDialog({
             value={periodStart}
             disabled={fieldsDisabled}
             onChange={(event) => setPeriodStart(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
           />
         </label>
 
@@ -286,7 +286,7 @@ export default function RetroCreateDialog({
             value={periodEnd}
             disabled={fieldsDisabled}
             onChange={(event) => setPeriodEnd(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 min-h-10 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary focus-visible:border-studio-border-active"
           />
         </label>
       </div>

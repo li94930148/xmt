@@ -15,7 +15,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import { useAppStore, useAuthStore } from '../store';
-import { deleteProduction, getProductionById, getProductionHistory, updateProduction } from '../api';
+import { deleteProduction, getProductionById, getProductionByIdForRecovery, getProductionHistory, updateProduction } from '../api';
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
 import ContentEditor, { type EditorCommandHandle } from '../components/ContentEditor';
@@ -581,7 +581,10 @@ export default function ProductionDetail() {
     setLinkedHistoryVersion(null);
 
     try {
-      const productionData = await getProductionById(Number.parseInt(id, 10));
+      const productionId = Number.parseInt(id, 10);
+      const productionData = options?.recovery
+        ? await getProductionByIdForRecovery(productionId)
+        : await getProductionById(productionId);
       if (requestId !== detailRequestRef.current) return 'stale' as const;
 
       const currentVersion = productionData.version || 'v1.0';
@@ -753,7 +756,7 @@ export default function ProductionDetail() {
     setProductionAutosaveRecovery(checking);
     setProductionAutosaveRecoveryReadError('');
     try {
-      const record = await getProductionById(recovery.productionId, { cache: 'no-store' });
+      const record = await getProductionByIdForRecovery(recovery.productionId);
       if (record.id !== recovery.productionId) throw new Error('服务器返回的创作记录与当前页面不一致。');
       const serverContent = String(record.content || '');
       const serverFingerprint = await fingerprintProductionContent(serverContent);
@@ -897,7 +900,7 @@ export default function ProductionDetail() {
     setProductionAutosaveRetrying(true);
     try {
       if (!persistProductionAutosaveDraft(conflict.content)) return;
-      const record = await getProductionById(production.id, { cache: 'no-store' });
+      const record = await getProductionByIdForRecovery(production.id);
       const currentContent = String(record.content || '');
       if (record.id !== production.id || record.topic_id !== production.topic_id
         || (record.version || 'v1.0') !== (production.version || 'v1.0')
@@ -1055,7 +1058,7 @@ export default function ProductionDetail() {
     pendingStatusTransitionRef.current = { ...recovery, phase: 'checking' };
     setPendingStatusTransition({ ...recovery, phase: 'checking' });
     try {
-      const serverRecord = await getProductionById(Number.parseInt(id, 10));
+      const serverRecord = await getProductionByIdForRecovery(Number.parseInt(id, 10));
       if (authUserIdRef.current !== recovery.userId) return;
       if (serverRecord.id !== recovery.productionId) throw new Error('服务器返回的创作记录与当前页面不一致。');
       const serverContent = String(serverRecord.content || '');

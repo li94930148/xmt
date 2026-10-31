@@ -1,7 +1,7 @@
 import { ArrowLeft, Check, Save, Send } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { createProduction, getProductionById, getProductionCreateStatus, getProductionHistory, getTopics, updateProduction } from '@/api';
+import { createProduction, getProductionById, getProductionByIdForRecovery, getProductionCreateStatus, getProductionHistory, getTopics, updateProduction } from '@/api';
 import ContentEditor, { type EditorCommandHandle } from '@/components/ContentEditor';
 import ProductionReviewPanel from '@/components/production/ProductionReviewPanel';
 import ProductionMaterialHistorySnapshot from '@/components/production/ProductionMaterialHistorySnapshot';
@@ -524,7 +524,7 @@ export default function MobileProductionEditor() {
   }, [content, draftKey]);
   const resolveMobileProductionWrite = useCallback(async (recovery: MobileProductionWriteRecovery) => {
     try {
-      const serverRecord = await getProductionById(recovery.productionId);
+      const serverRecord = await getProductionByIdForRecovery(recovery.productionId);
       if (serverRecord.id !== recovery.productionId) throw new Error('服务器返回的稿件与当前页面不一致。');
       const serverContent = String(serverRecord.content || '');
       const serverFingerprint = await fingerprintMobileProductionContent(serverContent);

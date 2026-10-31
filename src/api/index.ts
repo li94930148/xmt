@@ -11,7 +11,7 @@ export { getMessages, getUnreadCount, getMessageReadStatus, markMessageAsRead, c
 export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicAnalytics } from './analytics';
 export { deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';
 export {
-  getProduction, createProduction, getProductionCreateStatus, getProductionById, updateProduction, deleteProduction, getProductionHistory,
+  getProduction, createProduction, getProductionCreateStatus, getProductionById, getProductionByIdForRecovery, updateProduction, deleteProduction, getProductionHistory,
   getComments, addComment, deleteComment, getShootingScriptVersions,
   getShooting, getShootingById, getShootingDeleteStatus, getShootingCompletionStatus, getShootingCreateStatus, deleteShooting, updateShooting, createShooting, syncShootingPublishedArchive,
   getPublishing, getPublishingById, getPublishingDeleteStatus, getPublishingCreateStatus, getPublishingUpdateStatus, createPublishing, updatePublishing, deletePublishing, syncPublishingPublishedArchive, getPublishingScriptVersions,

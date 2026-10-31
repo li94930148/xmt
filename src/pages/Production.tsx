@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import PageHeading from '@/components/common/PageHeading';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
-import { getProduction, getProductionById, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
+import { getProduction, getProductionByIdForRecovery, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
 import { Production as ProductionType, Topic } from '../types';
 import { Plus, Search, FileText, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ActionButton, ResponsiveTableShell } from '@/components/studio';
@@ -480,7 +480,7 @@ export default function Production() {
 
   const resolvePendingProductionUpdate = useCallback(async (pending: PendingProductionUpdateVerification) => {
     try {
-      const current = await getProductionById(pending.id);
+      const current = await getProductionByIdForRecovery(pending.id);
       if (!isProductionUpdateRecord(current)) throw new Error('服务器返回的创作记录格式不完整。');
       if (Number(current.id) !== pending.id) throw new Error('服务器返回的创作记录与待核实记录不一致。');
       if (matchesProductionUpdateTarget(current, pending)) {

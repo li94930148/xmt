@@ -6,6 +6,7 @@ import { Plus, Trash2, Edit2, ArrowRight } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
 import { ConfirmModal, FormModal, LoadingState, PageHeader } from '../components/common';
 import ActionButton from '../components/studio/ActionButton';
+import { requestWorkflowTemplateDetail } from '../api/workflowTemplateDetails';
 import { buildWorkflowRuntimeContext, getExplainability, runTransitionCheck } from '@shared/workflow/workflow_runtime';
 import { getWorkflowRiskLabel, getWorkflowRuleLabel, localizeWorkflowMessage, mapDecisionToUI, mapExplainToUI } from '../components/workflow/WorkflowUIBridge';
 import XMTCard from '../design-system/components/XMTCard';
@@ -490,11 +491,13 @@ export default function WorkflowDesigner() {
     || deleteRecoveryInvalid
   );
 
-  const fetchTemplateDetail = async (id: number, authToken = useAuthStore.getState().token || token) => {
+  const fetchTemplateDetail = async (
+    id: number,
+    authToken = useAuthStore.getState().token || token || '',
+    cache?: RequestCache,
+  ) => {
     try {
-      const response = await fetch(`/api/workflow-templates/${id}`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
+      const response = await requestWorkflowTemplateDetail(id, authToken, cache);
 
       if (!response.ok) throw new Error('Workflow template detail request failed');
 
@@ -604,7 +607,7 @@ export default function WorkflowDesigner() {
   const finishConfirmedTemplateUpdate = async (recovery: WorkflowTemplateUpdateRecovery): Promise<boolean> => {
     if (!isCurrentTemplateUpdateRecovery(recovery)) return false;
     const currentToken = useAuthStore.getState().token || '';
-    const detail = await fetchTemplateDetail(recovery.templateId, currentToken);
+    const detail = await fetchTemplateDetail(recovery.templateId, currentToken, 'no-store');
     if (!isCurrentTemplateUpdateRecovery(recovery)) return false;
     if (!detail) {
       setUpdateRecoveryState('unavailable');
@@ -713,7 +716,7 @@ export default function WorkflowDesigner() {
             setUpdateRecoveryNotice('服务器未找到更新记录；该请求曾被明确拒绝，因此不会重试。可继续只读核实，或清理已拒绝的恢复标记。');
             return 'not_found';
           }
-          const currentDetail = await fetchTemplateDetail(recovery.templateId, useAuthStore.getState().token || '');
+          const currentDetail = await fetchTemplateDetail(recovery.templateId, useAuthStore.getState().token || '', 'no-store');
           if (!isCurrentTemplateUpdateRecovery(recovery)) return 'unavailable';
           if (!currentDetail) {
             setUpdateRecoveryState('unavailable');

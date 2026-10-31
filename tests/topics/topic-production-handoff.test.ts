@@ -70,6 +70,7 @@ test('a committed draft with a lost response is resolved by status and productio
   const storage = new MemoryStorage();
   const calls: string[] = [];
   let createWrites = 0;
+  let recoveryCache: RequestCache | undefined;
   const deps = dependencies({
     recoveryStorage: storage,
     listProductions: async (topicId) => { calls.push(`list:${topicId}`); return []; },
@@ -79,13 +80,18 @@ test('a committed draft with a lost response is resolved by status and productio
       throw new TypeError('response lost after commit');
     },
     getCreateStatus: async (requestId) => { calls.push(`status:${requestId}`); return { status: 'created', productionId: 99 }; },
-    getProductionById: async (productionId) => { calls.push(`read:${productionId}`); return { id: productionId, topic_id: 7 }; },
+    getProductionById: async (productionId, options) => {
+      calls.push(`read:${productionId}`);
+      recoveryCache = options?.cache;
+      return { id: productionId, topic_id: 7 };
+    },
   });
 
   const result = await startOrResumeTopicProduction({ id: 7, status: 'production', outline: '既有选题大纲' }, deps);
 
   assert.deepEqual(result, { kind: 'opened', productionId: 99, created: true, advanced: false, verified: true });
   assert.equal(createWrites, 1);
+  assert.equal(recoveryCache, 'no-store', 'recovered production detail reads bypass the browser cache');
   assert.deepEqual(calls.map((call) => call.split(':')[0]), ['list', 'create', 'status', 'read']);
   assert.equal(readTopicProductionCreateRecovery(7, 7, storage), null, 'the receipt marker clears only after the associated production is read');
 });

@@ -108,6 +108,10 @@ export async function getProductionById(id: number, options?: { cache?: RequestC
   return response.json();
 }
 
+export function getProductionByIdForRecovery(id: number): Promise<Production> {
+  return getProductionById(id, { cache: 'no-store' });
+}
+
 export interface ProductionSourceSnapshot {
   production_id: number;
   source_topic_id: number;

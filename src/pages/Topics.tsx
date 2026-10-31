@@ -905,10 +905,15 @@ export default function Topics() {
           topics={sortedTopics}
           total={total}
           statusFilter={statusFilter}
+          hasActiveQueryFilters={Boolean(searchTerm.trim() || statusFilter)}
           loading={loading}
           canUpdate={hasPermission('topic:update')}
           canAudit={hasPermission('topic:audit')}
           statusVerificationIds={statusVerificationIds}
+          onClearQueryFilters={() => {
+            setSearchTerm('');
+            updateStatusFilter('');
+          }}
           onOpenTopic={openBoardTopic}
           onTransition={handleBoardTransition}
         />

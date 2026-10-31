@@ -29,6 +29,7 @@ import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCar
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsMetricSlot } from '../features/reactbits-appearance/slots/ReactBitsMetricSlot';
 import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
+import { analyticsStatToneStyles } from './analyticsStatColors';
 
 export default function Analytics() {
   const navigate = useNavigate();
@@ -119,11 +120,11 @@ export default function Analytics() {
   }));
 
   const statCards = [
-    { title: '本月完成', value: teamStats?.completed_count ?? '—', unit: '个选题', icon: BarChart3, color: 'var(--xmt-success)' },
-    { title: '完成率', value: teamStats ? `${teamStats.completion_rate}%` : '—', unit: '团队整体', icon: TrendingUp, color: 'var(--xmt-primary)' },
-    { title: '逾期率', value: teamStats ? `${teamStats.overdue_rate}%` : '—', unit: '当前周期', icon: TrendingUp, color: 'var(--xmt-coral)' },
-    { title: '平均耗时', value: teamStats?.avg_days ?? '—', unit: '天 / 选题', icon: Users, color: 'var(--xmt-violet)' },
-  ];
+    { title: '本月完成', value: teamStats?.completed_count ?? '—', unit: '个选题', icon: BarChart3, tone: 'success' },
+    { title: '完成率', value: teamStats ? `${teamStats.completion_rate}%` : '—', unit: '团队整体', icon: TrendingUp, tone: 'primary' },
+    { title: '逾期率', value: teamStats ? `${teamStats.overdue_rate}%` : '—', unit: '当前周期', icon: TrendingUp, tone: 'coral' },
+    { title: '平均耗时', value: teamStats?.avg_days ?? '—', unit: '天 / 选题', icon: Users, tone: 'violet' },
+  ] as const;
 
   const metricCards = [
     { label: '播放量', value: monthlyStats?.total_views ?? null, icon: Play, color: 'text-studio-primary' },
@@ -209,6 +210,7 @@ export default function Analytics() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             {statCards.map((card, index) => {
               const Icon = card.icon;
+              const toneStyles = analyticsStatToneStyles[card.tone];
               return (
                 <ReactBitsCardSlot
                   key={index}
@@ -221,15 +223,16 @@ export default function Analytics() {
                       <p data-analytics-metric={card.title} className={`mt-3 text-3xl font-bold tracking-tight ${styles.textPrimary}`}>
                         {card.value === '—' ? '—' : <ReactBitsMetricSlot value={typeof card.value === 'number' ? card.value : undefined}>{String(card.value)}</ReactBitsMetricSlot>}
                       </p>
-                      <p className="mt-1 text-xs" style={{ color: card.color }}>
+                      <p data-analytics-stat-unit={card.tone} className="mt-1 text-xs" style={{ color: toneStyles.text }}>
                         {card.unit}
                       </p>
                     </div>
                     <div
+                      data-analytics-stat-icon={card.tone}
                       className="flex h-12 w-12 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-110"
-                      style={{ backgroundColor: `${card.color}15` }}
+                      style={{ backgroundColor: toneStyles.iconBackground }}
                     >
-                      <Icon className="w-6 h-6" style={{ color: card.color }} />
+                      <Icon className="w-6 h-6" style={{ color: toneStyles.icon }} />
                     </div>
                   </div>
                 </ReactBitsCardSlot>

@@ -11,6 +11,26 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.50',
+    date: '2026-10-31',
+    title: '最近变化数据校验与选题看板空状态',
+    impactScope: ['工作台最近变化', '桌面选题看板', '移动选题看板'],
+    changes: [
+      { type: 'fix', description: '最近变化会先核对读取结果，格式异常时明确提示重载并阻止无效跳转。' },
+      { type: 'improvement', description: '选题看板区分上层搜索/状态筛选、看板内平台/负责人筛选和真正空列表的提示；上层筛选无结果时可清除筛选。' },
+      { type: 'improvement', description: '包含数据复盘统计卡浅/深主题颜色与对比度修复。' },
+    ],
+  },
+  {
+    version: '10.1.49',
+    date: '2026-10-31',
+    title: '数据复盘统计卡主题颜色优化',
+    impactScope: ['数据复盘', '浅色与深色主题'],
+    changes: [
+      { type: 'improvement', description: '统计卡的说明文字和图标颜色随主题切换保持清晰可辨，图标底色正常显示。' },
+    ],
+  },
+  {
     version: '10.1.48',
     date: '2026-10-31',
     title: '实时提示无障碍播报与触控',

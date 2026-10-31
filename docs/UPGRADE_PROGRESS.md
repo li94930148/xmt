@@ -1,12 +1,27 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B4/B5/G：最近变化数据校验与选题看板空状态（v10.1.50）
+
+- **发现与改造**：最近变化客户端过去把 HTTP 200 直接当作有效数据，现按已知事件类型、必需字段、统计范围和站内路由校验响应。桌面/移动选题看板现在分别说明上层搜索/状态筛选无结果、看板平台/负责人筛选无结果和真正空列表；上层筛选无结果提供一键清除搜索与状态筛选。
+- **Chrome DevTools MCP 隔离验收**：隔离内存夹具在桌面看板确认上层无结果显示“没有匹配当前筛选条件的选题”及“清除筛选”；清除后列表恢复。将平台选为抖音、负责人选为乙负责人后显示“没有匹配的选题”及平台/负责人调整说明。移动端确认待审核与不存在标题组合后显示对应上层筛选空状态，清除后筛选恢复。业务 API 请求仅为 GET，Socket.IO 有连接握手 POST；控制台无错误，无业务数据写入。
+- **自动回归与工程检查**：干净依赖安装（使用本机临时 npm 缓存）成功；`npm run test:entrypoints`（321 个文件）、`npm run test:analytics-stat-colors`（1/1）、`npm run test:home-activity-client`（3/3）、`npm run version:check`（v10.1.50）、`npm run test:version-governance`、`npm run test:changelog-governance`（728 个版本）、`npm run test:android-runtime`、`npm run check -- --pretty false`、`npm run lint -- --quiet`、生产依赖高危审计（0 项）、`npm run test:deploy-safety`、`npm run test:internal-exposure-gate`、`npm run build` 与 `git diff --check` 通过。生产构建保留现有 >500 kB 分包提示。自动 `test:topics-responsive-browser` 和 `test:analytics-browser` 在 macOS Chromium 的 `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入自动断言；上文 Chrome DevTools MCP 手工验收不计作自动套件通过。
+- **范围与版本**：本版合并发布 v10.1.49 统计卡浅/深主题颜色、图标底色与对比度修复；不改变权限和数据库结构，无 Android 原生逻辑变化。Android 元数据为 10.1.50 / 100150，未构建 APK。后续继续 B8 全量 mutation/恢复路径盘点、B4/B5 全站主题与响应式验收、G 中等待可信来源的规则，以及用户要求后置的 Android 专项。发布 PR/远端 CI/生产部署证据待补。
+
+## 2026-10-31 清单 B4/B5：分析统计卡片主题对比度（v10.1.49，本地未推送）
+
+- **发现与改造**：分析页四张统计卡片原先把 `var(--xmt-*)` 令牌再拼接十六进制透明度，导致图标底色声明无效；浅色主题的成功色和紫色色值作为小号文字时也未达到 4.5:1。现改为使用 `--xmt-*-contrast` 文字/图标令牌与 `--xmt-*-soft` 图标底色令牌，并为语义色映射添加独立回归。
+- **Playwright MCP 隔离验收**：隔离分析页在浅色和深色主题下逐一核对四种语义色，实际对比度最低分别为 7.10:1 与 12.28:1；图标底色透明度分别解析为 0.08 与 0.14。390px 深色手机视口下页面无横向溢出，卡片保留 16px 左右边距；验收只发起 GET，没有业务写入。浏览器控制台只有夹具主动注入分析接口 503 的预期记录。
+- **自动回归与工程检查**：新增令牌对比度单测并加入 CI fast-gate。`npm run test:analytics-stat-colors`（1/1）、`npm run test:entrypoints`（321 个文件）、类型检查和目标 lint 通过；版本/变更说明治理、Android runtime、生产构建与部署门禁随 v10.1.50 完整版完成。`npm run test:analytics-browser` 在 macOS Chromium 启动时遇 `bootstrap_check_in ... Permission denied (1100)`，没有进入自动断言；Playwright MCP 隔离手工验收单独记录，不计作该自动套件通过。
+- **范围与版本**：只改分析统计卡片色彩令牌、回归和版本说明；无 API、权限、数据库或 Android 原生逻辑变化。Android 元数据随完整发布版本为 10.1.50 / 100150，未构建 APK。v10.1.49 未单独发布；该改造合入 v10.1.50 完整版。
+
 ## 2026-10-31 清单 B4/B5/B8：实时提示无障碍播报与触控（v10.1.48）
 
 - **改造内容**：`RealtimeToast` 现在始终保留一个 `role="status"`、`aria-live="polite"` 播报区。每条实时提示更新播报节点，因此相同文案再次到达时也能作为新提示播报；关闭按钮有包含通知标题的可访问名称，触控区域为 40×40px。`animate-slide-in` 在系统偏好为减少动态效果时关闭动画。
 - **Playwright MCP 隔离验收**：本地临时 Vite 页面只挂载真实 `RealtimeToast` 和合成提示按钮，不连接业务 API。1440×960 与 390×844 下，可访问快照显示 `status` 和“关闭通知：消息已送达”；实际关闭控件尺寸均为 40×40px，页面宽度分别等于视口宽度，手机提示未越过 16px 安全边距。启用 `prefers-reduced-motion: reduce` 后计算动画名为 `none`。提示出现时控件可见，运行时控制台无错误。组件单测另行点击逐条关闭并验证播报文本保留。
 - **测试与工程检查**：干净依赖安装后，新增实时提示回归、通知路由与消息通知回归、`version:check`、版本/变更说明治理（726 个版本）、入口检查（319 个文件）、Android 运行态契约、部署安全契约、内网暴露门禁、`npm audit --omit=dev --audit-level=high`（0 漏洞）、`npm run check -- --pretty false`、全量 `npm run lint` 与 `npm run build` 均退出成功。全量 ESLint 为 0 errors / 283 warnings；目标文件定向 lint 为 0 errors / 1 条既有 `react-refresh/only-export-components` warning。生产构建保留大分包提示（主入口 827.83 kB、Tiptap 560.08 kB、Silk 背景适配器 843.50 kB）。
 - **部署前生产只读预检（2026-10-31）**：生产仍运行 v10.1.47；PM2 `xmt-api` online、Caddy active，公网首页 HTTP 200，API 健康响应及数据库状态正常。生产 SQLite `quick_check=ok`、外键违规 0；根分区可用 20 GB、inode 使用 11%。`/www/wwwroot/xmt/emergency-backup` 与 `/www/backup/xmt` 有可读备份；`/www/wwwroot/xmt/data/backups` 不存在。备份保留 dry-run 计划删除 0 项。该只读预检不代替发布脚本在线备份、Restore Drill 和部署后核验。
-- **范围与下一步**：仅改实时提示组件、减少动态效果样式、组件回归、CI 回归入口和版本/文档；无 API、权限、数据库、真实业务数据或 Android 原生逻辑变化。Android 元数据为 10.1.48 / 100148，未构建 APK。原始 B8 症状逐项见清单复核说明，但 B8 全量 mutation/恢复路径盘点仍开放；B4/B5 全站主题与响应式验收、G 中依赖可信口径的范围和 Android 原生专项也继续开放。CI 需以本次 PR 的精确合并 SHA 核对后再部署；部署结果以本节后续核验记录为准。
+- **范围与下一步**：仅改实时提示组件、减少动态效果样式、组件回归、CI 回归入口和版本/文档；无 API、权限、数据库、真实业务数据或 Android 原生逻辑变化。Android 元数据为 10.1.48 / 100148，未构建 APK。原始 B8 症状逐项见清单复核说明，但 B8 全量 mutation/恢复路径盘点仍开放；B4/B5 全站主题与响应式验收、G 中依赖可信口径的范围和 Android 原生专项也继续开放。
+- **部署结果**：PR #98 合并，精确 SHA `f7b882f0ba9a9b05ef94f686e972e10555e82a26`；PR 检查与该合并 SHA 的主 CI 各 6/6 通过。安全部署在线备份为 `/www/wwwroot/xmt/emergency-backup/xmt-20261031-113625-3803250.db`，Restore Drill PASS，001–069 迁移就绪 GO，运行环境来源门禁与读回通过，Auth/mobile rollout 保持关闭。版本、类型检查、构建和生产依赖清理门禁通过；PM2 `xmt-api` v10.1.48 online、Caddy active。本机与公网 `/api/health` 均返回 v10.1.48 且数据库正常，公网首页 HTTP 200，新前端资源已提供；SQLite `quick_check=ok`、外键违规 0，内部暴露 4 项检查通过。PR 描述已补充部署证据。
 
 ## 2026-10-31 清单 B4：管理首页跨模块待办摘要与移动触控（v10.1.47）
 

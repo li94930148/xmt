@@ -85,6 +85,7 @@ export type HomeActivitySummary = {
 };
 
 const INVALID_HOME_ATTENTION_MESSAGE = '工作台摘要数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。';
+const INVALID_HOME_ACTIVITY_MESSAGE = '最近变化数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -92,6 +93,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRecordArray(value: unknown): value is Record<string, unknown>[] {
   return Array.isArray(value) && value.every(isRecord);
+}
+
+function isHomeActivityEvent(value: unknown): value is HomeActivityEvent {
+  if (!isRecord(value)) return false;
+  const isNonEmptyString = (field: unknown) => typeof field === 'string' && field.trim().length > 0;
+  const isInternalActivityPath = (path: string) => /^\/(?:production\/\d+(?:\?version=[^#]+)?|topics\/\d+)$/.test(path);
+
+  return (value.kind === 'version' || value.kind === 'review' || value.kind === 'reply' || value.kind === 'topic_status')
+    && isNonEmptyString(value.id)
+    && isNonEmptyString(value.label)
+    && isNonEmptyString(value.title)
+    && isNonEmptyString(value.detail)
+    && isNonEmptyString(value.occurred_at)
+    && isNonEmptyString(value.path)
+    && isInternalActivityPath(value.path as string);
+}
+
+function isHomeActivitySummary(value: unknown): value is HomeActivitySummary {
+  return isRecord(value)
+    && (value.scope === 'all-visible-content' || value.scope === 'personal')
+    && typeof value.generated_at === 'string' && value.generated_at.trim().length > 0
+    && Array.isArray(value.events) && value.events.every(isHomeActivityEvent);
 }
 
 function isHomeRetroActionSummary(value: unknown): value is HomeAttentionSummary['my_retro_actions'] {
@@ -219,5 +242,7 @@ export async function getHomeActivity(signal?: AbortSignal): Promise<HomeActivit
     const message = payload && typeof payload.message === 'string' ? payload.message : '获取最近变化失败';
     throw new Error(message);
   }
-  return response.json();
+  const payload: unknown = await response.json().catch(() => null);
+  if (!isHomeActivitySummary(payload)) throw new Error(INVALID_HOME_ACTIVITY_MESSAGE);
+  return payload;
 }

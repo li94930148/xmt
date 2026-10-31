@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "10.1.48",
+  "version": "10.1.50",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -34,6 +34,7 @@
     "test:topic-create-recovery": "tsx --test tests/topics/topic-create-recovery.test.ts tests/topics/topic-create-recovery-hook.test.tsx",
     "test:workflow-stage-crud": "tsx tests/integrity/workflow-stage-crud.test.ts",
     "test:home-dashboard": "tsx tests/home/home-dashboard.test.ts",
+    "test:home-activity-client": "tsx --test tests/home/home-activity-client-contract.test.ts",
     "test:home-cross-module-overview": "tsx --test tests/dashboard/home-cross-module-overview.test.ts",
     "test:topic-stage-timestamp": "tsx tests/database/topic-stage-entered-at-migration.test.ts",
     "test:topic-production-handoff": "tsx --test tests/topics/topic-production-handoff.test.ts",
@@ -86,6 +87,7 @@
     "test:resource-hover-contrast-browser": "tsx tests/browser/resource-table-hover-contrast.spec.ts",
     "test:resource-search-submit-lock-browser": "tsx tests/browser/resource-search-submit-lock.spec.ts",
     "test:resource-search-snippet": "tsx --test tests/resource-center/search-snippet.test.tsx",
+    "test:analytics-stat-colors": "tsx --test tests/analytics/analytics-stat-colors.test.ts",
     "test:resource-api-error": "tsx --test tests/resource-center/api-error.test.ts",
     "test:resource-create-recovery": "tsx --test tests/resource-center/resource-create-recovery.test.ts",
     "test:resource-update-recovery": "tsx --test tests/resource-center/resource-update-recovery.test.ts",

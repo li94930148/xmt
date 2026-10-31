@@ -17,6 +17,10 @@ let seedScenario = 'none';
 let seedPostRequests = 0;
 let seedListReads = 0;
 let seedDefinitions: Array<Record<string, unknown>> = [];
+let checkScenario = 'none';
+let checkPostRequests = 0;
+let checkRefreshReads = 0;
+let checkRefreshFailureInjected = false;
 const seededAchievement = {
   id: 501,
   name: '预设成就',
@@ -36,12 +40,17 @@ app.get('/__qa', (req, res) => {
   activeUser = canManage ? manager : user;
   activePermissions = canManage ? ['system:achievement'] : [];
   seedScenario = String(req.query.seedScenario || 'none');
+  checkScenario = String(req.query.checkScenario || 'none');
   seedPostRequests = 0;
   seedListReads = 0;
-  seedDefinitions = [];
+  checkPostRequests = 0;
+  checkRefreshReads = 0;
+  checkRefreshFailureInjected = false;
+  seedDefinitions = checkScenario === 'refresh-fails' ? [seededAchievement] : [];
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(activeUser))});localStorage.setItem('xmt_token','achievement-empty-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/achievements');</script>`);
 });
 app.get('/__qa/seed-state', (_req, res) => res.json({ seedPostRequests, seedListReads, definitionCount: seedDefinitions.length }));
+app.get('/__qa/check-state', (_req, res) => res.json({ checkPostRequests, checkRefreshReads }));
 app.get('/api/auth/me', (_req, res) => res.json(activeUser));
 app.get('/api/permissions/my', (_req, res) => res.json(activePermissions));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
@@ -53,11 +62,25 @@ app.get('/api/achievements', (_req, res) => {
   }
   return res.json({ data: seedDefinitions });
 });
-app.get('/api/achievements/me', (_req, res) => res.json({ data: [] }));
+app.get('/api/achievements/me', (_req, res) => {
+  if (checkScenario === 'refresh-fails' && checkPostRequests > 0) {
+    checkRefreshReads += 1;
+    if (!checkRefreshFailureInjected) {
+      checkRefreshFailureInjected = true;
+      return res.status(503).json({ message: '隔离成就刷新读取失败' });
+    }
+  }
+  return res.json({ data: [] });
+});
 app.get('/api/achievements/progress', (_req, res) => res.json({ data: {} }));
 app.get('/api/achievements/stats', (_req, res) => res.json({ data: { totalPoints: 0 } }));
 app.get('/api/achievements/leaderboard', (_req, res) => res.json({ data: [] }));
 app.get('/api/achievements/recent', (_req, res) => res.json({ data: [] }));
+app.post('/api/achievements/check', (_req, res) => {
+  apiWrites += 1;
+  checkPostRequests += 1;
+  return res.json({ message: '检查完成', newAchievements: [] });
+});
 app.post('/api/achievements/seed', (_req, res) => {
   apiWrites += 1;
   seedPostRequests += 1;
@@ -156,12 +179,23 @@ async function getSeedFixtureState(page: import('playwright').Page) {
   return response.json() as Promise<{ seedPostRequests: number; seedListReads: number; definitionCount: number }>;
 }
 
+async function getCheckFixtureState(page: import('playwright').Page) {
+  const response = await page.request.get(`${base}/__qa/check-state`);
+  assert.equal(response.status(), 200, 'the isolated achievement check fixture state is readable');
+  return response.json() as Promise<{ checkPostRequests: number; checkRefreshReads: number }>;
+}
+
 try {
   const errors: string[] = [];
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    if (message.type() === 'error') {
+      const text = message.text();
+      // The fixture deliberately injects handled HTTP 503 responses for recovery assertions.
+      if (text.startsWith('Failed to load resource: the server responded with a status of 503 (Service Unavailable)')) return;
+      errors.push(text);
+    }
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -354,8 +388,21 @@ try {
   await page.getByRole('button', { name: '启用预设成就' }).waitFor();
   assert.equal(await page.getByTestId('achievement-seed-recovery').count(), 0, 'a definitive 4xx preserves the existing failure path without recovery state');
   assert.deepEqual(await getSeedFixtureState(page), { seedPostRequests: 1, seedListReads: 1, definitionCount: 0 }, 'a definitive 4xx is not followed by a verification GET');
+
+  await page.goto(`${base}/__qa?theme=dark&checkScenario=refresh-fails`);
+  await page.getByRole('heading', { name: '成就系统', exact: true }).waitFor();
+  await page.getByText('预设成就', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '检查新成就', exact: true }).click();
+  const refreshFailure = page.getByRole('alert').filter({ hasText: '成就检查或初始化已确认，但页面数据刷新失败' });
+  await refreshFailure.waitFor();
+  await page.getByText('暂无新成就解锁', { exact: true }).waitFor();
+  await page.getByText('预设成就', { exact: true }).waitFor();
+  assert.deepEqual(await getCheckFixtureState(page), { checkPostRequests: 1, checkRefreshReads: 1 }, 'a confirmed check followed by a failed refresh retains the one completed POST');
+  await refreshFailure.getByRole('button', { name: '只重新读取成就数据', exact: true }).click();
+  await refreshFailure.waitFor({ state: 'detached' });
+  assert.deepEqual(await getCheckFixtureState(page), { checkPostRequests: 1, checkRefreshReads: 2 }, 'the recovery action retries only GET and never repeats the confirmed check POST');
   assert.deepEqual(errors, [], 'the isolated achievement flows have no unexpected browser errors');
-  console.log('Achievements browser test passed: empty-state views plus commit-loss read-back, explicit retry, read-back lock, and definitive rejection request counts.');
+  console.log('Achievements browser test passed: empty-state views, seed recovery, confirmed-check refresh failure, and GET-only retry request counts.');
 
 } finally {
   await browser.close();

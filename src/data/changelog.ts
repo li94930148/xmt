@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.59',
+    date: '2026-10-31',
+    title: '报告与成就恢复读取可靠性',
+    impactScope: ['创作者中心', '成就系统', '写入结果恢复'],
+    changes: [
+      { type: 'fix', description: '报告列表和成就数据恢复读取均绕过缓存；成就写入确认后刷新失败会保留成功结果，并允许只读重试。' },
+    ],
+  },
+  {
     version: '10.1.58',
     date: '2026-10-31',
     title: '灵感写入恢复读取防缓存',

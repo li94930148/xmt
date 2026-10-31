@@ -301,6 +301,7 @@ export function getRetrospectiveCreateRequestStatus(clientRequestId: string) {
   return requestJson<RetrospectiveCreateRequestStatus>(
     `/create-requests/${encodeURIComponent(clientRequestId)}`,
     '核实复盘创建结果失败',
+    { cache: 'no-store' },
   );
 }
 

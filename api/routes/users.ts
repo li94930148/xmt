@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { createHmac } from 'node:crypto';
 import { queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 import { assertAssignableRole, getAssignableRoles } from '../services/role-assignment.service.js';
 import { disconnectUserSockets } from '../utils/socket.js';
@@ -171,7 +172,7 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
   }
 });
 
-router.get('/create-requests/:requestId', authenticate, async (req, res) => {
+router.get('/create-requests/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     if (!USER_MUTATION_REQUEST_ID_PATTERN.test(requestId)) {
@@ -189,7 +190,7 @@ router.get('/create-requests/:requestId', authenticate, async (req, res) => {
   }
 });
 
-router.get('/update-requests/:requestId/:targetUserId', authenticate, async (req, res) => {
+router.get('/update-requests/:requestId/:targetUserId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     const targetUserId = Number(req.params.targetUserId);
@@ -209,7 +210,7 @@ router.get('/update-requests/:requestId/:targetUserId', authenticate, async (req
   }
 });
 
-router.get('/delete-requests/:requestId/:targetUserId', authenticate, async (req, res) => {
+router.get('/delete-requests/:requestId/:targetUserId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     const targetUserId = Number(req.params.targetUserId);

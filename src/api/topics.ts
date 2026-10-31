@@ -84,9 +84,10 @@ export async function getTopics(params?: GetTopicsParams): Promise<TopicsListRes
   };
 }
 
-export async function getTopic(id: number): Promise<Topic> {
+export async function getTopic(id: number, options?: { cache?: RequestCache }): Promise<Topic> {
   const response = await fetch(`${BASE_URL}/topics/${id}`, {
-    headers: getAuthHeader()
+    headers: getAuthHeader(),
+    ...(options?.cache ? { cache: options.cache } : {}),
   });
   if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '获取选题详情失败'), response.status);
   const result = await response.json();
@@ -99,7 +100,7 @@ export async function getTopic(id: number): Promise<Topic> {
 
 export async function getTopicDeleteStatus(id: number): Promise<'present' | 'missing'> {
   try {
-    await getTopic(id);
+    await getTopic(id, { cache: 'no-store' });
     return 'present';
   } catch (error) {
     if (error instanceof TopicApiError && error.status === 404) return 'missing';

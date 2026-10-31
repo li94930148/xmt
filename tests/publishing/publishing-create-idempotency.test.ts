@@ -89,22 +89,45 @@ try {
 
   const changedPayload = await postCreate({ ...payload, platform: '其他平台' });
   assert.equal(changedPayload.status, 409, 'a request id cannot be reused with a different payload');
-  assert.equal((await fetch(`${base}/publishing/create-request/not-a-uuid`, { headers })).status, 400);
+  const invalidStatus = await fetch(`${base}/publishing/create-request/not-a-uuid`, { headers });
+  assert.equal(invalidStatus.status, 400);
+  assert.equal(invalidStatus.headers.get('Cache-Control'), 'no-store');
 
   const verified = await fetch(`${base}/publishing/create-request/${requestId}`, { headers });
   assert.equal(verified.status, 200);
+  assert.equal(verified.headers.get('Cache-Control'), 'no-store');
   assert.deepEqual(await verified.json(), { publishingId: createdBody.publishingId });
-  assert.equal(
-    (await fetch(`${base}/publishing/create-request/${requestId}`, { headers: otherHeaders })).status,
-    404,
-    'another user cannot read the request key or learn the publication id',
-  );
+  const hiddenStatus = await fetch(`${base}/publishing/create-request/${requestId}`, { headers: otherHeaders });
+  assert.equal(hiddenStatus.status, 404,
+    'another user cannot read the request key or learn the publication id');
+  assert.equal(hiddenStatus.headers.get('Cache-Control'), 'no-store');
+  const missingStatus = await fetch(`${base}/publishing/create-request/11111111-1111-4111-8111-111111111111`, { headers });
+  assert.equal(missingStatus.status, 404);
+  assert.equal(missingStatus.headers.get('Cache-Control'), 'no-store');
+  const unauthenticatedStatus = await fetch(`${base}/publishing/create-request/${requestId}`);
+  assert.equal(unauthenticatedStatus.status, 401);
+  assert.equal(unauthenticatedStatus.headers.get('Cache-Control'), 'no-store');
   assert.equal((await postCreate(payload, otherHeaders)).status, 409, 'a request key remains bound to its original creator');
+
+  const publishingDetail = await fetch(`${base}/publishing/${createdBody.publishingId}`, { headers });
+  assert.equal(publishingDetail.status, 200);
+  assert.equal(publishingDetail.headers.get('cache-control'), 'no-store', 'publishing update and delete recovery must read current detail');
+  const missingPublishingDetail = await fetch(`${base}/publishing/999999`, { headers });
+  assert.equal(missingPublishingDetail.status, 404);
+  assert.equal(missingPublishingDetail.headers.get('cache-control'), 'no-store');
+  const unauthenticatedPublishingDetail = await fetch(`${base}/publishing/${createdBody.publishingId}`);
+  assert.equal(unauthenticatedPublishingDetail.status, 401);
+  assert.equal(unauthenticatedPublishingDetail.headers.get('cache-control'), 'no-store');
 
   const deleted = await fetch(`${base}/publishing/${createdBody.publishingId}`, { method: 'DELETE', headers });
   assert.equal(deleted.status, 200);
-  assert.equal((await fetch(`${base}/publishing/create-request/${requestId}`, { headers })).status, 410,
+  const deletedPublishingDetail = await fetch(`${base}/publishing/${createdBody.publishingId}`, { headers });
+  assert.equal(deletedPublishingDetail.status, 404);
+  assert.equal(deletedPublishingDetail.headers.get('cache-control'), 'no-store');
+  const deletedStatus = await fetch(`${base}/publishing/create-request/${requestId}`, { headers });
+  assert.equal(deletedStatus.status, 410,
     'the create request ledger records a tombstone after the publication is deleted');
+  assert.equal(deletedStatus.headers.get('Cache-Control'), 'no-store');
   assert.equal((await postCreate(payload)).status, 410, 'a delayed retry cannot resurrect a deleted publication');
   assert.equal(Number((await queryOne<{ total: number }>('SELECT COUNT(*) AS total FROM publishing WHERE topic_id=?', [topicId]))?.total), 0);
   assert.equal(Number((await queryOne<{ total: number }>('SELECT COUNT(*) AS total FROM publishing_create_request_keys WHERE client_request_id=?', [requestId]))?.total), 1,

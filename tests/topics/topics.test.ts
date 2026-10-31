@@ -443,6 +443,19 @@ async function apiTests() {
     assert.deepEqual(v1.meta, { ...legacy.pagination as object, requestId: (v1.meta as { requestId: string }).requestId });
     assert.equal(typeof (v1.meta as { requestId: string }).requestId, 'string');
 
+    const topicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}`, { headers });
+    assert.equal(topicDetailResponse.status, 200);
+    assert.equal(topicDetailResponse.headers.get('cache-control'), 'no-store', 'topic detail reads used for mutation recovery must not be cached');
+    const missingTopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/999999`, { headers });
+    assert.equal(missingTopicDetailResponse.status, 404);
+    assert.equal(missingTopicDetailResponse.headers.get('cache-control'), 'no-store');
+    const unauthenticatedTopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}`);
+    assert.equal(unauthenticatedTopicDetailResponse.status, 401);
+    assert.equal(unauthenticatedTopicDetailResponse.headers.get('cache-control'), 'no-store');
+    const v1TopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/v1/topics/${topicId}`, { headers });
+    assert.equal(v1TopicDetailResponse.status, 200);
+    assert.equal(v1TopicDetailResponse.headers.get('cache-control'), 'no-store');
+
     const creationStageResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics?status=creation`, { headers });
     assert.equal(creationStageResponse.status, 200, 'the content-flow creation-stage filter is accepted by the existing topic list API');
     const creationStage = await creationStageResponse.json() as { data: Array<{ title: string; status: string }>; pagination: { total: number } };

@@ -41,7 +41,22 @@ try {
     });
     assert.equal(readable.status, 200, `${path} reads successfully for the signed-in user`);
     noStore(readable);
-    await readable.arrayBuffer();
+    if (path === '/leaderboard') {
+      const body = await readable.json() as { data: Array<{
+        user_id: number;
+        user_name: string;
+        achievement_count: number;
+        total_points: number;
+      }> };
+      assert.deepEqual(body.data.find((entry) => entry.user_id === userId), {
+        user_id: userId,
+        user_name: '成就测试用户',
+        achievement_count: 1,
+        total_points: 10,
+      }, 'leaderboard uses the existing users schema and returns the earned score');
+    } else {
+      await readable.arrayBuffer();
+    }
   }
 
   const response = await fetch(`http://127.0.0.1:${address.port}/api/achievements/check`, {

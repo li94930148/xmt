@@ -130,6 +130,8 @@ try {
   assert.equal(await inspirations.getInspirationDeleteStatus(31), 'missing');
   await inspirations.getInspirationDetailForRecovery(72);
   await inspirations.getInspirationDetail(73);
+  await topics.getTopicResourcesForRecovery(13);
+  await topics.getTopicResources(13);
   assert.equal(await workflow.getShootingDeleteStatus(35), 'deleted');
   assert.deepEqual(await workflow.getShootingCompletionStatus(35), { state: 'missing' });
   assert.equal(await workflow.getPublishingDeleteStatus(41), 'deleted');
@@ -188,6 +190,7 @@ try {
     '/api/workflow/shooting/create-request/shooting-create-key',
     '/api/workflow/publishing/create-request/publishing-create-key',
     '/api/topics/13',
+    '/api/topics/13/resources',
     '/api/inspirations/72',
     '/api/topics/create-requests/topic-create-key',
     '/api/inspirations/31',
@@ -230,6 +233,7 @@ try {
     '/api/retrospectives/17',
     '/api/workflow-templates/53',
     '/api/inspirations/73',
+    '/api/topics/13/resources',
   ]);
   for (const request of requests) {
     if (ordinaryDetailPaths.has(request.url) && request.cache === undefined) continue;
@@ -249,6 +253,15 @@ try {
     ['/api/inspirations/72', 'no-store'],
     ['/api/inspirations/73', undefined],
   ], 'inspiration recovery bypasses cache while ordinary detail reads keep existing request behavior');
+  const topicResourceRequests = requests.filter((request) => request.url === '/api/topics/13/resources');
+  assert.deepEqual(topicResourceRequests.map((request) => request.cache), ['no-store', undefined],
+    'topic resource recovery bypasses cache while ordinary resource loading keeps its existing request behavior');
+
+  const topicResourcesPanelSource = fs.readFileSync(new URL('../../src/components/topic/TopicResourcesPanel.tsx', import.meta.url), 'utf8');
+  assert.equal((topicResourcesPanelSource.match(/getTopicResourcesForRecovery\(/g) || []).length, 2,
+    'mutation verification and stored recovery use the uncached topic resource read');
+  assert.equal((topicResourcesPanelSource.match(/getTopicResources\(/g) || []).length, 1,
+    'ordinary topic resource loading keeps the existing request behavior');
 
   const workflowDesignerSource = fs.readFileSync(new URL('../../src/pages/WorkflowDesigner.tsx', import.meta.url), 'utf8');
   assert.match(workflowDesignerSource, /fetchTemplateDetail\(recovery\.templateId, currentToken, 'no-store'\)/);

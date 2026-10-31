@@ -1,12 +1,18 @@
 # XMT 升级阶段记录
 
-## 2026-10-31 清单 B8：报告与成就恢复读取可靠性（v10.1.59）
+## 2026-10-31 清单 B4/B8：复盘焦点、关联资料恢复读取与排行榜合同（v10.1.60）
 
-- **发现与改造**：创作者报告列表生成结果恢复读取及成就系统六个数据 GET 均在客户端明确绕过缓存；服务端在认证前为报告与成就读取统一设置 `Cache-Control: no-store`。成就检查或初始化确认成功后，页面改为后台读取；即便后续 GET 失败，也保留确认结果和已有列表，并提供只读重试。新增的排行榜 HTTP 合同还发现旧 SQL 引用了当前用户表中不存在的头像列，现已移除无效列引用。
-- **回归与数据边界**：恢复状态客户端合同覆盖新增的报告/成就读取；隔离 HTTP 合同使用临时 SQLite 覆盖相关 401、403、404、200 响应。浏览器回归注入成就写入成功后的 GET 失败，验证成功反馈和列表保留、手动重试只发 GET 且不重复 POST。所有数据测试使用临时数据库；没有访问或修改真实业务数据。报告载荷、权限规则、写入逻辑和数据模型不变。
-- **版本与工程门禁**：`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（737 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（327 个）、`npm run check -- --pretty false`、`npm run lint -- --quiet`、`npm run test:deploy-safety`、`npm run test:internal-exposure-gate`、`npm run test:recovery-status-cache`、生产依赖 `npm audit --omit=dev`（0 漏洞）、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。Playwright Chromium 自动套件在浏览器启动阶段被 macOS `bootstrap_check_in ... Permission denied (1100)` 阻断，未进入自动断言；Playwright MCP 隔离页面实际验证了成功提示、失败提示及只读重试，计数为 1 次写入、1 次失败 GET、1 次成功 GET，未重复写入。唯一控制台错误是测试故意注入的 503 响应。Android 元数据为 10.1.59 / 100159，未构建 APK。
-- **迁移门禁边界**：当前隔离本地副本没有可读取的业务数据库，`npm run migration:check` 按只读方式返回 `INSUFFICIENT_DATA`；本版本未修改迁移文件或数据库结构。部署脚本会先完成线上数据库备份，再对服务器实际数据库运行迁移门禁；未通过即停止服务重启。
-- **发布状态**：以本版本受保护 PR、精确提交 SHA 与部署后核验记录为准。此前 v10.1.58 已由 PR [#104](https://github.com/li94930148/xmt/pull/104) 合并部署，目标 SHA 为 `d67919c1dea2095e9dd1ac8a366fb6ce3cf37c09`。
+- **改造范围**：复盘行动项“处理结果”输入框不再压制全局 `:focus-visible`；键盘在状态选择框按 Tab 后，处理结果文本框恢复 2px、2px offset 的 Studio 主色焦点环。选题关联资料增加专用 `getTopicResourcesForRecovery`，只替换关联/解除结果核实和刷新后的恢复读取；普通面板和移动页读取保持原请求方式。服务端在认证前禁止关联资料 GET 缓存，避免 401/403/404/200 任一响应被缓存。排行榜查询移除现有 `users` 表不存在的 `avatar` 列，并验证当前账号积分结果。
+- **回归与数据边界**：`test:recovery-status-cache-client` 检查专用恢复 GET 使用 `cache: no-store`、普通加载保持默认行为，并确认两条恢复分支均使用专用入口；`test:content-topic-assets` 临时 SQLite HTTP 合同覆盖关联资料 GET 的 401/403/404/200 `Cache-Control: no-store`，并验证原有资源可见范围。`test:achievements-check` 覆盖排行榜成功载荷、积分与已有成就关系。未修改权限、API 载荷、数据库结构、关联/解除事务或真实业务数据。
+- **浏览器与工程门禁**：Playwright MCP 隔离夹具在 320px 浅色及 1440px 深色视口用键盘 Tab 聚焦处理结果输入框；两处均为 2px Studio 主色焦点环、2px offset，页面无横向溢出和控制台错误。减少动态效果测试产生一条 Motion 提示。仓库 Playwright 自动套件在 Chromium 启动前被 macOS `bootstrap_check_in ... Permission denied (1100)` 阻断，未进入断言，不计自动化通过。`npm run test:recovery-status-cache`、`npm run version:check`、版本治理、更新说明治理（738 个版本）、Android runtime、测试入口（327 个）、类型检查、全仓 lint、生产构建、生产依赖高危审计和 `git diff --check` 均通过；构建保留既有超过 500 kB 分包提示。Android 元数据为 10.1.60 / 100160，未构建 APK。
+- **发布状态**：发布状态及精确 SHA 见本版本的 GitHub PR；Android 原生专项仍按用户要求后置。继续盘点 B8 写入恢复闭环及 B4/B5 全站主题、响应式、键盘和辅助技术验收。
+
+## 2026-10-31 清单 B8：创作者报告列表恢复读取防缓存（v10.1.59，已部署）
+
+- **发现与改造**：生成报告后，页面依赖 `GET /api/creator-agent/reports` 核对列表；该请求原来没有显式绕过客户端缓存，服务端也未为认证和权限失败等响应统一设置 `Cache-Control: no-store`。现将客户端与服务端读取都设为禁止缓存，服务端中间件位于认证之前，覆盖未登录、无权限、无同步账号和正常列表响应。
+- **回归与数据边界**：`npm run test:recovery-status-cache-client` 与 `npm run test:creator-reports-cache-http` 通过。HTTP 合同使用临时 SQLite 数据库覆盖 401、403、404、200 响应；客户端合同逐条核对该列表请求使用 `cache: no-store`。新 HTTP 合同加入 `test:recovery-status-cache`，而该任务由 `core-security-contract` CI 执行。未访问或修改真实业务数据；报告字段、权限规则、写入逻辑和数据模型不变。
+- **版本与工程门禁**：`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（737 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（327 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint -- --quiet`、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.59 / 100159，未构建 APK。
+- **合并与部署**：PR [#105](https://github.com/li94930148/xmt/pull/105) 已合并部署，精确 SHA `b898d03209a7fa9371b20c00212fb55c9cdcf28f`。主分支 CI 六项检查全部通过；生产在线备份及 Restore Drill PASS，迁移检查 GO，PM2/Caddy/API 健康和 SQLite 完整性核验通过，详情见 PR 与发布记录。
 - **后续方向**：继续盘点 B8 其他写入恢复闭环，并推进 B4/B5 全站主题、响应式、键盘和辅助技术验收；依赖可信业务数据的问题不自行假设，Android 原生专项仍按用户要求后置。
 
 ## 2026-10-31 清单 B8：灵感写入恢复读取防缓存（v10.1.58）
@@ -26,12 +32,12 @@
 - **发布状态（后续核对）**：GitHub `main` 已由 PR [#103](https://github.com/li94930148/xmt/pull/103) 更新并部署至 v10.1.57，目标 SHA 为 `94bde476d1eb73f80b34584b8afb07b92013a35f`；此后的本地恢复合同扩展按 v10.1.58 继续，未作为整体推送或部署。
 - **后续方向**：继续 B8 其他写入恢复路径与 B4/B5 全站主题、响应式、键盘及辅助技术验收；需要可信业务指标或外部数据的判断不自行设定，Android 原生专项仍按用户要求后置。
 
-## 2026-10-31 清单 B8：跨模块写入结果恢复状态防缓存（v10.1.55，本地）
+## 2026-10-31 清单 B8：跨模块写入结果恢复状态防缓存（v10.1.55，随 v10.1.56 发布）
 
 - **发现与改造**：灵感创建/投票、复盘创建/更新/行动项创建与更新、成员创建/更新/删除、创作创建、拍摄创建及发布创建的恢复状态读取，原先有的响应可能在认证失败时缺少防缓存头，或客户端没有绕过浏览器缓存。现在服务端状态路由在身份验证前设置 `Cache-Control: no-store`，客户端 12 个状态读取入口均使用 `cache: no-store`。
 - **回归与数据边界**：`npm run test:recovery-status-cache` 通过；隔离 HTTP 测试覆盖成功、无记录/越权隐藏、非法请求、未登录、权限撤销后读回和已删除墓碑响应，客户端合同逐个核验 12 个恢复读取函数的 `RequestInit.cache`。新合同加入 `core-security-contract` CI。所有服务端测试使用临时 SQLite 数据库；未访问或写入本机/生产真实业务数据。
 - **版本与工程门禁**：Android 元数据同步为 10.1.55 / 100155。`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（733 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（323 个测试文件）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。
-- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。v10.1.55 仅为本地未提交改造，未推送或部署。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
+- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。此阶段覆盖的 12 个恢复读取入口和合同随 v10.1.56 由 PR #102 合并部署，不单独发布 v10.1.55。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
 
 ## 2026-10-31 清单 B8：日历创建结果核实防缓存（v10.1.54）
 

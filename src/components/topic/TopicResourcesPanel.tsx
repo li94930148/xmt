@@ -1,7 +1,7 @@
 import { ExternalLink, Link2, Search, Trash2 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { addTopicResource, getTopicResources, removeTopicResource, TopicApiError, type TopicResource } from '@/api/topics';
+import { addTopicResource, getTopicResources, getTopicResourcesForRecovery, removeTopicResource, TopicApiError, type TopicResource } from '@/api/topics';
 import { searchResourceCenter } from '@/api/resourceCenter';
 import { BaseModal, ConfirmModal, ErrorState, LoadingState } from '@/components/common';
 import { EmptyState, SearchBar } from '@/components/studio';
@@ -142,7 +142,7 @@ export default function TopicResourcesPanel({ topicId, canManage }: { topicId: n
     setMutating(true);
     setPendingRecovery({ ...recovery, message: `正在只读核实「${recovery.resource.title}」的关联状态；核实期间不会重复写入。` }, resourceId);
     try {
-      reconcileMutation(recovery, await getTopicResources(topicId));
+      reconcileMutation(recovery, await getTopicResourcesForRecovery(topicId));
     } catch (error) {
       const message = getUserFacingErrorMessage(error, '暂时无法读取资料关联状态');
       setPendingRecovery({
@@ -178,7 +178,7 @@ export default function TopicResourcesPanel({ topicId, canManage }: { topicId: n
       message: `正在只读核实「${resource.title}」的${mutation === 'link' ? '关联' : '解除关联'}结果；核实期间不会重复写入。`,
     }, resource.id);
     try {
-      reconcileMutation(recovery, await getTopicResources(topicId), error);
+      reconcileMutation(recovery, await getTopicResourcesForRecovery(topicId), error);
     } catch (readError) {
       const message = getUserFacingErrorMessage(readError, '暂时无法读取资料关联状态');
       setPendingRecovery({

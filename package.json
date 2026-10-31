@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "10.1.59",
+  "version": "10.1.60",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -212,7 +212,7 @@
     "test:recovery-status-cache-client": "tsx tests/api-contract/recovery-status-cache-client.test.ts",
     "test:creator-reports-cache-http": "tsx tests/creator/creator-reports-cache-http.test.ts",
     "test:retrospective-create-idempotency": "tsx tests/analytics/retrospective-create-idempotency-http.test.ts",
-    "test:recovery-status-cache": "npm run test:inspiration-create-response && npm run test:inspiration-mutations-atomic && npm run test:topics && npm run test:retrospective-create-idempotency && npm run test:retrospective-update-idempotency && npm run test:retro-action-create-idempotency && npm run test:retro-action-update-idempotency && npm run test:user-mutation-audit-atomic && npm run test:production-create-idempotency && npm run test:shooting-create-idempotency && npm run test:publishing-create-idempotency && npm run test:workflow-template-update-idempotency && npm run test:recovery-status-cache-client && npm run test:creator-reports-cache-http && npm run test:achievements-check",
+    "test:recovery-status-cache": "npm run test:inspiration-create-response && npm run test:inspiration-mutations-atomic && npm run test:topics && npm run test:content-topic-assets && npm run test:retrospective-create-idempotency && npm run test:retrospective-update-idempotency && npm run test:retro-action-create-idempotency && npm run test:retro-action-update-idempotency && npm run test:user-mutation-audit-atomic && npm run test:production-create-idempotency && npm run test:shooting-create-idempotency && npm run test:publishing-create-idempotency && npm run test:workflow-template-update-idempotency && npm run test:recovery-status-cache-client && npm run test:creator-reports-cache-http && npm run test:achievements-check",
     "test:retro-action-create-idempotency": "tsx tests/analytics/retro-action-create-idempotency-http.test.ts",
     "test:retro-action-update-idempotency": "tsx tests/analytics/retro-action-update-idempotency-http.test.ts",
     "test:workflow-template-create-idempotency": "tsx tests/workflow/workflow-template-create-idempotency.test.ts",

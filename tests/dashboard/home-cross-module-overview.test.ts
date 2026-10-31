@@ -20,7 +20,6 @@ test('home cross-module overview keeps exact zero counts and follows existing pe
   });
 
   assert.deepEqual(metrics.map(({ id, count }) => [id, count]), [
-    ['topic-attention', 5],
     ['topic-review', 4],
     ['production-review', 2],
     ['today-publishing', 0],
@@ -29,6 +28,7 @@ test('home cross-module overview keeps exact zero counts and follows existing pe
   ]);
   assert.equal(metrics.find((metric) => metric.id === 'production-review')?.path, '/production');
   assert.equal(metrics.find((metric) => metric.id === 'actionable-messages')?.path, '/messages?filter=actionable');
+  assert.equal(metrics.some((metric) => metric.id === 'topic-attention'), false, 'management topic attention is already shown in its dedicated section');
 });
 
 test('home cross-module overview omits queues outside the current role or permission scope', () => {

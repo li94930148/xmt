@@ -27,6 +27,7 @@ export {
   deleteInspiration,
   promoteInspiration,
   getInspirationDetail,
+  getInspirationDetailForRecovery,
   createInspirationComment,
   getInspirationCreateRequest,
   getInspirationVoteRequest

@@ -11,13 +11,22 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.58',
+    date: '2026-10-31',
+    title: '灵感写入恢复读取防缓存',
+    impactScope: ['灵感池', '点赞恢复', '转选题恢复', '评论恢复'],
+    changes: [
+      { type: 'fix', description: '点赞、转选题和评论写入结果不明时，恢复核实明确绕过浏览器缓存；正常打开灵感详情仍保持原请求方式。' },
+    ],
+  },
+  {
     version: '10.1.57',
     date: '2026-10-31',
-    title: '恢复核实与复盘弹窗改进',
-    impactScope: ['创作', '复盘', '工作流模板', '消息通知'],
+    title: '恢复读取防缓存与复盘弹窗优化',
+    impactScope: ['写入结果恢复', '复盘新建', '键盘与触控可用性'],
     changes: [
-      { type: 'fix', description: '恢复操作确认结果时读取最新状态，避免浏览器缓存影响判断。' },
-      { type: 'improvement', description: '新建复盘表单字段和按钮更易触控，键盘焦点清楚可见。' },
+      { type: 'fix', description: '生产、复盘、工作流模板和通知相关恢复读取不再使用缓存状态。' },
+      { type: 'improvement', description: '复盘新建弹窗的触控目标和键盘焦点显示更加清楚。' },
     ],
   },
   {

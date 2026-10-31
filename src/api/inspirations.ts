@@ -135,14 +135,24 @@ export async function promoteInspiration(id: number): Promise<{ message: string;
   return response.json();
 }
 
-export async function getInspirationDetail(
-  id: number
+async function requestInspirationDetail(
+  id: number,
+  cache?: RequestCache,
 ): Promise<{ inspiration: Inspiration; comments: InspirationComment[] }> {
   const response = await fetch(`${BASE_URL}/inspirations/${id}`, {
     headers: getAuthHeader(),
+    ...(cache ? { cache } : {}),
   });
   if (!response.ok) throw new Error('获取灵感详情失败');
   return response.json();
+}
+
+export async function getInspirationDetail(id: number): Promise<{ inspiration: Inspiration; comments: InspirationComment[] }> {
+  return requestInspirationDetail(id);
+}
+
+export async function getInspirationDetailForRecovery(id: number): Promise<{ inspiration: Inspiration; comments: InspirationComment[] }> {
+  return requestInspirationDetail(id, 'no-store');
 }
 
 export async function createInspirationComment(

@@ -1,5 +1,20 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B8：删除、完成与更新结果核实防缓存（v10.1.56，本地）
+
+- **发现与改造**：选题/灵感删除、拍摄删除/完成、发布删除/更新的恢复状态读取复用了普通详情 GET，客户端没有明确绕过浏览器缓存，服务端响应也没有统一禁止缓存。现在这些客户端恢复读取设置 `cache: no-store`；服务端旧版与 v1 选题详情、灵感详情、拍摄详情和发布详情在认证前设置 `Cache-Control: no-store`。选题普通详情读取仍可使用原行为，只有恢复状态调用显式绕过客户端缓存。
+- **回归与数据边界**：`npm run test:recovery-status-cache` 已通过。隔离 API 回归检查旧版/v1 选题详情、灵感详情和拍摄/发布详情的成功、未找到及未登录响应；客户端合同检查 18 个恢复读取函数使用 `cache: no-store`。测试使用临时数据库，没有访问或修改真实业务数据；现有角色范围和发布结果对比语义保持不变。
+- **版本与工程门禁**：Android 元数据为 10.1.56 / 100156，未构建 APK。`npm run test:recovery-status-cache`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（734 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（325 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留已有超过 500 kB 的分包提示。
+- **发布状态**：本次正在执行用户明确授权的推送与部署；提交、PR、CI、备份/恢复演练及线上核验结果完成后补记。
+- **后续方向**：继续 B8 其他写入恢复路径与 B4/B5 全站主题、响应式、键盘及辅助技术验收；需要可信业务指标或外部数据的判断不自行设定，Android 原生专项仍按用户要求后置。
+
+## 2026-10-31 清单 B8：跨模块写入结果恢复状态防缓存（v10.1.55，本地）
+
+- **发现与改造**：灵感创建/投票、复盘创建/更新/行动项创建与更新、成员创建/更新/删除、创作创建、拍摄创建及发布创建的恢复状态读取，原先有的响应可能在认证失败时缺少防缓存头，或客户端没有绕过浏览器缓存。现在服务端状态路由在身份验证前设置 `Cache-Control: no-store`，客户端 12 个状态读取入口均使用 `cache: no-store`。
+- **回归与数据边界**：`npm run test:recovery-status-cache` 通过；隔离 HTTP 测试覆盖成功、无记录/越权隐藏、非法请求、未登录、权限撤销后读回和已删除墓碑响应，客户端合同逐个核验 12 个恢复读取函数的 `RequestInit.cache`。新合同加入 `core-security-contract` CI。所有服务端测试使用临时 SQLite 数据库；未访问或写入本机/生产真实业务数据。
+- **版本与工程门禁**：Android 元数据同步为 10.1.55 / 100155。`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（733 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（323 个测试文件）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。
+- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。v10.1.55 仅为本地未提交改造，未推送或部署。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
+
 ## 2026-10-31 清单 B8：日历创建结果核实防缓存（v10.1.54）
 
 - **发现与改造**：日历创建状态端点返回当前账号可核实的事件状态，但没有明确禁止缓存；客户端状态 GET 也未设置 `cache: no-store`。现在服务端先于认证中间件统一设置 `Cache-Control: no-store`，覆盖成功、无记录、已删除、无效请求及未登录响应；客户端状态读取绕过浏览器缓存。

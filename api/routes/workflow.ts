@@ -2,6 +2,7 @@
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { requireAllPermissions, requirePermission, userHasPermission } from '../middleware/permissions';
 import { canEditAllContent, canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { hasPublishedArchiveScriptDrift, syncPublishedArchive } from '../services/publishedArchive';
@@ -744,7 +745,7 @@ router.get('/production', authenticate, async (req, res) => {
   }
 });
 
-router.get('/production/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/production/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
@@ -1729,7 +1730,7 @@ router.get('/shooting', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shooting/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/shooting/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
@@ -1752,7 +1753,7 @@ router.get('/shooting/create-request/:requestId', authenticate, async (req, res)
   }
 });
 
-router.get('/shooting/:id', authenticate, async (req, res) => {
+router.get('/shooting/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const shooting = await queryOne(`SELECT s.*, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM shooting s LEFT JOIN users u ON s.operator_id = u.id LEFT JOIN topics t ON s.topic_id = t.id WHERE s.id = ?`, [req.params.id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
@@ -2295,7 +2296,7 @@ router.put(
   },
 );
 
-router.get('/publishing/:id', authenticate, async (req, res) => {
+router.get('/publishing/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const publishing = await queryOne(`SELECT ${publishingWithDouyinSelect},p.script_source_production_id,p.script_source_version,t.description AS topic_description,t.platform AS topic_platform,t.deadline AS topic_deadline,t.status AS topic_status FROM publishing p ${publishingWithDouyinJoins} WHERE p.id=?`, [req.params.id]);
     if (!publishing) return res.status(404).json({ message: '发布记录不存在' });
@@ -2532,7 +2533,7 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
 });
 
 // GET /publishing/create-request/:requestId - read back a create result without writing.
-router.get('/publishing/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/publishing/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {

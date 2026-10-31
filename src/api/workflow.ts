@@ -66,6 +66,7 @@ export async function getProductionCreateStatus(clientRequestId: string): Promis
   | { status: 'created'; productionId: number }
 > {
   const response = await fetch(`${BASE_URL}/workflow/production/create-request/${encodeURIComponent(clientRequestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (response.status === 404) return { status: 'missing' };
@@ -437,6 +438,7 @@ export async function getShootingById(id: number): Promise<any> {
 export async function getShootingDeleteStatus(id: number): Promise<'deleted' | 'exists'> {
   const response = await fetch(`${BASE_URL}/workflow/shooting/${id}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (response.status === 404) return 'deleted';
   if (response.ok) return 'exists';
@@ -448,6 +450,7 @@ export async function getShootingDeleteStatus(id: number): Promise<'deleted' | '
 export async function getShootingCompletionStatus(id: number): Promise<{ state: 'completed' } | { state: 'other'; status: string } | { state: 'missing' }> {
   const response = await fetch(`${BASE_URL}/workflow/shooting/${id}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (response.status === 404) return { state: 'missing' };
   if (!response.ok) {
@@ -511,6 +514,7 @@ export async function getShootingCreateStatus(clientRequestId: string): Promise<
   | { status: 'created'; shootingId: number }
 > {
   const response = await fetch(`${BASE_URL}/workflow/shooting/create-request/${encodeURIComponent(clientRequestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (response.status === 404) return { status: 'missing' };
@@ -566,6 +570,7 @@ export async function getPublishingById(id: number): Promise<any> {
 export async function getPublishingDeleteStatus(id: number): Promise<'exists' | 'deleted'> {
   const response = await fetch(`${BASE_URL}/workflow/publishing/${id}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (response.status === 404) return 'deleted';
   if (!response.ok) throw new Error('获取发布记录状态失败');
@@ -582,6 +587,7 @@ export async function getPublishingCreateStatus(clientRequestId: string): Promis
   | { status: 'created'; publishingId: number }
 > {
   const response = await fetch(`${BASE_URL}/workflow/publishing/create-request/${encodeURIComponent(clientRequestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (response.status === 404) return { status: 'missing' };
@@ -628,6 +634,7 @@ export async function getPublishingUpdateStatus(
 ): Promise<PublishingUpdateVerification> {
   const response = await fetch(`${BASE_URL}/workflow/publishing/${id}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (response.status === 404) return { status: 'missing' };
   if (!response.ok) throw new Error('获取发布记录更新状态失败');

@@ -52,6 +52,7 @@ export async function createInspirition(data: {
 
 export async function getInspirationCreateRequest(clientRequestId: string): Promise<{ id: number; inspiration: Inspiration; deleted: false } | { deleted: true } | null> {
   const response = await fetch(`${BASE_URL}/inspirations/create-request/${encodeURIComponent(clientRequestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (response.status === 404) return null;
@@ -118,6 +119,7 @@ export async function deleteInspiration(id: number): Promise<{ message: string }
 export async function getInspirationDeleteStatus(id: number): Promise<'present' | 'missing'> {
   const response = await fetch(`${BASE_URL}/inspirations/${id}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (response.status === 404) return 'missing';
   if (!response.ok) throw new Error('核实灵感删除状态失败');

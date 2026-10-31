@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "10.1.54",
+  "version": "10.1.56",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -209,6 +209,11 @@
     "qa:mobile-touch-targets-fixture": "tsx tests/browser/mobile-work-center-responsive.spec.ts --mcp-touch-targets-fixture",
     "test:daily-report-submit-recovery-browser": "tsx tests/browser/daily-report-submit-recovery.spec.ts",
     "test:calendar-permissions": "tsx tests/calendar/calendar-permissions.test.ts",
+    "test:recovery-status-cache-client": "tsx tests/api-contract/recovery-status-cache-client.test.ts",
+    "test:retrospective-create-idempotency": "tsx tests/analytics/retrospective-create-idempotency-http.test.ts",
+    "test:recovery-status-cache": "npm run test:inspiration-create-response && npm run test:inspiration-mutations-atomic && npm run test:topics && npm run test:retrospective-create-idempotency && npm run test:retrospective-update-idempotency && npm run test:retro-action-create-idempotency && npm run test:retro-action-update-idempotency && npm run test:user-mutation-audit-atomic && npm run test:production-create-idempotency && npm run test:shooting-create-idempotency && npm run test:publishing-create-idempotency && npm run test:recovery-status-cache-client",
+    "test:retro-action-create-idempotency": "tsx tests/analytics/retro-action-create-idempotency-http.test.ts",
+    "test:retro-action-update-idempotency": "tsx tests/analytics/retro-action-update-idempotency-http.test.ts",
     "test:workflow-template-create-idempotency": "tsx tests/workflow/workflow-template-create-idempotency.test.ts",
     "test:workflow-template-update-recovery": "tsx --test tests/workflow/workflow-template-update-recovery-frontend.test.ts",
     "test:workflow-template-create-idempotency-migration": "tsx tests/database/workflow-template-create-idempotency-migration.test.ts",

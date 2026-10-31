@@ -49,6 +49,7 @@ export type UserCreateRequestStatus =
 
 export async function getUserCreateRequestStatus(requestId: string): Promise<UserCreateRequestStatus> {
   const response = await fetch(`${BASE_URL}/users/create-requests/${encodeURIComponent(requestId)}`, {
+    cache: 'no-store',
     headers: getAuthHeader(),
   });
   if (!response.ok) throw new Error(await getErrorMessage(response, '无法确认成员是否已创建，请重新核实'));
@@ -62,7 +63,7 @@ export type UserUpdateRequestStatus =
 export async function getUserUpdateRequestStatus(requestId: string, targetUserId: number): Promise<UserUpdateRequestStatus> {
   const response = await fetch(
     `${BASE_URL}/users/update-requests/${encodeURIComponent(requestId)}/${encodeURIComponent(String(targetUserId))}`,
-    { headers: getAuthHeader() },
+    { cache: 'no-store', headers: getAuthHeader() },
   );
   if (!response.ok) throw new Error(await getErrorMessage(response, '无法确认成员信息是否已更新，请重新核实'));
   return response.json();
@@ -75,7 +76,7 @@ export type UserDeleteRequestStatus =
 export async function getUserDeleteRequestStatus(requestId: string, targetUserId: number): Promise<UserDeleteRequestStatus> {
   const response = await fetch(
     `${BASE_URL}/users/delete-requests/${encodeURIComponent(requestId)}/${encodeURIComponent(String(targetUserId))}`,
-    { headers: getAuthHeader() },
+    { cache: 'no-store', headers: getAuthHeader() },
   );
   if (!response.ok) throw new Error(await getErrorMessage(response, '无法确认成员是否已删除，请重新核实'));
   return response.json();

@@ -49,6 +49,16 @@ async function request(pathname: string, method: 'POST' | 'DELETE', body?: unkno
 }
 
 try {
+  const existingDetail = await fetch(`${endpoint}/${inspirationId}`, { headers });
+  assert.equal(existingDetail.status, 200);
+  assert.equal(existingDetail.headers.get('cache-control'), 'no-store', 'inspiration deletion recovery reads current detail without cache');
+  const missingDetail = await fetch(`${endpoint}/999999`, { headers });
+  assert.equal(missingDetail.status, 404);
+  assert.equal(missingDetail.headers.get('cache-control'), 'no-store');
+  const unauthenticatedDetail = await fetch(`${endpoint}/${inspirationId}`);
+  assert.equal(unauthenticatedDetail.status, 401);
+  assert.equal(unauthenticatedDetail.headers.get('cache-control'), 'no-store');
+
   const rollbackRequestId = 'b01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';
   await execute(`CREATE TRIGGER fail_inspiration_comment_parent_update
     BEFORE UPDATE OF updated_at ON inspirations
@@ -117,10 +127,20 @@ try {
     voted: true,
     votes: 1,
   });
+  const missingVoteStatus = await fetch(`${endpoint}/vote-requests/00112233-4455-4677-8899-aabbccddeeff`, { headers });
+  assert.equal(missingVoteStatus.status, 404);
+  assert.equal(missingVoteStatus.headers.get('cache-control'), 'no-store', 'missing vote results must not be cached');
+  const invalidVoteStatus = await fetch(`${endpoint}/vote-requests/not-a-uuid`, { headers });
+  assert.equal(invalidVoteStatus.status, 400);
+  assert.equal(invalidVoteStatus.headers.get('cache-control'), 'no-store', 'invalid vote status requests must not be cached');
+  const unauthenticatedVoteStatus = await fetch(`${endpoint}/vote-requests/${keyedVoteRequestId}`);
+  assert.equal(unauthenticatedVoteStatus.status, 401);
+  assert.equal(unauthenticatedVoteStatus.headers.get('cache-control'), 'no-store', 'authentication failures must not be cached');
   const crossActorVoteStatus = await fetch(`${endpoint}/vote-requests/${keyedVoteRequestId}`, {
     headers: { ...headers, authorization: `Bearer ${signToken({ userId: otherUserId })}` },
   });
   assert.equal(crossActorVoteStatus.status, 404, 'vote request status is isolated to the actor who created it');
+  assert.equal(crossActorVoteStatus.headers.get('cache-control'), 'no-store', 'actor-scoped missing results must not be cached');
   const crossActorVoteReplay = await fetch(`${endpoint}/${secondInspirationId}/vote`, {
     method: 'POST',
     headers: { ...headers, authorization: `Bearer ${signToken({ userId: otherUserId })}` },
@@ -216,6 +236,9 @@ try {
   const deleted = await fetch(`${endpoint}/${inspirationId}`, { method: 'DELETE', headers });
   assert.equal(deleted.status, 200);
   assert.deepEqual(await deleted.json(), { message: '灵感删除成功' });
+  const deletedDetail = await fetch(`${endpoint}/${inspirationId}`, { headers });
+  assert.equal(deletedDetail.status, 404);
+  assert.equal(deletedDetail.headers.get('cache-control'), 'no-store', 'deleted inspiration read-back cannot be cached');
   assert.equal(await queryOne('SELECT id FROM inspirations WHERE id = ?', [inspirationId]), null);
   assert.equal((await queryOne<{ total: number }>('SELECT COUNT(*) as total FROM inspiration_comments WHERE inspiration_id = ?', [inspirationId]))?.total, 0);
   assert.equal((await queryOne<{ total: number }>('SELECT COUNT(*) as total FROM inspiration_votes WHERE inspiration_id = ?', [inspirationId]))?.total, 0);
@@ -224,6 +247,7 @@ try {
   assert.equal(deletedSecondInspiration.status, 200);
   const deletedVoteStatus = await fetch(`${endpoint}/vote-requests/${keyedVoteRequestId}`, { headers });
   assert.equal(deletedVoteStatus.status, 410, 'deleting an inspiration preserves a terminal vote request result');
+  assert.equal(deletedVoteStatus.headers.get('cache-control'), 'no-store', 'deleted vote results must not be cached');
   assert.equal((await queryOne<{ total: number }>('SELECT COUNT(*) as total FROM inspiration_vote_request_keys WHERE inspiration_id = ?', [secondInspirationId]))?.total, 3,
     'vote request tombstones survive inspiration deletion');
 } finally {

@@ -11,6 +11,24 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.56',
+    date: '2026-10-31',
+    title: '删除与更新结果核实防缓存',
+    impactScope: ['选题', '灵感', '拍摄', '发布'],
+    changes: [
+      { type: 'fix', description: '删除、完成和更新后的状态核实统一读取服务端最新记录，不使用浏览器缓存。' },
+    ],
+  },
+  {
+    version: '10.1.55',
+    date: '2026-10-31',
+    title: '跨模块恢复状态防缓存',
+    impactScope: ['灵感', '复盘', '成员管理', '创作', '拍摄', '发布'],
+    changes: [
+      { type: 'fix', description: '恢复写入结果时统一读取最新状态；服务端和浏览器均不缓存核实查询，减少刷新后的重复提交和错误状态。' },
+    ],
+  },
+  {
     version: '10.1.54',
     date: '2026-10-31',
     title: '日历结果核实状态防缓存',

@@ -2,6 +2,7 @@ import express from 'express';
 import { createHash } from 'node:crypto';
 import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { requirePermission } from '../middleware/permissions';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
@@ -99,7 +100,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // GET /create-request/:requestId - read back a create result without writing.
-router.get('/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     const userId = Number(req.user?.id);
@@ -195,8 +196,7 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // GET /vote-requests/:requestId - confirm a keyed vote result for the current actor.
-router.get('/vote-requests/:requestId', authenticate, async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
+router.get('/vote-requests/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     const userId = Number(req.user?.id);
@@ -235,7 +235,7 @@ router.get('/vote-requests/:requestId', authenticate, async (req, res) => {
 });
 
 // GET /:id - 获取灵感详情和评论
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const userId = Number(req.user?.id);

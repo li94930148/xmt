@@ -1,5 +1,13 @@
 # XMT 升级阶段记录
 
+## 2026-10-31 清单 B4/B5/B8：实时提示无障碍播报与触控（v10.1.48）
+
+- **改造内容**：`RealtimeToast` 现在始终保留一个 `role="status"`、`aria-live="polite"` 播报区。每条实时提示更新播报节点，因此相同文案再次到达时也能作为新提示播报；关闭按钮有包含通知标题的可访问名称，触控区域为 40×40px。`animate-slide-in` 在系统偏好为减少动态效果时关闭动画。
+- **Playwright MCP 隔离验收**：本地临时 Vite 页面只挂载真实 `RealtimeToast` 和合成提示按钮，不连接业务 API。1440×960 与 390×844 下，可访问快照显示 `status` 和“关闭通知：消息已送达”；实际关闭控件尺寸均为 40×40px，页面宽度分别等于视口宽度，手机提示未越过 16px 安全边距。启用 `prefers-reduced-motion: reduce` 后计算动画名为 `none`。提示出现时控件可见，运行时控制台无错误。组件单测另行点击逐条关闭并验证播报文本保留。
+- **测试与工程检查**：干净依赖安装后，新增实时提示回归、通知路由与消息通知回归、`version:check`、版本/变更说明治理（726 个版本）、入口检查（319 个文件）、Android 运行态契约、部署安全契约、内网暴露门禁、`npm audit --omit=dev --audit-level=high`（0 漏洞）、`npm run check -- --pretty false`、全量 `npm run lint` 与 `npm run build` 均退出成功。全量 ESLint 为 0 errors / 283 warnings；目标文件定向 lint 为 0 errors / 1 条既有 `react-refresh/only-export-components` warning。生产构建保留大分包提示（主入口 827.83 kB、Tiptap 560.08 kB、Silk 背景适配器 843.50 kB）。
+- **部署前生产只读预检（2026-10-31）**：生产仍运行 v10.1.47；PM2 `xmt-api` online、Caddy active，公网首页 HTTP 200，API 健康响应及数据库状态正常。生产 SQLite `quick_check=ok`、外键违规 0；根分区可用 20 GB、inode 使用 11%。`/www/wwwroot/xmt/emergency-backup` 与 `/www/backup/xmt` 有可读备份；`/www/wwwroot/xmt/data/backups` 不存在。备份保留 dry-run 计划删除 0 项。该只读预检不代替发布脚本在线备份、Restore Drill 和部署后核验。
+- **范围与下一步**：仅改实时提示组件、减少动态效果样式、组件回归、CI 回归入口和版本/文档；无 API、权限、数据库、真实业务数据或 Android 原生逻辑变化。Android 元数据为 10.1.48 / 100148，未构建 APK。原始 B8 症状逐项见清单复核说明，但 B8 全量 mutation/恢复路径盘点仍开放；B4/B5 全站主题与响应式验收、G 中依赖可信口径的范围和 Android 原生专项也继续开放。CI 需以本次 PR 的精确合并 SHA 核对后再部署；部署结果以本节后续核验记录为准。
+
 ## 2026-10-31 清单 B4：管理首页跨模块待办摘要与移动触控（v10.1.47）
 
 - **发现与改造**：管理首页“团队今日重点”原先重复陈述发布、消息、同步异常和稿件审核数量；“团队工作概览”跨模块摘要又重复显示首页下方独立、可操作的选题卡点区。现将摘要按钮压缩为至少 40px 高、可换行的紧凑控件；管理角色摘要保留待审选题、待审稿件、今日待发布、同步异常、待办消息五项，继续按原权限范围显示和导航。管理重点说明不再重复摘要数量。非管理角色仍保留选题卡点事项及原有重点说明口径。

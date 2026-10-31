@@ -19,11 +19,13 @@ export function showRealtimeToast(item: Omit<ToastItem, 'id'>) {
 
 export default function RealtimeToast() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [announcement, setAnnouncement] = useState<ToastItem | null>(null);
   const styles = useThemeStyles();
 
   useEffect(() => {
     toastListener = (item) => {
       setToasts((prev) => [...prev, item]);
+      setAnnouncement(item);
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== item.id));
       }, 4000);
@@ -31,29 +33,36 @@ export default function RealtimeToast() {
     return () => { toastListener = null; };
   }, []);
 
-  if (toasts.length === 0) return null;
-
   return (
-    <div className="fixed bottom-4 right-4 z-notification space-y-2 pointer-events-none">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border pointer-events-auto
-            animate-slide-in ${styles.bgSecondary} ${styles.border}`}
-        >
-          {toast.icon && <span className="flex-shrink-0">{toast.icon}</span>}
-          <div className="min-w-0 flex-1">
-            <p className={`text-sm font-medium ${styles.textPrimary} truncate`}>{toast.title}</p>
-            <p className={`text-xs ${styles.textMuted} truncate`}>{toast.message}</p>
-          </div>
-          <button
-            onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-            className={`flex-shrink-0 ${styles.textMuted} hover:${styles.textPrimary}`}
-          >
-            <X className="w-4 h-4" />
-          </button>
+    <>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement ? <span key={announcement.id}>{announcement.title}。{announcement.message}</span> : null}
+      </div>
+      {toasts.length > 0 ? (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-notification space-y-2">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`pointer-events-auto flex items-center gap-3 rounded-lg border px-4 py-3 shadow-lg
+                animate-slide-in ${styles.bgSecondary} ${styles.border}`}
+            >
+              {toast.icon && <span className="flex-shrink-0">{toast.icon}</span>}
+              <div className="min-w-0 flex-1">
+                <p className={`truncate text-sm font-medium ${styles.textPrimary}`}>{toast.title}</p>
+                <p className={`truncate text-xs ${styles.textMuted}`}>{toast.message}</p>
+              </div>
+              <button
+                type="button"
+                aria-label={`关闭通知：${toast.title}`}
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                className={`xmt-btn xmt-btn-ghost h-10 w-10 flex-shrink-0 p-0 ${styles.focusRing}`}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      ) : null}
+    </>
   );
 }

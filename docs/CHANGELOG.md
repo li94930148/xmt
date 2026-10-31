@@ -1,5 +1,17 @@
 # Changelog
 
+## v10.1.51 - 2026-10-31
+
+### 优化
+
+- 创作者驾驶舱窄屏以紧凑身份行显示账号头像、名称、UID、数据状态和查看作品入口，桌面继续使用 ReactBits 资料卡。
+- 账号粉丝、作品、播放指标与互动表现分组展示；移除重复的作品数量，Creator Agent 设备详情放在主要数据及创作建议之后。
+- 320px 下账号统计使用两列布局，完整显示“暂无数据”，查看作品触控高度至少 40px。
+
+### 验证
+
+- Chrome DevTools MCP 隔离页人工验收 1440px 桌面、390px 和 320px 手机视口；自动浏览器套件因 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 未进入断言，详见 `docs/UPGRADE_PROGRESS.md`。
+
 ## v10.1.50 - 2026-10-31
 
 ### 修复

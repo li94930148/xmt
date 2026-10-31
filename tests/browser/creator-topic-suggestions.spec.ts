@@ -206,6 +206,50 @@ async function restoreSessionStorageMarkerWrite(page: Page) {
     }
   });
 }
+async function assertCreatorDashboardLayout(page: Page, width: number) {
+  const overview = page.getByTestId('creator-account-overview');
+  const compactProfile = page.getByTestId('creator-profile-compact');
+  const desktopProfile = page.getByTestId('creator-profile-desktop');
+  assert.equal(await overview.count(), 1, 'the account overview is unique');
+  assert.equal(await compactProfile.isVisible(), width < 1024, `compact identity matches the ${width}px viewport`);
+  assert.equal(await desktopProfile.isVisible(), width >= 1024, `ReactBits profile matches the ${width}px viewport`);
+  if (width < 1024) {
+    const viewWorks = compactProfile.getByRole('button', { name: '查看作品', exact: true });
+    const viewWorksBox = await viewWorks.boundingBox();
+    assert(viewWorksBox && viewWorksBox.height >= 40, 'compact profile keeps a 40px touch target for works');
+  }
+
+  const accountMetrics = page.getByTestId('creator-account-metrics');
+  const expectedAccountColumns = width < 360 ? 2 : 3;
+  const accountColumns = await accountMetrics.evaluate(node => getComputedStyle(node).gridTemplateColumns.split(' ').length);
+  assert.equal(accountColumns, expectedAccountColumns, `account metrics use ${expectedAccountColumns} readable columns at ${width}px`);
+  for (const label of ['粉丝', '入库作品', '累计播放']) {
+    assert.equal(await accountMetrics.getByText(label, { exact: true }).count(), 1, `${label} appears once in account metrics`);
+  }
+  assert.equal(await accountMetrics.getByText('暂无数据', { exact: true }).count(), 1, 'the complete missing-data label remains visible at narrow widths');
+  assert.equal(await accountMetrics.getByText('暂无数据', { exact: true }).evaluate(node => getComputedStyle(node).textOverflow), 'clip', 'missing account values are not ellipsized');
+  const engagement = page.getByTestId('creator-engagement-metrics');
+  for (const label of ['互动率', '分享率', '爆款作品']) {
+    assert.equal(await engagement.getByText(label, { exact: true }).count(), 1, `${label} appears once in engagement metrics`);
+  }
+  for (const label of ['粉丝', '入库作品', '累计播放']) {
+    assert.equal(await engagement.getByText(label, { exact: true }).count(), 0, `${label} is not duplicated in engagement metrics`);
+  }
+
+  const dataStatus = await page.getByTestId('creator-data-source-status').innerText();
+  assert(!dataStatus.includes('6 条作品'), 'data source status does not repeat the account work count');
+  const dimensions = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+  assert(dimensions.scrollWidth <= dimensions.clientWidth, `${width}px dashboard has no horizontal overflow`);
+
+  if (width < 1024) {
+    const overviewBox = await overview.boundingBox();
+    const maximumOverviewHeight = width < 360 ? 280 : 240;
+    assert(overviewBox && overviewBox.height < maximumOverviewHeight, `compact account overview stays short, received ${overviewBox?.height ?? 'no box'}px at ${width}px`);
+    const engagementBox = await engagement.boundingBox();
+    const agentBox = await page.getByTestId('creator-agent-panel').boundingBox();
+    assert(engagementBox && agentBox && agentBox.y > engagementBox.y, 'primary engagement data precedes the Creator Agent panel');
+  }
+}
 if (process.env.XMT_TOPIC_QA_SERVE === '1') {
   console.log(`Isolated topic suggestion QA fixture: ${base}/__qa`);
   await new Promise(() => {});
@@ -222,6 +266,7 @@ try {
     page.on('console', message => { if (message.type() === 'error' && !message.text().includes('503') && !message.text().includes('ERR_EMPTY_RESPONSE') && !message.text().includes('ERR_CONNECTION_RESET')) errors.push(message.text()); });
     await page.goto(`${base}/__qa`);
     await page.getByRole('heading', { name: '数据指导创作', exact: true }).waitFor();
+    await assertCreatorDashboardLayout(page, width);
     await page.getByText('约 3 倍。', { exact: false }).waitFor();
     const notAdopted = page.getByRole('button', { name: '暂不采用', exact: true });
     if (width === 1440) {

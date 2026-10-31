@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '@/store';
-import { Activity, CalendarRange, Gauge, Heart, Play, Share2, Users, Video } from 'lucide-react';
+import { Activity, CalendarRange, Gauge, Heart, Share2, Video } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createCreatorAgentBindingCode, getCreatorAgentBindingCodeRecovery, getCreatorAgentStatus, getDouyinDashboard, getDouyinSyncLogs, type CreatorAgentStatus, type DouyinDashboardData } from '@/api/creatorCenter';
 import CreatorCoverImage from '@/components/common/CreatorCoverImage';
@@ -235,25 +235,20 @@ export default function CreatorDashboard() {
       uid={String(account.douyin_uid || account.account_id || account.platform_uid || '')}
       dataStatus={data.data_status}
       fansCount={data.metrics.fans_count}
+      worksLabel={official ? '官方作品' : '入库作品'}
       worksCount={data.metrics.works_count}
       playCount={data.metrics.play_count}
       onViewWorks={() => navigate(`/analytics/creator-center/works${accountQuery}`)}
     /></ReactBitsCardSlot></ReactBitsRevealSlot>
-    <Panel title="Creator Agent" description="本机采集设备与浏览器状态">
-      <div className="mb-4 flex flex-wrap items-center gap-3"><span className={`inline-flex min-h-9 items-center rounded-lg px-3 text-sm ${agentStatusTone}`}>{agentStatusLabel}</span>{agentStatusError ? <p role="alert" className="text-sm text-studio-coral-contrast">采集端状态读取失败；点击页面上方“刷新数据”重试。</p> : null}</div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-secondary">设备</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.device_name || (!agent ? '尚未绑定采集端' : '未知设备')}</p></div><div><span className="text-xs text-studio-text-secondary">浏览器</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_type || '未就绪'} {!agentStatusError || agent ? agent?.browser_version || '' : ''}</p></div><div><span className="text-xs text-studio-text-secondary">兼容状态</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_compatibility || '未检测'}</p></div><div><span className="text-xs text-studio-text-secondary">抖音登录</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_login_status === 'valid' ? '正常' : agent?.browser_login_status ? '未确认' : agentStatusError ? '暂不可用' : '未确认'}</p></div></div>
-      <div className="mt-4 flex flex-wrap items-center gap-3"><ActionButton type="button" variant="primary" disabled={bindingBusy||bindingRecoveryState==='checking'||!currentAccountId} onClick={runBindingAction}>{bindingButtonLabel}</ActionButton>{visibleBinding?<div role="status" className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{visibleBinding.code}</code><span className="ml-3 text-xs text-studio-text-secondary">有效期至 {formatDate(visibleBinding.expiresAt,true)} · 仅可使用一次</span></div>:null}</div>
-      {bindingError?<p role="alert" className="mt-3 text-sm text-studio-coral-contrast">{bindingError}</p>:null}
-    </Panel>
-    <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-studio-success/30 bg-studio-success/10':'border-studio-amber/30 bg-studio-amber/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-secondary">{official?'抖音官方导出优先':'采集数据'} · 更新于 {formatDate(official?data.official_snapshot_at:data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
-    <ReactBitsRevealSlot className="block"><section data-testid="creator-core-metrics" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <MetricCard label="粉丝" value={data.metrics.fans_count == null ? '暂无数据' : data.metrics.fans_count} icon={Users} />
-      <MetricCard label={official?'官方作品':'入库作品'} value={data.metrics.works_count} icon={Video} accent="violet" />
-      <MetricCard label="累计播放" value={data.metrics.play_count} icon={Play} accent="blue" />
+    <div data-testid="creator-data-source-status" className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-studio-success/30 bg-studio-success/10':'border-studio-amber/30 bg-studio-amber/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-secondary">{official?'抖音官方导出优先':'采集数据'} · 更新于 {formatDate(official?data.official_snapshot_at:data.last_success_at,true)}</span></div>
+    <section data-testid="creator-engagement-metrics" aria-labelledby="creator-engagement-heading" className="space-y-3">
+      <h2 id="creator-engagement-heading" className="text-base font-semibold text-studio-text">互动表现</h2>
+      <ReactBitsRevealSlot className="block"><div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
       <MetricCard label="互动率" value={`${(data.metrics.interaction_rate * 100).toFixed(2)}%`} icon={Heart} accent="rose" />
       <MetricCard label="分享率" value={`${(data.metrics.share_rate * 100).toFixed(2)}%`} icon={Share2} accent="blue" />
       <MetricCard label="爆款作品" value={data.metrics.viral_works_count} icon={Gauge} accent="emerald" />
-    </section></ReactBitsRevealSlot>
+      </div></ReactBitsRevealSlot>
+    </section>
     <section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]">
       <Panel title="周期表现" description={official ? '播放、互动按官方周期逐日合计；粉丝按真实期初与期末总量计算' : `${data.snapshot_count} 个日快照`}>
         <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} official={official} /><GrowthBlock title="近 30 天" data={data.growth_30d} official={official} /></div>
@@ -272,6 +267,12 @@ export default function CreatorDashboard() {
       </Panel></ReactBitsCardSlot>
     </section>
     <CreatorTopicSuggestionsPanel data={data.topic_suggestions} unavailable={loading || Boolean(error)} />
+    <div data-testid="creator-agent-panel"><Panel title="Creator Agent" description="本机采集设备与浏览器状态">
+      <div className="mb-4 flex flex-wrap items-center gap-3"><span className={`inline-flex min-h-9 items-center rounded-lg px-3 text-sm ${agentStatusTone}`}>{agentStatusLabel}</span>{agentStatusError ? <p role="alert" className="text-sm text-studio-coral-contrast">采集端状态读取失败；点击页面上方“刷新数据”重试。</p> : null}</div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-secondary">设备</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.device_name || (!agent ? '尚未绑定采集端' : '未知设备')}</p></div><div><span className="text-xs text-studio-text-secondary">浏览器</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_type || '未就绪'} {!agentStatusError || agent ? agent?.browser_version || '' : ''}</p></div><div><span className="text-xs text-studio-text-secondary">兼容状态</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_compatibility || '未检测'}</p></div><div><span className="text-xs text-studio-text-secondary">抖音登录</span><p className="mt-1 font-medium">{agentStatusError && !agent ? '暂不可用' : agent?.browser_login_status === 'valid' ? '正常' : agent?.browser_login_status ? '未确认' : agentStatusError ? '暂不可用' : '未确认'}</p></div></div>
+      <div className="mt-4 flex flex-wrap items-center gap-3"><ActionButton type="button" variant="primary" disabled={bindingBusy||bindingRecoveryState==='checking'||!currentAccountId} onClick={runBindingAction}>{bindingButtonLabel}</ActionButton>{visibleBinding?<div role="status" className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{visibleBinding.code}</code><span className="ml-3 text-xs text-studio-text-secondary">有效期至 {formatDate(visibleBinding.expiresAt,true)} · 仅可使用一次</span></div>:null}</div>
+      {bindingError?<p role="alert" className="mt-3 text-sm text-studio-coral-contrast">{bindingError}</p>:null}
+    </Panel></div>
     <Panel title="最近同步">
       {syncLogsError ? <p role="alert" className="mb-4 rounded-lg border border-studio-coral/30 bg-studio-coral/8 p-3 text-sm text-studio-coral-contrast">同步记录读取失败；{logs?.length ? '仍显示最近一次成功读取的记录。' : '当前同步指标尚未确认。'}请点击页面上方“刷新数据”重试。</p> : logs && logs.length === 0 ? <p className="mb-4 text-sm text-studio-text-secondary">尚无同步记录；首次同步后会显示在这里。</p> : logs === null ? <p role="status" className="mb-4 text-sm text-studio-text-secondary">同步记录尚未确认。</p> : null}
       <div className="grid gap-4 sm:grid-cols-4">

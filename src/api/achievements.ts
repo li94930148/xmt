@@ -22,7 +22,7 @@ export async function getAchievements(
   const qs = params.toString();
   const url = `${BASE_URL}/achievements${qs ? '?' + qs : ''}`;
 
-  const response = await fetch(url, { headers: getAuthHeader(), ...(options?.cache ? { cache: options.cache } : {}) });
+  const response = await fetch(url, { headers: getAuthHeader(), cache: options?.cache ?? 'no-store' });
   if (!response.ok) throw new Error('获取成就列表失败');
   const json = await response.json();
   return json.data || json;
@@ -30,7 +30,7 @@ export async function getAchievements(
 
 // 获取当前用户的成就
 export async function getMyAchievements(): Promise<Achievement[]> {
-  const response = await fetch(`${BASE_URL}/achievements/me`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/achievements/me`, { headers: getAuthHeader(), cache: 'no-store' });
   if (!response.ok) throw new Error('获取我的成就失败');
   const json = await response.json();
   return json.data || json;
@@ -38,7 +38,7 @@ export async function getMyAchievements(): Promise<Achievement[]> {
 
 // 获取成就进度
 export async function getAchievementProgress(): Promise<Record<number, AchievementProgress>> {
-  const response = await fetch(`${BASE_URL}/achievements/progress`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/achievements/progress`, { headers: getAuthHeader(), cache: 'no-store' });
   if (!response.ok) throw new Error('获取成就进度失败');
   const json = await response.json();
   return json.data || json;
@@ -46,7 +46,7 @@ export async function getAchievementProgress(): Promise<Record<number, Achieveme
 
 // 获取成就统计
 export async function getAchievementStats(): Promise<AchievementStats> {
-  const response = await fetch(`${BASE_URL}/achievements/stats`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/achievements/stats`, { headers: getAuthHeader(), cache: 'no-store' });
   if (!response.ok) throw new Error('获取成就统计失败');
   const json = await response.json();
   return json.data || json;
@@ -54,7 +54,7 @@ export async function getAchievementStats(): Promise<AchievementStats> {
 
 // 获取积分排行榜
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  const response = await fetch(`${BASE_URL}/achievements/leaderboard`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/achievements/leaderboard`, { headers: getAuthHeader(), cache: 'no-store' });
   if (!response.ok) throw new Error('获取排行榜失败');
   const json = await response.json();
   return json.data || json;
@@ -62,7 +62,7 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
 
 // 获取最近获得的成就
 export async function getRecentAchievements(limit = 10): Promise<RecentAchievement[]> {
-  const response = await fetch(`${BASE_URL}/achievements/recent?limit=${limit}`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/achievements/recent?limit=${limit}`, { headers: getAuthHeader(), cache: 'no-store' });
   if (!response.ok) throw new Error('获取最近成就失败');
   const json = await response.json();
   return json.data || json;

@@ -18,7 +18,7 @@ export const createCreatorAgentBindingCode=(accountId:string,requestId?:string)=
 export const getCreatorAgentBindingCodeRecovery=(accountId:string,requestId:string)=>creatorJson<CreatorAgentBindingRecovery>(`/binding-codes/requests/${encodeURIComponent(requestId)}?account_id=${encodeURIComponent(accountId)}`,{cache:'no-store'});
 export const getCreatorWorkAnalysis=(id:string,period:'24h'|'7d'|'30d')=>creatorJson<CreatorWorkAnalysis>(`/works/${encodeURIComponent(id)}/analysis?period=${period}`);
 export const getCreatorTrends=(period:'7d'|'30d'|'90d')=>creatorJson<CreatorTrendSeries>(`/trends?period=${period}`);
-export const getCreatorReports=()=>creatorJson<CreatorReport[]>('/reports');
+export const getCreatorReports=()=>creatorJson<CreatorReport[]>('/reports',{cache:'no-store'});
 export const generateCreatorReport=(type:'daily'|'weekly'|'monthly',accountId:string)=>creatorJson<Record<string,unknown>>('/reports/generate',{method:'POST',body:JSON.stringify({type,account_id:accountId})});
 export const deleteCreatorReport=(id:number,accountId:string)=>creatorJson<void>(`/reports/${id}?account_id=${encodeURIComponent(accountId)}`,{method:'DELETE'});
 

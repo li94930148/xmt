@@ -108,6 +108,7 @@ try {
   const dailyReports = await import('../../src/api/dailyReports.js');
   const calendar = await import('../../src/api/calendar.js');
   const creatorCenter = await import('../../src/api/creatorCenter.js');
+  const achievementsApi = await import('../../src/api/achievements.js');
 
   assert.equal(await inspirations.getInspirationCreateRequest('inspiration-create-key'), null);
   assert.equal(await inspirations.getInspirationVoteRequest('inspiration-vote-key'), null);
@@ -165,6 +166,13 @@ try {
   assert.equal((await dailyReports.getYearlyRecordUpdateStatus(2026, 'yearly-summary-key', 'f'.repeat(64))).status, 'not_found');
   assert.deepEqual(await calendar.getCalendarEventCreateStatus('calendar-create-key'), { status: 'missing' });
   assert.equal((await creatorCenter.getCreatorAgentBindingCodeRecovery('account-7', 'agent-binding-key')).status, 'not_found');
+  await creatorCenter.getCreatorReports();
+  await achievementsApi.getAchievements();
+  await achievementsApi.getMyAchievements();
+  await achievementsApi.getAchievementProgress();
+  await achievementsApi.getAchievementStats();
+  await achievementsApi.getLeaderboard();
+  await achievementsApi.getRecentAchievements();
 
   const requiredRecoveryPaths = [
     '/api/inspirations/create-request/inspiration-create-key',
@@ -205,6 +213,13 @@ try {
     '/api/report-summaries/yearly/requests/yearly-summary-key',
     '/api/calendar/create-request/calendar-create-key',
     '/api/creator-agent/binding-codes/requests/agent-binding-key',
+    '/api/creator-agent/reports',
+    '/api/achievements',
+    '/api/achievements/me',
+    '/api/achievements/progress',
+    '/api/achievements/stats',
+    '/api/achievements/leaderboard',
+    '/api/achievements/recent',
   ];
   const requestedPaths = requests.map((request) => request.url);
   for (const path of requiredRecoveryPaths) {

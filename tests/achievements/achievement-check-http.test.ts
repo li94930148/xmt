@@ -27,8 +27,23 @@ const server = app.listen(0, '127.0.0.1');
 await new Promise<void>(resolve => server.once('listening', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
+const noStore = (response: Response) => assert.match(response.headers.get('cache-control') || '', /no-store/i);
 
 try {
+  const cacheSensitiveReads = ['/','/me','/progress','/stats','/leaderboard','/recent?limit=10'];
+  for (const path of cacheSensitiveReads) {
+    const unauthenticated = await fetch(`http://127.0.0.1:${address.port}/api/achievements${path}`);
+    assert.equal(unauthenticated.status, 401, `${path} requires authentication`);
+    noStore(unauthenticated);
+
+    const readable = await fetch(`http://127.0.0.1:${address.port}/api/achievements${path}`, {
+      headers: { authorization: `Bearer ${signToken({ userId })}` },
+    });
+    assert.equal(readable.status, 200, `${path} reads successfully for the signed-in user`);
+    noStore(readable);
+    await readable.arrayBuffer();
+  }
+
   const response = await fetch(`http://127.0.0.1:${address.port}/api/achievements/check`, {
     method: 'POST',
     headers: { authorization: `Bearer ${signToken({ userId })}`, 'content-type': 'application/json' },

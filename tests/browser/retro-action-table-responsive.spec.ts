@@ -600,6 +600,23 @@ try {
       assert.equal(await actionStatus.count(), 1, `${theme}/${width}px inline status control identifies its action`);
       assert.equal(await actionResult.count(), 1, `${theme}/${width}px inline result control identifies its action`);
       await assertMinTouchHeight(actionStatus, `${theme}/${width}px inline action status`);
+      await actionStatus.focus();
+      await actionStatus.press('Tab');
+      const resultFocus = await actionResult.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          focused: document.activeElement === element,
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          outlineColor: style.outlineColor,
+          outlineOffset: Number.parseFloat(style.outlineOffset),
+        };
+      });
+      assert.equal(resultFocus.focused, true, `${theme}/${width}px keyboard Tab advances from action status to its result field`);
+      assert.notEqual(resultFocus.outlineStyle, 'none', `${theme}/${width}px action result field exposes a keyboard focus outline`);
+      assert.ok(resultFocus.outlineWidth >= 2, `${theme}/${width}px action result focus outline is at least 2px`);
+      assert.notEqual(resultFocus.outlineColor, 'rgba(0, 0, 0, 0)', `${theme}/${width}px action result focus outline is visible`);
+      assert.ok(resultFocus.outlineOffset >= 2, `${theme}/${width}px action result focus outline has a visible offset`);
       if (theme === 'dark') {
         await assertMutedTextContrast(page.locator('main').first(), `${theme}/${width}px retrospective detail`);
         const tableHeaders = await page.locator('table thead th').all();

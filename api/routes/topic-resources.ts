@@ -1,6 +1,7 @@
 import express from 'express';
 import { queryAll, queryOne, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
 import { canEditTopic, canViewTopic } from '../utils/access';
 import { getScopedResource, normalizeTagName, positiveInteger, recordResourceAuditInTransaction, resourceScopeArgs, resourceScopePredicate, userHasPermission } from '../services/resourceCenter';
@@ -104,7 +105,7 @@ router.delete('/:topicId/asset-dimensions/:dimensionId', authenticate, requirePe
   }
 });
 
-router.get('/:id/resources', authenticate, requirePermission('topic:view'), async (req, res) => {
+router.get('/:id/resources', noStoreResponse, authenticate, requirePermission('topic:view'), async (req, res) => {
   const topicId = positiveInteger(req.params.id);
   if (!topicId) return res.status(400).json({ message: '选题 ID 无效' });
   const topic = await getTopic(topicId);

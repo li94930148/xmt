@@ -11,12 +11,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.60',
+    date: '2026-10-31',
+    title: '关联资料恢复读取与键盘焦点优化',
+    impactScope: ['复盘行动项', '选题关联资料', '成就排行榜'],
+    changes: [
+      { type: 'improvement', description: '复盘行动项处理结果输入框恢复 Studio 键盘焦点环，便于键盘用户确认当前编辑位置。' },
+      { type: 'fix', description: '选题关联资料写入恢复读取绕过缓存，成就排行榜不再引用用户表中不存在的头像字段。' },
+    ],
+  },
+  {
     version: '10.1.59',
     date: '2026-10-31',
-    title: '报告与成就恢复读取可靠性',
-    impactScope: ['创作者中心', '成就系统', '写入结果恢复'],
+    title: '报告与成就结果恢复优化',
+    impactScope: ['创作者中心', '成就系统', '报告与检查恢复'],
     changes: [
-      { type: 'fix', description: '报告列表和成就数据恢复读取均绕过缓存；成就写入确认后刷新失败会保留成功结果，并允许只读重试。' },
+      { type: 'fix', description: '报告生成后恢复列表时客户端和服务端均绕过缓存，避免旧列表误判刚生成的报告。' },
+      { type: 'fix', description: '成就检查结果已确认但后台刷新失败时保留成功结果并仅允许只读重试；排行榜查询使用当前用户表字段。' },
     ],
   },
   {

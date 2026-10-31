@@ -210,10 +210,21 @@ export interface TopicResource {
   category: { id: number; name: string; path?: string } | null;
 }
 
-export async function getTopicResources(topicId: number): Promise<TopicResource[]> {
-  const response = await fetch(`${BASE_URL}/topics/${topicId}/resources`, { headers: getAuthHeader() });
+async function getTopicResourcesWithCache(topicId: number, cache?: RequestCache): Promise<TopicResource[]> {
+  const response = await fetch(`${BASE_URL}/topics/${topicId}/resources`, {
+    headers: getAuthHeader(),
+    ...(cache ? { cache } : {}),
+  });
   if (!response.ok) throw new Error(await getErrorMessage(response, '获取关联资料失败'));
   return (await response.json()).data;
+}
+
+export function getTopicResources(topicId: number): Promise<TopicResource[]> {
+  return getTopicResourcesWithCache(topicId);
+}
+
+export function getTopicResourcesForRecovery(topicId: number): Promise<TopicResource[]> {
+  return getTopicResourcesWithCache(topicId, 'no-store');
 }
 
 export async function addTopicResource(topicId: number, resourceId: number): Promise<void> {

@@ -1412,7 +1412,7 @@ router.get('/production/:id/source-snapshot', (req, res, next) => {
   }
 });
 
-router.get('/production/:id/review-threads', authenticate, async (req, res) => {
+router.get('/production/:id/review-threads', noStoreResponse, authenticate, async (req, res) => {
   try {
     const productionId = parsePositiveId(req.params.id);
     if (!productionId) return res.status(400).json({ message: '创作记录编号无效' });

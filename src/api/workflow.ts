@@ -220,6 +220,7 @@ export async function getProductionReviewThreads(productionId: number, version: 
   const query = new URLSearchParams({ version });
   const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/review-threads?${query}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (!response.ok) throw new Error(await getErrorMessage(response, '获取批注与建议失败'));
   const payload = await response.json() as { data?: ProductionReviewThread[] };

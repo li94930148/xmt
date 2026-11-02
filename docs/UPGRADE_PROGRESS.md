@@ -1,10 +1,18 @@
 # XMT 升级阶段记录
 
-## 2026-10-31 清单 B8：创作评审线程列表刷新防缓存（v10.1.61，本地）
+## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，本地）
+
+- **改造范围**：资料分类管理、新建、编辑三个弹窗的分类名称、上级分类、标题、分类、可见范围、摘要、正文输入均补齐 `:focus-visible` 的 2px Studio 主色轮廓与 2px offset。沿用 `studio-primary` 令牌；无 API、权限、数据库结构或业务数据变化。
+- **浏览器回归**：Playwright MCP 在隔离的内存 API 夹具中实际 Tab 导航三个弹窗共 12 个字段焦点路径。每个字段均匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio primary；未提交表单或写入真实数据。仓库浏览器脚本 `npx tsx tests/browser/resource-category-management.spec.ts` 在启动 Chromium 时遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入自动断言；不计为自动套件通过。
+- **工程门禁**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。Android 元数据为 10.1.62 / 100162，未构建 APK；本地未提交、推送或部署。
+- **下一步**：继续核对清单中其他未完成的 B4/B5 键盘、响应式与主题问题；安卓端仍按用户要求后置。
+
+## 2026-10-31 清单 B8：创作评审线程列表刷新防缓存（v10.1.61，已部署）
 
 - **改造范围**：创作评审面板在创建批注、回复或处理状态后刷新线程列表；该列表 GET 原先依赖默认浏览器缓存。现在客户端 `getProductionReviewThreads` 使用 `cache: no-store`，服务端在 `authenticate` 前使用统一 `noStoreResponse`，让 401/403/404/200 响应都不被缓存。既有 `canAccessTopic` 权限范围和版本有效性检查保持原样；无载荷、数据库结构或真实业务数据变化。
-- **回归结果**：完整 `npm run test:recovery-status-cache` 通过。客户端合同确认线程列表请求绕过缓存；隔离 SQLite HTTP 合同确认未登录、无权限、缺失版本和成功列表响应均带 `Cache-Control: no-store`，现有权限、版本隔离及写入规则保持通过。
-- **版本与发布状态**：工程版本为 10.1.61，Android 元数据为 10.1.61 / 100161，未构建 APK。类型检查、全仓 ESLint（quiet）、生产构建、版本检查、版本治理、更新说明治理（739 个版本）、Android runtime 合同、测试入口检查（327 个文件）与 `git diff --check` 均通过；构建保留现有超过 500 kB 的分包提示。Android 元数据为 10.1.61 / 100161，未构建 APK；本地未提交、推送或部署。
+- **回归结果**：完整 `npm run test:recovery-status-cache` 通过；客户端合同确认绕过缓存，隔离 SQLite HTTP 合同确认 401/403/404/200 均带 `Cache-Control: no-store`。合并提交的 CI 六项检查全部通过。
+- **部署核验**：PR [#107](https://github.com/li94930148/xmt/pull/107) 已合并部署，精确 SHA `7c416390557beac2423ec948be1e4470493a4a54`。部署前在线备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261102-084057-3862149.db` 与 Restore Drill 通过，迁移检查 GO；部署后 PM2 v10.1.61 在线、Caddy active、运行配置与内部路由暴露检查通过，SQLite `quick_check` 为 `ok`、外键违规为 0，公网 API 健康且首页/前端资源返回 200。Playwright MCP 打开线上登录页无控制台错误。
+- **版本与交付边界**：Android 元数据为 10.1.61 / 100161；CI Debug APK 构建通过，但未签名或发布 APK。
 
 ## 2026-10-31 清单 B4/B8：复盘焦点、关联资料恢复读取与排行榜合同（v10.1.60，已部署）
 

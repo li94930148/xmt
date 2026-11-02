@@ -14,7 +14,7 @@ interface ResourceEditModalProps {
   onRecovered: () => void;
 }
 
-const inputClassName = 'w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active disabled:opacity-60';
+const inputClassName = 'w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary disabled:opacity-60';
 
 export default function ResourceEditModal({ open, resource, onClose, onUpdated, onRecovered }: ResourceEditModalProps) {
   const actorId = useAuthStore((state) => state.user?.id);

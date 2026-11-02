@@ -138,6 +138,7 @@ try {
   assert.deepEqual(await workflow.getPublishingUpdateStatus(41, { status: 'published' }, { status: 'pending' }), { status: 'missing' });
   assert.equal((await workflow.getProductionByIdForRecovery(77)).id, 77);
   assert.equal((await workflow.getProductionById(77)).id, 77);
+  assert.deepEqual(await workflow.getProductionReviewThreads(77, 'v1.0'), []);
   assert.deepEqual(await workflow.getProductionReviewThreadRequestStatus(77, 'thread-request', {
     version: 'v1.0',
     kind: 'comment',
@@ -197,6 +198,7 @@ try {
     '/api/workflow/shooting/35',
     '/api/workflow/publishing/41',
     '/api/workflow/production/77/review-threads/requests/thread-request',
+    '/api/workflow/production/77/review-threads',
     '/api/workflow/production/77/review-threads/5/replies/requests/reply-request',
     '/api/workflow/production/77/review-threads/5/status-requests/status-request',
     '/api/messages/42/read-status',

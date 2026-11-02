@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.61',
+    date: '2026-10-31',
+    title: '评审列表及时更新',
+    impactScope: ['创作评审', '写入结果恢复'],
+    changes: [
+      { type: 'fix', description: '创建批注、回复或处理评审后，列表会读取最新结果，避免页面继续显示旧内容。' },
+    ],
+  },
+  {
     version: '10.1.60',
     date: '2026-10-31',
     title: '关联资料恢复读取与键盘焦点优化',

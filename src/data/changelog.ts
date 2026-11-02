@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.62',
+    date: '2026-11-02',
+    title: '资料中心表单焦点清晰可见',
+    impactScope: ['资料中心', '资料分类', '键盘可访问性'],
+    changes: [
+      { type: 'improvement', description: '资料分类管理、新建与编辑表单的字段均显示 Studio 主色键盘焦点环。' },
+    ],
+  },
+  {
     version: '10.1.61',
     date: '2026-10-31',
     title: '评审列表及时更新',

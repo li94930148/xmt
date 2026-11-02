@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import { Server as SocketServer } from 'socket.io';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { readFileSync } from 'node:fs';
 
@@ -13,6 +13,27 @@ const resourceCreateRecoveryFixtureMode = process.argv.includes('--mcp-resource-
 const resourceUpdateRecoveryFixtureMode = process.argv.includes('--mcp-resource-update-recovery-fixture');
 const resourceUpdateNotFoundFixtureMode = process.argv.includes('--mcp-resource-update-not-found-fixture');
 const user = { id: 91, username: 'resource-category-qa', role: 'admin', name: '分类管理隔离验收', enabled: true, force_change_password: false };
+
+async function assertStudioFocusRing(locator: Locator, label: string) {
+  const focus = await locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      focusVisible: element.matches(':focus-visible'),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
+      outlineColor: style.outlineColor,
+      usesStudioPrimary: element.classList.contains('focus-visible:outline-studio-primary'),
+    };
+  });
+  assert.equal(focus.focusVisible, true, `${label} is keyboard-focused`);
+  assert.equal(focus.outlineStyle, 'solid', `${label} uses an outline for keyboard focus`);
+  assert.equal(focus.outlineWidth, '2px', `${label} has the 2px Studio focus width`);
+  assert.equal(focus.outlineOffset, '2px', `${label} has the 2px Studio focus offset`);
+  assert.notEqual(focus.outlineColor, 'rgba(0, 0, 0, 0)', `${label} focus outline is visible`);
+  assert.equal(focus.usesStudioPrimary, true, `${label} focus color comes from the Studio primary token`);
+}
+
 type Category = { id: number; library_type: string; parent_id: number | null; name: string; code: string | null; path: string; sort_order: number; enabled: number; resource_count: number };
 const categories: Category[] = [
   { id: 81, library_type: 'knowledge', parent_id: null, name: '现有资料', code: null, path: '/现有资料', sort_order: 1, enabled: 1, resource_count: 1 },
@@ -538,6 +559,12 @@ try {
   }
 
   const nameInput = page.getByRole('textbox', { name: '分类名称' });
+  const parentCategory = page.getByRole('combobox', { name: '上级分类' });
+  await nameInput.focus();
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(parentCategory, 'category parent selector');
+  await page.keyboard.press('Shift+Tab');
+  await assertStudioFocusRing(nameInput, 'category name field');
   await nameInput.fill('新增分类');
   await page.getByRole('button', { name: '新增分类' }).click();
   await page.getByText('服务器尚未找到这次分类操作回执').waitFor();
@@ -593,6 +620,18 @@ try {
   await page.getByRole('button', { name: '关闭弹窗' }).click();
   await page.getByRole('button', { name: '新增资料' }).click();
   const resourceTitle = page.getByRole('textbox', { name: '标题' });
+  await resourceTitle.focus();
+  await page.keyboard.press('Tab');
+  const resourceCategory = page.getByRole('combobox', { name: '分类' });
+  await assertStudioFocusRing(resourceCategory, 'create category selector');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('combobox', { name: '可见范围' }), 'create visibility selector');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('textbox', { name: '摘要' }), 'create summary field');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('textbox', { name: '正文' }), 'create body field');
+  for (let index = 0; index < 4; index += 1) await page.keyboard.press('Shift+Tab');
+  await assertStudioFocusRing(resourceTitle, 'create title field');
   await resourceTitle.fill('知识库新建验收资料');
   await page.getByRole('button', { name: '创建', exact: true }).evaluate((button) => {
     const form = button.closest('form') as HTMLFormElement;
@@ -623,6 +662,19 @@ try {
   await editAvailable.click();
   await page.getByRole('heading', { name: '编辑资料', exact: true }).waitFor();
   const editTitle = page.getByRole('textbox', { name: '资料标题' });
+  const editCategory = page.getByRole('combobox', { name: '资料分类' });
+  await page.waitForFunction(() => document.querySelector('select[aria-label="资料分类"]')?.disabled === false);
+  await editTitle.focus();
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(editCategory, 'edit category selector');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('combobox', { name: '可见范围' }), 'edit visibility selector');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('textbox', { name: '资料摘要' }), 'edit summary field');
+  await page.keyboard.press('Tab');
+  await assertStudioFocusRing(page.getByRole('textbox', { name: '资料正文' }), 'edit body field');
+  for (let index = 0; index < 4; index += 1) await page.keyboard.press('Shift+Tab');
+  await assertStudioFocusRing(editTitle, 'edit title field');
   await editTitle.fill('已编辑资料标题');
   await page.getByRole('textbox', { name: '资料摘要' }).fill('已更新摘要');
   await page.getByRole('textbox', { name: '资料正文' }).fill('正文可以在资料详情直接修改。');

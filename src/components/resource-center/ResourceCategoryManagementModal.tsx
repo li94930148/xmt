@@ -16,7 +16,7 @@ interface ResourceCategoryManagementModalProps {
   onCategoriesChange: (categories: ResourceCategory[]) => void;
 }
 
-const fieldClassName = 'xmt-field w-full';
+const fieldClassName = 'xmt-field w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary';
 
 export default function ResourceCategoryManagementModal({
   open,

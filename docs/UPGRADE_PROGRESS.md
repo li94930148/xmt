@@ -1,5 +1,14 @@
 # XMT 升级阶段记录
 
+## 2026-11-03 清单 B4/B5：登录与首次改密键盘焦点可见（v10.1.63，本地待发布）
+
+- **改造范围**：登录页三种布局以及首次登录改密弹窗的账号、密码输入框移除覆盖全局 `:focus-visible` 的禁用样式，继续使用现有 Studio 主色 2px 焦点轮廓和 2px offset。认证请求、密码规则、API、权限、数据库结构与业务数据均不变。
+- **浏览器核验**：Playwright MCP 隔离夹具已通过键盘 Tab 核对三种布局的浅/深主题登录字段，以及浅/深主题首次改密弹窗的当前、新密码和确认密码字段；焦点环为实线、2px、偏移 2px，使用主题 Studio 主色。未提交表单或写入真实业务数据。
+- **自动浏览器回归**：自动套件与工程门禁的最终结果将在验证后补入；macOS Chromium 启动权限问题如重现会单独记录，不计为自动断言通过。
+- **自动浏览器回归**：`npm run test:login-theme-contrast-browser` 在 Chromium 启动阶段遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入断言；不计为自动回归通过。Playwright MCP 手动核验结果见上文。
+- **工程门禁**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。
+- **版本与交付边界**：工程与 Android 元数据均为 10.1.63 / 100163，未构建或发布 APK；PR 与生产部署待完成。
+
 ## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，已部署）
 
 - **改造范围**：资料分类管理、新建、编辑三个弹窗的分类名称、上级分类、标题、分类、可见范围、摘要、正文输入均补齐 `:focus-visible` 的 2px Studio 主色轮廓与 2px offset。沿用 `studio-primary` 令牌；无 API、权限、数据库结构或业务数据变化。

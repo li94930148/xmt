@@ -188,7 +188,7 @@ function ChangePasswordModal({
             disabled={loading || outcomeUnknown}
             value={oldPwd}
             onChange={(event) => onOldPwdChange(event.target.value)}
-            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="当前密码"
           />
           <label htmlFor="first-login-new-password" className="sr-only">新密码</label>
@@ -200,7 +200,7 @@ function ChangePasswordModal({
             disabled={loading || outcomeUnknown}
             value={newPwd}
             onChange={(event) => onNewPwdChange(event.target.value)}
-            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="新密码（至少 6 位）"
           />
           <label htmlFor="first-login-confirm-password" className="sr-only">确认新密码</label>
@@ -212,7 +212,7 @@ function ChangePasswordModal({
             disabled={loading || outcomeUnknown}
             value={confirmPwd}
             onChange={(event) => onConfirmPwdChange(event.target.value)}
-            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="确认新密码"
           />
         </div>
@@ -358,7 +358,7 @@ function LoginForm({
             id="login-username"
             value={username}
             onChange={(event) => onUsernameChange(event.target.value)}
-            className={`h-12 w-full rounded-xl border px-4 outline-none transition-all ${surfaceClass}`}
+            className={`h-12 w-full rounded-xl border px-4 transition-all ${surfaceClass}`}
             placeholder="请输入账号"
             autoComplete="username"
           />
@@ -372,7 +372,7 @@ function LoginForm({
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              className={`h-12 w-full rounded-xl border px-4 pr-14 outline-none transition-all ${surfaceClass}`}
+              className={`h-12 w-full rounded-xl border px-4 pr-14 transition-all ${surfaceClass}`}
               placeholder="请输入密码"
               autoComplete="current-password"
             />
@@ -1029,7 +1029,7 @@ export default function Login() {
                           }
                           if (loginSuccessMessage) setLoginSuccessMessage('');
                         }}
-                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
+                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active"
                         placeholder="输入用户名"
                         autoComplete="username"
                         required
@@ -1052,7 +1052,7 @@ export default function Login() {
                           }
                           if (loginSuccessMessage) setLoginSuccessMessage('');
                         }}
-                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 pr-10 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
+                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 pr-10 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active"
                         placeholder="输入密码"
                         autoComplete="current-password"
                         required

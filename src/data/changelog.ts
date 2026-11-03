@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '10.1.63',
+    date: '2026-11-03',
+    title: '登录键盘焦点清晰可见',
+    impactScope: ['登录页', '首次登录改密', '键盘可访问性'],
+    changes: [
+      { type: 'improvement', description: '登录字段和首次改密字段显示 Studio 主题焦点环，增强键盘操作可见性。' },
+    ],
+  },
+  {
     version: '10.1.62',
     date: '2026-11-02',
     title: '资料中心表单焦点清晰可见',

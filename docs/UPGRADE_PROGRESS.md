@@ -8,7 +8,7 @@
 - **工程门禁**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。
 - **生产浏览器复核**：部署后 Chrome DevTools MCP 打开公网登录页并实际按 Tab；用户名输入框匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio 主色 `rgb(107, 140, 255)`；浏览器控制台无错误。
 - **CI 与部署**：PR 检查和主线六项 CI 全部通过，主线 CI 运行 [41588331550](https://github.com/li94930148/xmt/actions/runs/41588331550) 成功。PR [#110](https://github.com/li94930148/xmt/pull/110) 已合并，生产部署精确 SHA `67cb4f686fa1c12f999d257804b88b8afb5791d9`。部署前在线备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261103-141636-3897174.db` 的 Restore Drill PASS，迁移 001–069 GO，权威运行配置检查通过；部署后 PM2 v10.1.63 online、Caddy active、本机与公网 `/api/health` 和首页均为 200，SQLite `quick_check=ok`、外键违规 0，内部诊断路径 4 项均未暴露，生产依赖审计 0 vulnerabilities。
-- **工程门禁与交付边界**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.63 / 100163，未构建或发布 APK。
+- **工程门禁与交付边界**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.63 / 100163；CI Debug APK 构建通过，但未签名、分发或做设备专项验收。
 
 ## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，已部署）
 

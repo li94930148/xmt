@@ -1,13 +1,14 @@
 # XMT 升级阶段记录
 
-## 2026-11-03 清单 B4/B5：登录与首次改密键盘焦点可见（v10.1.63，本地待发布）
+## 2026-11-03 清单 B4/B5：登录与首次改密键盘焦点可见（v10.1.63，已部署）
 
 - **改造范围**：登录页三种布局以及首次登录改密弹窗的账号、密码输入框移除覆盖全局 `:focus-visible` 的禁用样式，继续使用现有 Studio 主色 2px 焦点轮廓和 2px offset。认证请求、密码规则、API、权限、数据库结构与业务数据均不变。
 - **浏览器核验**：Playwright MCP 隔离夹具已通过键盘 Tab 核对三种布局的浅/深主题登录字段，以及浅/深主题首次改密弹窗的当前、新密码和确认密码字段；焦点环为实线、2px、偏移 2px，使用主题 Studio 主色。未提交表单或写入真实业务数据。
-- **自动浏览器回归**：自动套件与工程门禁的最终结果将在验证后补入；macOS Chromium 启动权限问题如重现会单独记录，不计为自动断言通过。
 - **自动浏览器回归**：`npm run test:login-theme-contrast-browser` 在 Chromium 启动阶段遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入断言；不计为自动回归通过。Playwright MCP 手动核验结果见上文。
 - **工程门禁**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。
-- **版本与交付边界**：工程与 Android 元数据均为 10.1.63 / 100163，未构建或发布 APK；PR 与生产部署待完成。
+- **生产浏览器复核**：部署后 Chrome DevTools MCP 打开公网登录页并实际按 Tab；用户名输入框匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio 主色 `rgb(107, 140, 255)`；浏览器控制台无错误。
+- **CI 与部署**：PR 检查和主线六项 CI 全部通过，主线 CI 运行 [41588331550](https://github.com/li94930148/xmt/actions/runs/41588331550) 成功。PR [#110](https://github.com/li94930148/xmt/pull/110) 已合并，生产部署精确 SHA `67cb4f686fa1c12f999d257804b88b8afb5791d9`。部署前在线备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261103-141636-3897174.db` 的 Restore Drill PASS，迁移 001–069 GO，权威运行配置检查通过；部署后 PM2 v10.1.63 online、Caddy active、本机与公网 `/api/health` 和首页均为 200，SQLite `quick_check=ok`、外键违规 0，内部诊断路径 4 项均未暴露，生产依赖审计 0 vulnerabilities。
+- **工程门禁与交付边界**：`npm ci`、`npm run version:check`、版本治理、更新说明治理（741 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、全仓 ESLint、Studio 令牌检查、`npm run build` 与 `git diff --check` 均通过。完整依赖安装报告 16 项 moderate 告警；构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.63 / 100163，未构建或发布 APK。
 
 ## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，已部署）
 

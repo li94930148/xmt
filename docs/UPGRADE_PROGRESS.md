@@ -1,10 +1,11 @@
 # XMT 升级阶段记录
 
-## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，本地）
+## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，已部署）
 
 - **改造范围**：资料分类管理、新建、编辑三个弹窗的分类名称、上级分类、标题、分类、可见范围、摘要、正文输入均补齐 `:focus-visible` 的 2px Studio 主色轮廓与 2px offset。沿用 `studio-primary` 令牌；无 API、权限、数据库结构或业务数据变化。
 - **浏览器回归**：Playwright MCP 在隔离的内存 API 夹具中实际 Tab 导航三个弹窗共 12 个字段焦点路径。每个字段均匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio primary；未提交表单或写入真实数据。仓库浏览器脚本 `npx tsx tests/browser/resource-category-management.spec.ts` 在启动 Chromium 时遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入自动断言；不计为自动套件通过。
-- **工程门禁**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。Android 元数据为 10.1.62 / 100162，未构建 APK；本地未提交、推送或部署。
+- **工程门禁**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。PR #108 与合并主线 SHA 的六项 GitHub CI 均通过。Android 元数据为 10.1.62 / 100162，未构建或发布 APK。
+- **生产部署**：PR [#108](https://github.com/li94930148/xmt/pull/108) 合并并部署，精确 SHA `125abd2b823b4a8072dfd7ff8ffa801a4b04a35c`。部署前在线数据库备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261102-091123-3863783.db` 的 `quick_check=ok`，非破坏性 Restore Drill PASS；迁移 001–069 GO，权威运行环境检查及读回 PASS。部署后服务器 HEAD 一致且工作树干净，PM2 `xmt-api` v10.1.62 online、Caddy active；本机和公网 `/api/health` 均为 200，首页 200，SQLite `quick_check=ok`、外键违规 0，四个公网内部诊断路径均为 404。依赖裁剪后生产依赖审计 0 vulnerabilities；安装阶段报告 16 项 moderate 依赖告警。
 - **下一步**：继续核对清单中其他未完成的 B4/B5 键盘、响应式与主题问题；安卓端仍按用户要求后置。
 
 ## 2026-10-31 清单 B8：创作评审线程列表刷新防缓存（v10.1.61，已部署）

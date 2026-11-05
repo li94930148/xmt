@@ -1,11 +1,12 @@
-import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { noStoreResponse } from '../middleware/no-store';
 import { createMessage } from '../utils/messageHelper';
+import { dateKeyBjt } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 // GET / - 获取所有成就定义（支持分类筛选）
 router.get('/', noStoreResponse, authenticate, async (req, res) => {
@@ -98,9 +99,10 @@ router.get('/progress', noStoreResponse, authenticate, async (req, res) => {
           break;
         }
         case 'login_streak': {
+          const startDate = dateKeyBjt(Date.now() - Math.max(0, Number(conditionValue)) * 24 * 60 * 60 * 1000);
           const r: any = await queryOne(
-            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
-            [userId, conditionValue]
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= ?`,
+            [userId, startDate]
           );
           current = r?.days || 0;
           break;
@@ -346,9 +348,10 @@ router.post('/check', authenticate, async (req, res) => {
           break;
         }
         case 'login_streak': {
+          const startDate = dateKeyBjt(Date.now() - Math.max(0, Number(conditionValue)) * 24 * 60 * 60 * 1000);
           const result: any = await queryOne(
-            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
-            [userId, conditionValue]
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= ?`,
+            [userId, startDate]
           );
           earned = (result?.days || 0) >= conditionValue;
           break;

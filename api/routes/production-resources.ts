@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { beijingNow, queryOne, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
@@ -6,7 +7,7 @@ import { canEditProduction, canViewProduction } from '../utils/access';
 import { getScopedResource, positiveInteger } from '../services/resourceCenter';
 import { MATERIAL_HTML_MAX_LENGTH, plainTextToSafeHtml, sanitizeRichText } from '../utils/sanitize-rich-text';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const MAX_LIBRARY_MATERIALS_PER_REQUEST = 50;
 
 type ProductionScope = {

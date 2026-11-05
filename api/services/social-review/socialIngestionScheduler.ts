@@ -53,22 +53,25 @@ export async function createDailySchedule(accountId: number, enabled = true) {
   const account = await getSocialAccount(accountId);
   if (!account) throw new Error('账号不存在。');
   const nextRunAt = nextDailyRunAt();
+  const now = beijingNow();
   await execute(`INSERT INTO social_scheduled_jobs (account_id, schedule_type, enabled, next_run_at, created_at, updated_at)
-    VALUES (?, 'daily', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
-    ON CONFLICT(account_id, schedule_type) DO UPDATE SET enabled = excluded.enabled, next_run_at = excluded.next_run_at, updated_at = datetime('now', '+8 hours')`, [accountId, enabled ? 1 : 0, nextRunAt]);
+    VALUES (?, 'daily', ?, ?, ?, ?)
+    ON CONFLICT(account_id, schedule_type) DO UPDATE SET enabled = excluded.enabled, next_run_at = excluded.next_run_at, updated_at = excluded.updated_at`, [accountId, enabled ? 1 : 0, nextRunAt, now, now]);
   const row = await queryOne<Record<string, unknown>>(`SELECT id FROM social_scheduled_jobs WHERE account_id = ? AND schedule_type = 'daily'`, [accountId]);
   return getScheduledJob(Number(row?.id || 0));
 }
 
 export async function updateScheduleEnabled(scheduleId: number, enabled: boolean) {
+  const now = beijingNow();
   const affected = await execute(`UPDATE social_scheduled_jobs SET enabled = ?, next_run_at = CASE WHEN ? = 1 THEN ? ELSE next_run_at END,
-    updated_at = datetime('now', '+8 hours') WHERE id = ?`, [enabled ? 1 : 0, enabled ? 1 : 0, nextDailyRunAt(), scheduleId]);
+    updated_at = ? WHERE id = ?`, [enabled ? 1 : 0, enabled ? 1 : 0, nextDailyRunAt(), now, scheduleId]);
   if (!affected) throw new Error('采集计划不存在。');
   return getScheduledJob(scheduleId);
 }
 
 async function markScheduleRun(scheduleId: number) {
-  await execute(`UPDATE social_scheduled_jobs SET last_run_at = ?, next_run_at = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [beijingNow(), nextDailyRunAt(), scheduleId]);
+  const now = beijingNow();
+  await execute(`UPDATE social_scheduled_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, [now, nextDailyRunAt(), now, scheduleId]);
 }
 
 export async function recordScheduledJobFailure(jobId: number, error: unknown) {
@@ -77,8 +80,9 @@ export async function recordScheduledJobFailure(jobId: number, error: unknown) {
     credential_expired: '登录凭据已失效，请重新扫码登录。', download_failed: '官方导出下载失败，请稍后重试。',
     parse_failed: '导出数据解析失败，请检查文件结构。', network_failed: '页面加载失败，请稍后重试。', unknown: '采集失败，请稍后重试。',
   };
+  const now = beijingNow();
   await execute(`UPDATE social_ingestion_jobs SET status = 'failed', failure_type = ?, last_error = ?,
-    finished_at = datetime('now', '+8 hours'), updated_at = datetime('now', '+8 hours') WHERE id = ?`, [failureType, messages[failureType], jobId]);
+    finished_at = ?, updated_at = ? WHERE id = ?`, [failureType, messages[failureType], now, now, jobId]);
   if (failureType === 'credential_expired') {
     const job = await getIngestionJob(jobId);
     const account = job?.account_id == null ? null : await getSocialAccount(Number(job.account_id));

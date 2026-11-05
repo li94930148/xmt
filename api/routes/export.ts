@@ -1,11 +1,12 @@
-import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { beijingNow, beijingToday, queryOne, queryAll } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { sendSafeServerError } from '../utils/response';
 import { getLegacyAnalyticsInventory, getPublishingMetricFacts, sumPublishingMetricFacts } from '../services/publishingMetrics';
+import { formatBjtDatabase } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 function dateDaysAgo(baseDate: string, days: number): string {
   const date = new Date(`${baseDate}T08:00:00+08:00`);
@@ -104,15 +105,16 @@ router.get('/analytics', authenticate, requirePermission('export:data'), async (
       ORDER BY topics_created DESC
     `);
 
+    const dailyTrendCutoff = formatBjtDatabase(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const dailyTrend = await queryAll(`
       SELECT
         DATE(created_at) as date,
         COUNT(*) as topics_created
       FROM topics
-      WHERE created_at >= datetime('now', '+8 hours', '-30 days')
+      WHERE created_at >= ?
       GROUP BY DATE(created_at)
       ORDER BY date ASC
-    `);
+    `, [dailyTrendCutoff]);
 
     const platformDist = await queryAll(`
       SELECT platform, COUNT(*) as count

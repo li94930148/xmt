@@ -1,8 +1,10 @@
 ﻿﻿import express from 'express';
-import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
+import { dateKeyBjt, formatBjtDatabase, parseStoredBjt } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 type PomodoroSessionState = {
   id: number;
@@ -24,6 +26,14 @@ function sessionRemainingSeconds(session: PomodoroSessionState) {
 
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
   return Math.max(0, durationSeconds - elapsedSeconds);
+}
+
+function previousSundayBoundaryBjt() {
+  const midnight = parseStoredBjt(`${dateKeyBjt()} 00:00:00`);
+  if (!midnight) throw new Error('BJT_WEEK_BOUNDARY_UNAVAILABLE');
+  const weekday = (midnight.getUTCDay() + 1) % 7;
+  const daysSincePreviousSunday = weekday === 0 ? 7 : weekday;
+  return formatBjtDatabase(Date.now() - daysSincePreviousSunday * 24 * 60 * 60 * 1000);
 }
 
 // POST /start - 开始番茄钟
@@ -91,9 +101,9 @@ router.post('/:id/cancel', authenticate, async (req, res) => {
 
         await tx.execute(
           `INSERT INTO pomodoro_cancellation_ledger (user_id, session_id, cancelled_at)
-           VALUES (?, ?, datetime('now', '+8 hours'))
+           VALUES (?, ?, ?)
            ON CONFLICT(user_id, session_id) DO NOTHING`,
-          [req.user?.id, req.params.id]
+          [req.user?.id, req.params.id, beijingNow()]
         );
         const deleted = await tx.execute(
           'DELETE FROM pomodoro_sessions WHERE id = ? AND user_id = ? AND completed = 0',
@@ -125,9 +135,9 @@ router.post('/:id/complete', authenticate, async (req, res) => {
     const outcome = await runInTransaction(async (tx) => {
       const changed = await tx.execute(
         `UPDATE pomodoro_sessions
-         SET completed = 1, ended_at = datetime('now', '+8 hours')
+         SET completed = 1, ended_at = ?
          WHERE id = ? AND user_id = ? AND completed = 0`,
-        [req.params.id, req.user?.id]
+        [beijingNow(), req.params.id, req.user?.id]
       );
       if (changed === 1) return 'completed' as const;
 
@@ -193,14 +203,15 @@ router.get('/stats', authenticate, async (req, res) => {
 
     const todayResult = await queryOne(`
       SELECT COUNT(*) as count FROM pomodoro_sessions 
-      WHERE user_id = ? AND completed = 1 AND DATE(ended_at) = DATE('now', '+8 hours')
-    `, [userId]);
+      WHERE user_id = ? AND completed = 1 AND DATE(ended_at) = ?
+    `, [userId, dateKeyBjt()]);
 
+    const weekStart = previousSundayBoundaryBjt();
     const weekResult = await queryOne(`
       SELECT COUNT(*) as count FROM pomodoro_sessions 
       WHERE user_id = ? AND completed = 1 
-      AND ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
-    `, [userId]);
+      AND ended_at >= ?
+    `, [userId, weekStart]);
 
     const totalResult = await queryOne(`
       SELECT COALESCE(SUM(duration), 0) as total FROM pomodoro_sessions 
@@ -220,6 +231,7 @@ router.get('/stats', authenticate, async (req, res) => {
 // GET /ranking - 获取团队番茄钟排行榜（本周）
 router.get('/ranking', authenticate, async (req, res) => {
   try {
+    const weekStart = previousSundayBoundaryBjt();
     const ranking = await queryAll(`
       SELECT 
         u.id as user_id,
@@ -229,13 +241,13 @@ router.get('/ranking', authenticate, async (req, res) => {
       FROM users u
       LEFT JOIN pomodoro_sessions ps ON ps.user_id = u.id 
         AND ps.completed = 1 
-        AND ps.ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
+        AND ps.ended_at >= ?
       WHERE u.enabled = 1
       GROUP BY u.id
       HAVING total_sessions > 0
       ORDER BY total_sessions DESC
       LIMIT 20
-    `);
+    `, [weekStart]);
     const canSeeNames = req.user?.role === 'admin' || req.user?.role === 'director';
     res.json({ data: ranking.map((row, index) => ({
       user_id: canSeeNames || Number(row.user_id) === req.user?.id ? row.user_id : -(index + 1),

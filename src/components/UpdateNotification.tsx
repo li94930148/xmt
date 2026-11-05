@@ -1,5 +1,5 @@
 import { ArrowRight, Sparkles, X } from 'lucide-react';
-import { changelog } from '../data/changelog';
+import { latestChangelogEntry } from '../data/latest-changelog-entry';
 
 interface UpdateNotificationProps {
   onClose: () => void;
@@ -7,8 +7,7 @@ interface UpdateNotificationProps {
 }
 
 export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateNotificationProps) {
-  const latestVersion = changelog[0];
-  if (!latestVersion) return null;
+  const latestVersion = latestChangelogEntry;
 
   return (
     <aside

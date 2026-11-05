@@ -10,4 +10,4 @@
 4. 发布后检查协议版本、心跳、账号绑定和最近同步状态。
 5. 在 Agent 在线且抖音登录有效时执行一次小样本同步，再执行完整同步。
 
-`DOUYIN_CLIENT_KEY`、`DOUYIN_CLIENT_SECRET`、OAuth 回调和 Webhook配置仅供独立的授权/Webhook功能使用，不参与运营数据采集。不要为运营中心配置粉丝、作品或统计 OpenAPI URL。
+`DOUYIN_CLIENT_KEY`、`DOUYIN_CLIENT_SECRET`、`XMT_TOKEN_ENCRYPTION_KEY`、OAuth 回调和 Webhook 配置仅供独立的授权/Webhook 功能使用，不参与运营数据采集。令牌加密密钥必须独立生成，不能复用 JWT 或抖音客户端密钥；生产缺少密钥时服务不会启动。不要为运营中心配置粉丝、作品或统计 OpenAPI URL。

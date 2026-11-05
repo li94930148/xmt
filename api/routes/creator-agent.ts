@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { acknowledgeCreatorAgentBindResult, bindCreatorAgent, createCreatorAgentBindingCode, getCreatorAgentBindingCodeRecovery, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
@@ -12,7 +13,8 @@ import { creatorAnalyticsService, type ReportType } from '../services/creatorAna
 import { getDouyinDashboard, getDouyinManagedCover, getDouyinSyncLogs, getDouyinTrends, getDouyinWorkDetail, getDouyinWorkReview, getDouyinWorks } from '../services/douyinDataCenter.js';
 import { attachCreatorTopicSuggestionFeedback, saveCreatorTopicSuggestionFeedback } from '../services/creatorTopicSuggestionFeedback.js';
 import { queryAll } from '../database/utils.js';
-const router=express.Router();
+import { formatBjtDatabase } from '../../shared/time/index.js';
+const router=createAsyncRouter();
 const creatorError = (res: express.Response, error: unknown, fallback: string, defaultStatus = 500) => {
   if (error instanceof CreatorSyncAlreadyRunningError) {
     return res.set('Retry-After', '5').status(503).json({ success: false, code: 'CREATOR_SYNC_BUSY', message: error.message });
@@ -30,7 +32,7 @@ const creatorBindingRecoveryError = (res:express.Response,error:unknown,fallback
   if(status===503)return res.status(503).json({message:error instanceof Error?error.message:fallback});
   return creatorError(res,error,fallback);
 };
-router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= datetime('now','+8 hours','-2 minutes') THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){creatorError(res,error,'Agent 状态加载失败');}});
+router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const heartbeatCutoff=formatBjtDatabase(Date.now()-2*60*1000);const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= ? THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`,[heartbeatCutoff]);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){creatorError(res,error,'Agent 状态加载失败');}});
 router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});const suggestions=data.topic_suggestions?{...data.topic_suggestions,items:await attachCreatorTopicSuggestionFeedback(scope.id,req.user!.id,data.topic_suggestions.items)}:undefined;res.json({...data,topic_suggestions:suggestions,access_level:scope.access_level});}catch(error){creatorError(res,error,'抖音驾驶舱加载失败');}});
 router.post('/douyin/suggestions/:suggestionId/feedback',authenticate,requirePermission('creator:data:view'),async(req,res)=>{
   try{

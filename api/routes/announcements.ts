@@ -1,10 +1,11 @@
 ﻿import express from 'express';
 import { createHmac } from 'node:crypto';
+import { createAsyncRouter } from '../middleware/async-router';
 import { beijingNow, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const CREATE_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function createRequestFingerprint(payload: { content: string; type: string; pinned: boolean }) {
@@ -138,9 +139,10 @@ router.post('/', authenticate, requirePermission('system:announcement'), async (
       });
     }
 
+    const now = beijingNow();
     const announcementId = await executeInsert(
       `INSERT INTO announcements (content, type, pinned, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      [content, type || 'note', pinned ? 1 : 0, userId, beijingNow(), beijingNow()]
+      [content, type || 'note', pinned ? 1 : 0, userId, now, now]
     );
 
     res.json({ message: '公告创建成功', id: announcementId });
@@ -171,8 +173,8 @@ router.put('/:id', authenticate, requirePermission('system:announcement'), async
       return res.status(400).json({ message: '没有需要更新的字段' });
     }
 
-    updates.push("updated_at = datetime('now', '+8 hours')");
-    params.push(id);
+    updates.push('updated_at = ?');
+    params.push(beijingNow(), id);
 
     await execute(`UPDATE announcements SET ${updates.join(', ')} WHERE id = ?`, params);
 

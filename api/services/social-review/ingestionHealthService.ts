@@ -1,4 +1,4 @@
-import { execute, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryOne } from '../../database/utils.js';
 
 export type SocialIngestionHealth = {
   accountId: number;
@@ -28,11 +28,11 @@ export async function refreshIngestionHealth(accountId: number): Promise<SocialI
   const successRate = totalJobs ? successJobs / totalJobs : 0;
   await execute(`INSERT INTO social_ingestion_health
     (account_id, last_success_at, last_failed_at, success_rate, total_jobs, success_jobs, failed_jobs, last_failure_type, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(account_id) DO UPDATE SET last_success_at = excluded.last_success_at, last_failed_at = excluded.last_failed_at,
       success_rate = excluded.success_rate, total_jobs = excluded.total_jobs, success_jobs = excluded.success_jobs,
       failed_jobs = excluded.failed_jobs, last_failure_type = excluded.last_failure_type, updated_at = excluded.updated_at`, [
-    accountId, summary?.last_success_at || null, summary?.last_failed_at || null, successRate, totalJobs, successJobs, failedJobs, latestFailure?.failure_type || null,
+    accountId, summary?.last_success_at || null, summary?.last_failed_at || null, successRate, totalJobs, successJobs, failedJobs, latestFailure?.failure_type || null, beijingNow(),
   ]);
   const saved = await queryOne<Record<string, unknown>>(`SELECT updated_at FROM social_ingestion_health WHERE account_id = ?`, [accountId]);
   return {

@@ -1,10 +1,11 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { explainUserActions } from '../collaboration/ux/collaborationExplainUX';
 import { buildNarrative } from '../collaboration/ux/documentNarrative';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 router.get('/explain/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);

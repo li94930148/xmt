@@ -1,4 +1,4 @@
-import { execute, queryAll, queryOne, runInTransaction } from '../database/utils';
+import { beijingNow, execute, queryAll, queryOne, runInTransaction } from '../database/utils';
 import { createHash } from 'node:crypto';
 import type { User } from '../types';
 
@@ -116,8 +116,8 @@ export async function recordResourceAuditInTransaction(
 ) {
   await tx.execute(
     `INSERT INTO resource_audit_logs (resource_id, user_id, action, detail_json, created_at)
-     VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))`,
-    [resourceId, userId, action, JSON.stringify(detail ?? {})],
+     VALUES (?, ?, ?, ?, ?)`,
+    [resourceId, userId, action, JSON.stringify(detail ?? {}), beijingNow()],
   );
 }
 
@@ -150,8 +150,8 @@ export async function getResourceTags(resourceId: number) {
 export async function attachTag(resourceId: number, tagId: number, userId: number) {
   return execute(
     `INSERT OR IGNORE INTO resource_tag_relations (resource_id, tag_id, created_by, created_at)
-     VALUES (?, ?, ?, datetime('now', '+8 hours'))`,
-    [resourceId, tagId, userId],
+     VALUES (?, ?, ?, ?)`,
+    [resourceId, tagId, userId, beijingNow()],
   );
 }
 
@@ -189,16 +189,17 @@ function resourceCreateRequestFingerprint(fields: Record<string, unknown>) {
 }
 
 async function createResourceRecordInTransaction(tx: ResourceCenterTransaction, fields: Record<string, unknown>, userId: number) {
+  const now = beijingNow();
   const id = await tx.executeInsert(`
       INSERT INTO resources (
         name, title, summary, library_type, category_id, visibility, status,
         content_text, source_type, source_uri, owner_id, uploader_id, created_by, updated_by,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+      ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       fields.title, fields.title, fields.summary ?? null, fields.library_type, fields.category_id ?? null,
       fields.visibility, fields.content_text ?? null, fields.source_type ?? 'manual', fields.source_uri ?? null,
-      userId, userId, userId, userId,
+      userId, userId, userId, userId, now, now,
     ]);
     await recordResourceAuditInTransaction(tx, id, userId, 'create', {
       title: fields.title,
@@ -241,8 +242,8 @@ export async function createResourceRecordWithRequest(
     await tx.execute(
       `INSERT INTO resource_create_request_keys
         (client_request_id,actor_id,resource_id,request_fingerprint,created_at)
-       VALUES(?,?,?,?,datetime('now', '+8 hours'))`,
-      [normalizedRequestId, userId, resourceId, requestFingerprint],
+       VALUES(?,?,?,?,?)`,
+      [normalizedRequestId, userId, resourceId, requestFingerprint, beijingNow()],
     );
     return { resourceId, replayed: false };
   });
@@ -327,8 +328,8 @@ async function updateResourceRecordInTransaction(
 
   if (assignments.length) {
     await tx.execute(
-      `UPDATE resources SET ${assignments.join(', ')}, updated_by = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-      [...args, userId, resourceId],
+      `UPDATE resources SET ${assignments.join(', ')}, updated_by = ?, updated_at = ? WHERE id = ?`,
+      [...args, userId, beijingNow(), resourceId],
     );
   }
 
@@ -347,8 +348,8 @@ async function updateResourceRecordInTransaction(
     await tx.execute('DELETE FROM resource_tag_relations WHERE resource_id = ?', [resourceId]);
     for (const tagId of normalizedTagIds) {
       await tx.execute(
-        `INSERT INTO resource_tag_relations(resource_id, tag_id, created_by, created_at) VALUES (?, ?, ?, datetime('now', '+8 hours'))`,
-        [resourceId, tagId, userId],
+        `INSERT INTO resource_tag_relations(resource_id, tag_id, created_by, created_at) VALUES (?, ?, ?, ?)`,
+        [resourceId, tagId, userId, beijingNow()],
       );
     }
   }
@@ -356,8 +357,8 @@ async function updateResourceRecordInTransaction(
   const before = Object.fromEntries(RESOURCE_UPDATE_FIELDS.map((field) => [field, beforeRow[field]]));
   await tx.execute(
     `INSERT INTO resource_audit_logs(resource_id,user_id,action,detail_json,created_at)
-     VALUES(?,?, 'update', ?, datetime('now', '+8 hours'))`,
-    [resourceId, userId, JSON.stringify({ before, changes: updates, tag_ids: normalizedTagIds })],
+     VALUES(?,?, 'update', ?, ?)`,
+    [resourceId, userId, JSON.stringify({ before, changes: updates, tag_ids: normalizedTagIds }), beijingNow()],
   );
 }
 
@@ -406,8 +407,8 @@ export async function updateResourceRecordWithRequest(
     await tx.execute(
       `INSERT INTO resource_update_request_keys
         (client_request_id,actor_id,resource_id,request_fingerprint,created_at)
-       VALUES(?,?,?,?,datetime('now', '+8 hours'))`,
-      [normalizedRequestId, userId, resourceId, requestFingerprint],
+       VALUES(?,?,?,?,?)`,
+      [normalizedRequestId, userId, resourceId, requestFingerprint, beijingNow()],
     );
     return { resourceId, replayed: false };
   });

@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { getUserFacingErrorMessage } from '../../src/lib/userFacingError';
+import { describe, it } from 'vitest';
 
 const fallback = '操作暂时无法完成，请稍后重试。';
 
-for (const message of [
+describe('user-facing error messages', () => {
+  it('replaces technical failures with useful Chinese guidance', () => {
+    for (const message of [
   'Failed to fetch',
   'Load failed',
   'Failed to load resource: the server responded with a status of 503',
@@ -21,20 +24,20 @@ for (const message of [
   'QuotaExceededError: The quota has been exceeded.',
   'The quota has been exceeded.',
   "Failed to execute 'setItem' on 'Storage': Setting the value exceeded the quota.",
-]) {
-  assert.equal(
-    getUserFacingErrorMessage(new Error(message), fallback),
-    fallback,
-    `${message} is replaced with a readable recovery message`,
-  );
-}
+    ]) {
+      assert.equal(
+        getUserFacingErrorMessage(new Error(message), fallback),
+        fallback,
+        `${message} is replaced with a readable recovery message`,
+      );
+    }
 
-assert.equal(
-  getUserFacingErrorMessage(new Error('当前选题状态不支持创建拍摄计划'), fallback),
-  '当前选题状态不支持创建拍摄计划',
-  'readable Chinese business guidance remains visible',
-);
-assert.equal(getUserFacingErrorMessage(null, fallback), fallback, 'unknown thrown values use the fallback');
-assert.equal(getUserFacingErrorMessage(new Error('   '), fallback), fallback, 'empty messages use the fallback');
-
-console.log('User-facing error message tests passed');
+    assert.equal(
+      getUserFacingErrorMessage(new Error('当前选题状态不支持创建拍摄计划'), fallback),
+      '当前选题状态不支持创建拍摄计划',
+      'readable Chinese business guidance remains visible',
+    );
+    assert.equal(getUserFacingErrorMessage(null, fallback), fallback, 'unknown thrown values use the fallback');
+    assert.equal(getUserFacingErrorMessage(new Error('   '), fallback), fallback, 'empty messages use the fallback');
+  });
+});

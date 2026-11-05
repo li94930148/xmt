@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils';
+import { beijingNow, execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils';
 
 export type ProductionReviewKind = 'comment' | 'suggestion';
 export type ProductionReviewStatus = 'open' | 'resolved' | 'accepted' | 'rejected';
@@ -298,9 +298,9 @@ export async function updateProductionReviewStatus(
 ) {
   return execute(`
     UPDATE production_review_threads
-    SET status=?, reviewed_by=?, updated_at=datetime('now', '+8 hours')
+    SET status=?, reviewed_by=?, updated_at=?
     WHERE id=? AND status='open'
-  `, [status, reviewerId, threadId]);
+  `, [status, reviewerId, beijingNow(), threadId]);
 }
 
 export type ProductionReviewStatusRequestResult =
@@ -345,9 +345,9 @@ export async function updateProductionReviewStatusWithRequest(input: {
 
     const changed = await tx.execute(`
       UPDATE production_review_threads
-      SET status=?, reviewed_by=?, updated_at=datetime('now', '+8 hours')
+      SET status=?, reviewed_by=?, updated_at=?
       WHERE id=? AND production_id=? AND status='open'
-    `, [input.status, input.reviewerId, input.threadId, input.productionId]);
+    `, [input.status, input.reviewerId, beijingNow(), input.threadId, input.productionId]);
     if (!changed) return { kind: 'closed' };
     await tx.execute(`
       INSERT INTO production_review_status_request_keys(

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, it } from 'vitest';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
@@ -129,11 +130,11 @@ function themeColorToken(theme: string, token: string) {
   return match[1];
 }
 
-testTokensDefineSelectionVars();
-testIndexCssUsesGlobalAndEditorSelection();
-testTiptapInjectedStylesCoverSelection();
-testBubbleMenuKeepsSelectionFocus();
-testDoesNotMutateDocumentData();
-testToolbarToggleButtonsExposePressedState();
-
-console.log('selection-style-contract tests passed');
+describe('editor selection style contract', () => {
+  it('defines accessible selection tokens for both themes', testTokensDefineSelectionVars);
+  it('applies global and editor selection styles', testIndexCssUsesGlobalAndEditorSelection);
+  it('covers selections inside injected Tiptap styles', testTiptapInjectedStylesCoverSelection);
+  it('keeps editor selection focused while using the bubble menu', testBubbleMenuKeepsSelectionFocus);
+  it('does not mutate document data to style selections', testDoesNotMutateDocumentData);
+  it('exposes the pressed state for toolbar toggles', testToolbarToggleButtonsExposePressedState);
+});

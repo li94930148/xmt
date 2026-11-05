@@ -1,3 +1,5 @@
+import { beijingNow } from '../../database/utils.js';
+
 export type InspirationPromotionTransaction = {
   queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null>;
   execute(sql: string, params?: unknown[]): Promise<number>;
@@ -42,9 +44,10 @@ export async function promoteInspirationInTransaction(
     throw new InspirationPromotionError(409, '这条灵感已转为选题，但关联记录尚未建立，请联系管理员核对后处理。');
   }
 
+  const now = beijingNow();
   const topicId = await tx.executeInsert(
-    `INSERT INTO topics (title, description, status, creator_id, stage_entered_at) VALUES (?, ?, 'pending', ?, datetime('now', '+8 hours'))`,
-    [inspiration.title, inspiration.description, userId],
+    `INSERT INTO topics (title, description, status, creator_id, stage_entered_at) VALUES (?, ?, 'pending', ?, ?)`,
+    [inspiration.title, inspiration.description, userId, now],
   );
 
   await tx.execute(
@@ -54,9 +57,9 @@ export async function promoteInspirationInTransaction(
 
   const updated = await tx.execute(
     `UPDATE inspirations
-     SET status = 'promoted', topic_id = ?, updated_at = datetime('now', '+8 hours')
+     SET status = 'promoted', topic_id = ?, updated_at = ?
      WHERE id = ? AND topic_id IS NULL AND COALESCE(status, '') <> 'promoted'`,
-    [topicId, inspirationId],
+    [topicId, now, inspirationId],
   );
   if (updated !== 1) {
     throw new InspirationPromotionError(409, '灵感状态已变化，请刷新后确认是否已转为选题。');

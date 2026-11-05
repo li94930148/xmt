@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import express, { type Request } from 'express';
 import { once } from 'node:events';
+import { test } from 'vitest';
 import { requestObservability } from '../../api/middleware/request-observability.js';
 import { requestId } from '../../api/middleware/request-id.js';
 
+test('API request observability redacts sensitive request and response fields', async () => {
 type LogRecord = {
   level: 'info' | 'warn' | 'error';
   fields: Record<string, unknown>;
@@ -82,3 +84,4 @@ try {
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
+});

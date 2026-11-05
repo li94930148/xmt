@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { getEventStream } from '../collaboration/protocol/eventStream';
@@ -12,7 +13,7 @@ import {
   suggestImprovements,
 } from '../../src/content/generation/contentSuggestionEngine';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 function timelineSources(docId: string) {
   return {

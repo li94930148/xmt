@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Camera, CheckCircle, Clock3, ExternalLink, FileText, Send, UserRound, XCircle } from 'lucide-react';
 import { ActionButton, EmptyState, GlassPanel, StatusPill } from '../studio';
 import { formatBeijingDate } from '../../lib/utils';
@@ -37,6 +38,144 @@ const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 
   pending: 'amber', approved: 'success', rejected: 'coral', production: 'primary',
   shooting: 'violet', publishing: 'cyan', completed: 'muted',
 };
+
+const topicColumnVirtualizationThreshold = 32;
+
+type TopicsBoardColumnProps = {
+  column: BoardColumn;
+  items: Topic[];
+  canUpdate: boolean;
+  canAudit: boolean;
+  statusVerificationIds?: ReadonlySet<number>;
+  transitioningTopicIds: ReadonlySet<number>;
+  onOpenTopic: (topic: Topic) => void;
+  transitionTopic: (topic: Topic, status: TopicStatus) => Promise<void>;
+};
+
+function TopicsBoardColumn({
+  column,
+  items,
+  canUpdate,
+  canAudit,
+  statusVerificationIds,
+  transitioningTopicIds,
+  onOpenTopic,
+  transitionTopic,
+}: TopicsBoardColumnProps) {
+  const scrollElementRef = useRef<HTMLDivElement>(null);
+  const [showAllTopics, setShowAllTopics] = useState(false);
+  const shouldVirtualize = items.length > topicColumnVirtualizationThreshold && !showAllTopics;
+  const listId = `topics-board-list-${column.status}`;
+  const getItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? items.length : 0,
+    getScrollElement: () => scrollElementRef.current,
+    estimateSize: () => 184,
+    getItemKey,
+    overscan: 6,
+    gap: 12,
+  });
+
+  const renderTopic = (topic: Topic, index: number, virtual = false, start = 0) => {
+    const canChange = topic.status === 'pending' ? canAudit : canUpdate;
+    const isTransitioning = transitioningTopicIds.has(topic.id);
+    const statusNeedsVerification = statusVerificationIds?.has(topic.id) ?? false;
+
+    return (
+      <div
+        key={topic.id}
+        ref={virtual ? virtualizer.measureElement : undefined}
+        data-index={virtual ? index : undefined}
+        className={virtual ? 'absolute left-0 top-0 w-full' : 'relative'}
+        style={virtual ? { transform: `translateY(${start}px)` } : undefined}
+      >
+        <article
+          role="listitem"
+          aria-posinset={index + 1}
+          aria-setsize={items.length}
+          className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-3.5 transition hover:border-studio-border-active"
+        >
+          <ActionButton type="button" variant="ghost" onClick={() => onOpenTopic(topic)} className="group min-h-10 w-full items-start justify-between gap-2 p-0 text-left">
+            <span className="line-clamp-2 text-sm font-semibold text-studio-text-primary group-hover:text-studio-primary-contrast">{topic.title}</span>
+            <ExternalLink aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-studio-text-muted" />
+          </ActionButton>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <StatusPill tone={statusTone[topic.status]}>{statusLabels[topic.status]}</StatusPill>
+            {topic.platform ? <span className="rounded-full border border-studio-border-soft bg-studio-surface px-2 py-0.5 text-[10px] text-studio-text-secondary">{getPlatformLabel(topic.platform)}</span> : null}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-studio-text-secondary">
+            <span className="truncate">{topic.assignee_name || '未分配'}</span>
+            {topic.deadline ? <time className={new Date(topic.deadline) < new Date() && !['completed', 'rejected'].includes(topic.status) ? 'shrink-0 text-studio-coral-contrast' : 'shrink-0'}>{formatBeijingDate(topic.deadline)}</time> : null}
+          </div>
+          {canChange && nextStatuses[topic.status].length ? (
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-studio-border-soft pt-3">
+              {nextStatuses[topic.status].map((next) => (
+                <ActionButton key={next.status} type="button" variant="secondary" disabled={isTransitioning || statusNeedsVerification} aria-busy={isTransitioning} title={statusNeedsVerification ? '只读核实后才能更新状态' : undefined} className="min-h-10 px-2.5 py-1 text-xs" onClick={() => { void transitionTopic(topic, next.status); }}>
+                  {isTransitioning ? '处理中…' : next.label}
+                </ActionButton>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      </div>
+    );
+  };
+
+  const virtualItems = virtualizer.getVirtualItems();
+
+  return (
+    <section aria-labelledby={`topic-column-${column.status}`} className="w-[min(18rem,82vw)] shrink-0">
+      <GlassPanel className="h-full p-0">
+        <header className="flex items-center gap-2 border-b border-studio-border-soft px-4 py-3">
+          <column.icon className={`h-4 w-4 ${column.tone}`} />
+          <h2 id={`topic-column-${column.status}`} className="text-sm font-semibold text-studio-text-primary">{column.label}</h2>
+          <span className="ml-auto rounded-full bg-studio-surface-soft px-2 py-0.5 text-xs tabular-nums text-studio-text-secondary">{items.length}</span>
+        </header>
+        {items.length > topicColumnVirtualizationThreshold ? (
+          <div className="flex items-center justify-between gap-2 border-b border-studio-border-soft px-3 py-2">
+            <span className="text-xs text-studio-text-secondary">键盘进入卡片时会展开完整列表</span>
+            <ActionButton
+              type="button"
+              variant="ghost"
+              aria-expanded={!shouldVirtualize}
+              aria-controls={listId}
+              onClick={() => setShowAllTopics((current) => !current)}
+              className="min-h-10 shrink-0 px-2 py-1 text-xs"
+            >
+              {shouldVirtualize ? `显示全部 ${items.length} 条` : '恢复优化显示'}
+            </ActionButton>
+          </div>
+        ) : null}
+        <div
+          ref={scrollElementRef}
+          onFocusCapture={() => {
+            if (shouldVirtualize) setShowAllTopics(true);
+          }}
+          className="max-h-[calc(100vh-24rem)] min-h-40 overflow-y-auto p-3"
+        >
+          {items.length === 0 ? (
+            <p className="py-8 text-center text-xs text-studio-text-secondary">暂无选题</p>
+          ) : shouldVirtualize ? (
+            <div
+              id={listId}
+              role="list"
+              aria-label={`${column.label}选题`}
+              data-virtualized="true"
+              className="relative"
+              style={{ height: virtualizer.getTotalSize() }}
+            >
+              {virtualItems.map((item) => renderTopic(items[item.index], item.index, true, item.start))}
+            </div>
+          ) : (
+            <div id={listId} role="list" aria-label={`${column.label}选题`} className="space-y-3">
+              {items.map((topic, index) => renderTopic(topic, index))}
+            </div>
+          )}
+        </div>
+      </GlassPanel>
+    </section>
+  );
+}
 
 export type TopicsBoardViewProps = {
   topics: Topic[];
@@ -136,50 +275,19 @@ export default function TopicsBoardView({
       ) : (
         <div role="region" className="flex min-w-0 gap-4 overflow-x-auto pb-4" aria-label="选题状态看板">
           {visibleColumns.map((column) => {
-            const Icon = column.icon;
             const items = filteredTopics.filter((topic) => topic.status === column.status);
             return (
-              <section key={column.status} aria-labelledby={`topic-column-${column.status}`} className="w-[min(18rem,82vw)] shrink-0">
-                <GlassPanel className="h-full p-0">
-                  <header className="flex items-center gap-2 border-b border-studio-border-soft px-4 py-3">
-                    <Icon className={`h-4 w-4 ${column.tone}`} />
-                    <h2 id={`topic-column-${column.status}`} className="text-sm font-semibold text-studio-text-primary">{column.label}</h2>
-                    <span className="ml-auto rounded-full bg-studio-surface-soft px-2 py-0.5 text-xs tabular-nums text-studio-text-secondary">{items.length}</span>
-                  </header>
-                  <div className="max-h-[calc(100vh-24rem)] min-h-40 space-y-3 overflow-y-auto p-3">
-                    {items.length === 0 ? <p className="py-8 text-center text-xs text-studio-text-secondary">暂无选题</p> : items.map((topic) => {
-                      const canChange = topic.status === 'pending' ? canAudit : canUpdate;
-                      const isTransitioning = transitioningTopicIds.has(topic.id);
-                      const statusNeedsVerification = statusVerificationIds?.has(topic.id) ?? false;
-                      return (
-                        <article key={topic.id} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-3.5 transition hover:border-studio-border-active">
-                          <ActionButton type="button" variant="ghost" onClick={() => onOpenTopic(topic)} className="group min-h-10 w-full items-start justify-between gap-2 p-0 text-left">
-                            <span className="line-clamp-2 text-sm font-semibold text-studio-text-primary group-hover:text-studio-primary-contrast">{topic.title}</span>
-                            <ExternalLink aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-studio-text-muted" />
-                          </ActionButton>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <StatusPill tone={statusTone[topic.status]}>{statusLabels[topic.status]}</StatusPill>
-                            {topic.platform ? <span className="rounded-full border border-studio-border-soft bg-studio-surface px-2 py-0.5 text-[10px] text-studio-text-secondary">{getPlatformLabel(topic.platform)}</span> : null}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-studio-text-secondary">
-                            <span className="truncate">{topic.assignee_name || '未分配'}</span>
-                            {topic.deadline ? <time className={new Date(topic.deadline) < new Date() && !['completed', 'rejected'].includes(topic.status) ? 'shrink-0 text-studio-coral-contrast' : 'shrink-0'}>{formatBeijingDate(topic.deadline)}</time> : null}
-                          </div>
-                          {canChange && nextStatuses[topic.status].length ? (
-                            <div className="mt-3 flex flex-wrap gap-2 border-t border-studio-border-soft pt-3">
-                              {nextStatuses[topic.status].map((next) => (
-                                <ActionButton key={next.status} type="button" variant="secondary" disabled={isTransitioning || statusNeedsVerification} aria-busy={isTransitioning} title={statusNeedsVerification ? '只读核实后才能更新状态' : undefined} className="min-h-10 px-2.5 py-1 text-xs" onClick={() => { void transitionTopic(topic, next.status); }}>
-                                  {isTransitioning ? '处理中…' : next.label}
-                                </ActionButton>
-                              ))}
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                </GlassPanel>
-              </section>
+              <TopicsBoardColumn
+                key={column.status}
+                column={column}
+                items={items}
+                canUpdate={canUpdate}
+                canAudit={canAudit}
+                statusVerificationIds={statusVerificationIds}
+                transitioningTopicIds={transitioningTopicIds}
+                onOpenTopic={onOpenTopic}
+                transitionTopic={transitionTopic}
+              />
             );
           })}
         </div>

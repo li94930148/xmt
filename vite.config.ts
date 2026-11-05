@@ -10,35 +10,12 @@ const hasCerts = fs.existsSync(path.resolve(__dirname, 'certs/server.key'))
 // 读取 package.json 中的版本号
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'))
 
+// Keep route-only dependencies in Vite's dynamic import graph. Global manual
+// chunks promoted editor-only libraries into the root HTML modulepreload list.
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) {
-            return undefined;
-          }
-
-          if (id.includes('prosemirror')) {
-            return 'prosemirror';
-          }
-
-          if (id.includes('@tiptap/')) {
-            return 'tiptap';
-          }
-
-          if (id.includes('lowlight')) {
-            return 'editor-lowlight';
-          }
-
-          return undefined;
-        },
-      },
-    },
   },
   resolve: {
     alias: {

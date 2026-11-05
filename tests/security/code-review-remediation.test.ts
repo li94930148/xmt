@@ -24,7 +24,8 @@ assert.equal(PERMISSION_CACHE_TTL_MS, 60_000);
 
 const workflowSource = fs.readFileSync(new URL('../../api/routes/workflow.ts', import.meta.url), 'utf8');
 assert.equal(workflowSource.includes('选题?{'), false);
-assert.equal((workflowSource.match(/选题「\$\{(?:topic|existingTopic)\.title\}」/g) || []).length, 4);
+assert.equal(workflowSource.includes('选题「${topic.title}」成片制作已完成'), true);
+assert.equal(workflowSource.includes('选题「${topic.title}」创作已通过审核'), true);
 
 await initDatabase();
 const memberId = await executeInsert(
@@ -35,6 +36,7 @@ const adminId = await executeInsert(
   'INSERT INTO users (username, password, role, name, enabled) VALUES (?, ?, ?, ?, 1)',
   ['review-admin', 'hash', 'admin', 'Review Admin'],
 );
+await execute('INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE code=?', [adminId, 'admin']);
 
 const app = express();
 app.use(express.json());

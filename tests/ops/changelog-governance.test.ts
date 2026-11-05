@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { test } from 'vitest';
 import { changelog } from '../../src/data/changelog.js';
 
+test('user-facing changelog remains unique and free of implementation terms', () => {
 const packageVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version as string;
 const versions = changelog.map(({ version }) => version);
 const duplicates = versions.filter((version, index) => versions.indexOf(version) !== index);
@@ -23,3 +25,4 @@ assert.deepEqual(
 );
 
 console.log(`更新说明治理通过（${versions.length} 个版本，包含用户文案检查）`);
+});

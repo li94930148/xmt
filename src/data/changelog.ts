@@ -1,3 +1,5 @@
+import { latestChangelogEntry } from './latest-changelog-entry';
+
 export interface ChangelogEntry {
   version: string;
   date: string;
@@ -10,12 +12,116 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  latestChangelogEntry,
+  {
+    version: '10.1.73',
+    date: '2026-11-05',
+    title: '人员管理职责拆分',
+    impactScope: ['人员管理', '操作日志'],
+    changes: [
+      { type: 'improvement', description: '人员管理的用户列表和操作日志拆为独立展示组件，数据、权限和安全恢复行为保持原有规则。' },
+    ],
+  },
+  {
+    version: '10.1.72',
+    date: '2026-11-05',
+    title: '消息中心职责拆分',
+    impactScope: ['消息中心', '状态恢复'],
+    changes: [
+      { type: 'improvement', description: '消息中心页面将消息读取和状态恢复逻辑移入专用 hook，筛选、已读、清空与恢复行为保持原有规则。' },
+    ],
+  },
+  {
+    version: '10.1.71',
+    date: '2026-11-05',
+    title: '匿名意见管理职责拆分',
+    impactScope: ['匿名意见管理', '恢复处理'],
+    changes: [
+      { type: 'improvement', description: '匿名意见管理页面将数据和恢复流程移入专用逻辑层，列表、回复与删除行为保持原有规则。' },
+    ],
+  },
+  {
+    version: '10.1.70',
+    date: '2026-11-05',
+    title: '服务版本信息读取稳定性提升',
+    impactScope: ['系统设置', '服务状态'],
+    changes: [
+      { type: 'fix', description: '从非项目根目录启动服务时，系统设置和服务状态仍显示正确的应用版本。' },
+    ],
+  },
+  {
+    version: '10.1.69',
+    date: '2026-11-04',
+    title: '页面结构与日历浏览体验优化',
+    impactScope: ['排期日历', '匿名意见管理', '键盘操作'],
+    changes: [
+      { type: 'improvement', description: '排期日历页面完成职责拆分，保留原有日程展示、创建和恢复处理方式。' },
+      { type: 'improvement', description: '键盘跨月浏览会把焦点带到对应日期，移动屏幕完整显示日历日期格。' },
+      { type: 'improvement', description: '匿名意见管理列表展示独立整理，加载提示、空列表和操作入口保持原有状态与权限。' },
+    ],
+  },
+  {
+    version: '10.1.68',
+    date: '2026-11-04',
+    title: '匿名意见与多人协作稳定性提升',
+    impactScope: ['匿名意见箱', '多人协作', '意见记录保护'],
+    changes: [
+      { type: 'improvement', description: '匿名意见箱兼容历史记录，并补充对提交者身份保护和管理权限范围的验证。' },
+      { type: 'improvement', description: '补充多人协作服务中断恢复的验证，覆盖消息同步、文档编辑锁和多人同时修改。' },
+    ],
+  },
+  {
+    version: '10.1.67',
+    date: '2026-11-04',
+    title: '选题看板长列按需渲染',
+    impactScope: ['选题看板', '长列表性能', '键盘访问'],
+    changes: [
+      { type: 'improvement', description: '选题看板单个阶段超过 32 条时只渲染可视区域附近的卡片，减少长列初次渲染的页面节点。' },
+      { type: 'improvement', description: '键盘焦点进入长列时自动展开全部选题，并提供完整列表与优化显示切换。' },
+    ],
+  },
+  {
+    version: '10.1.66',
+    date: '2026-11-04',
+    title: '页面资源按需加载与依赖来源核验',
+    impactScope: ['页面加载', '编辑器', '文件导出'],
+    changes: [
+      { type: 'improvement', description: '编辑器相关资源在进入对应功能时再加载，首页不再预先请求编辑器专属模块。' },
+      { type: 'improvement', description: '文件导出依赖固定在仓库内并核对完整性，减少安装对外部下载站点的依赖。' },
+    ],
+  },
+  {
+    version: '10.1.65',
+    date: '2026-11-04',
+    title: '更新历史按需读取',
+    impactScope: ['首页加载', '版本更新'],
+    changes: [
+      { type: 'improvement', description: '首页更新提示只读取当前版本摘要；完整历史在打开版本更新页面时再读取。' },
+      { type: 'fix', description: '自动核对当前和上一主版本的更新记录，避免工程日志与页面更新历史缺项。' },
+    ],
+  },
+  {
+    version: '10.1.64',
+    date: '2026-11-04',
+    title: '并发数据库任务稳定性改进',
+    impactScope: ['后台任务稳定性', '自动检查'],
+    changes: [
+      { type: 'fix', description: '多个后台任务同时访问数据库时，遇到短时写锁会先等待释放，再按现有策略重试，减少瞬时争用导致的提前失败。' },
+      { type: 'improvement', description: '任务租约的并发抢占、续期与过期接管检查已纳入统一自动验证。' },
+    ],
+  },
   {
     version: '10.1.63',
     date: '2026-11-03',
-    title: '登录键盘焦点清晰可见',
-    impactScope: ['登录页', '首次登录改密', '键盘可访问性'],
+    title: '数据时间与服务安全改造',
+    impactScope: ['数据库时间', '服务可用性', '错误保护'],
     changes: [
+      { type: 'fix', description: '账号、日报、选题、资源、Creator Agent 和 Creator Sync 等记录现在统一按北京时间保存。' },
+      { type: 'improvement', description: '文字或备注中有问号时不会影响时间记录，常规操作也更轻。' },
+      { type: 'fix', description: '异步路由出错时会返回安全错误提示；进程遇到未处理拒绝时先降为不就绪，再有序关闭并等待进程管理器恢复。' },
+      { type: 'security', description: '启动账号不再使用公开固定口令，首次创建时使用随机口令并要求修改。' },
+      { type: 'security', description: '抖音 OAuth 令牌使用独立加密密钥；生产启动前校验密钥，并提供带 dry-run、备份门禁和事务回滚的存量迁移工具。' },
+      { type: 'fix', description: 'Creator Agent 绑定、绑定结果确认和心跳共享操作时间，所有关联时间均按北京时间保存。' },
       { type: 'improvement', description: '登录字段和首次改密字段显示 Studio 主题焦点环，增强键盘操作可见性。' },
     ],
   },

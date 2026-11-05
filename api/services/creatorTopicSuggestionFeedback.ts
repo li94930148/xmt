@@ -1,4 +1,4 @@
-import { execute, queryAll } from '../database/utils.js';
+import { beijingNow, execute, queryAll } from '../database/utils.js';
 import type {
   CreatorTopicSuggestion,
   CreatorTopicSuggestionFeedback,
@@ -67,9 +67,9 @@ export async function saveCreatorTopicSuggestionFeedback(input: {
        median_plays = excluded.median_plays,
        baseline_median_plays = excluded.baseline_median_plays,
        play_ratio = excluded.play_ratio,
-       updated_at = datetime('now', '+8 hours')`,
+       updated_at = ?`,
     [creatorAccountId, userId, item.id, item.evidence_id, outcome, item.sample_count,
-      item.baseline_count, item.median_plays, item.baseline_median_plays, item.play_ratio],
+      item.baseline_count, item.median_plays, item.baseline_median_plays, item.play_ratio, beijingNow()],
   );
   const rows = await attachCreatorTopicSuggestionFeedback(creatorAccountId, userId, [item]);
   return rows[0]?.feedback ?? emptyFeedback();

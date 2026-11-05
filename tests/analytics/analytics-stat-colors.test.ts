@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import test from 'node:test';
+import { test } from 'vitest';
 import { analyticsStatToneStyles } from '../../src/pages/analyticsStatColors';
 
 const tokensCss = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8');

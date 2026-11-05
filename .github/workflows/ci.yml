@@ -17,9 +17,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:entrypoints
-      - run: npm run test:realtime-toast-accessibility
-      - run: npm run test:analytics-stat-colors
-      - run: npm run test:home-activity-client
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run version:check
       - run: npm run lint
@@ -35,6 +32,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes redis-server
+      - run: npm run test:ci
       - run: npm run test:topics
       - run: npm run test:topics-list-notify
       - run: npm run test:user-api-error-copy

@@ -1,11 +1,12 @@
 import express from 'express';
+import { createAsyncRouter } from '../../middleware/async-router';
 import { authenticate } from '../../middleware/auth';
 import { noStoreResponse } from '../../middleware/no-store';
 import { requirePermission } from '../../middleware/permissions';
 import type { TopicController } from './topics.controller';
 
 export function createLegacyTopicsRouter(controller: TopicController) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   router.get('/', authenticate, controller.legacyList);
   router.get('/create-requests/:requestId', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -22,7 +23,7 @@ export function createLegacyTopicsRouter(controller: TopicController) {
   return router;
 }
 export function createV1TopicsRouter(controller: TopicController) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   router.get('/', authenticate, controller.v1List);
   router.get('/create-requests/:requestId', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');

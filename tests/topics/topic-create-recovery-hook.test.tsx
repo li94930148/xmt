@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { afterAll, describe, test } from 'vitest';
 import { act, createElement, useState } from 'react';
 import { JSDOM } from 'jsdom';
 
@@ -106,9 +106,8 @@ function reset() {
   };
 }
 
-test('topic create recovery hook blocks false completion, ignores unmounted results, and suppresses deterministic retries', async (t) => {
-  try {
-    await t.test('刷新后等待本机草稿加载完毕再核实并完成已创建的选题', async () => {
+describe('topic create recovery hook blocks false completion, ignores unmounted results, and suppresses deterministic retries', () => {
+    test('刷新后等待本机草稿加载完毕再核实并完成已创建的选题', async () => {
       reset();
       const requestId = '11111111-1111-4111-8111-111111111111';
       storage.setItem('xmt:topic-create-pending:v1:actor:17', JSON.stringify({
@@ -141,7 +140,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
       }
     });
 
-    await t.test('状态查询进行时草稿就绪状态变化会保留恢复记录并重新核实', async () => {
+    test('状态查询进行时草稿就绪状态变化会保留恢复记录并重新核实', async () => {
       reset();
       const recoveryKey = 'xmt:topic-create-pending:v1:actor:17';
       storage.setItem(recoveryKey, JSON.stringify({
@@ -185,7 +184,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
       }
     });
 
-    await t.test('恢复标记删除失败时保持锁定，显式重试清理成功后才回调', async () => {
+    test('恢复标记删除失败时保持锁定，显式重试清理成功后才回调', async () => {
       reset();
       const completions: number[] = [];
       const mounted = mount(() => completions.push(1));
@@ -211,7 +210,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
       }
     });
 
-    await t.test('卸载后迟到的创建响应不会触发页面回调', async () => {
+    test('卸载后迟到的创建响应不会触发页面回调', async () => {
       reset();
       let resolvePost!: (response: Response) => void;
       fetchHandler = async (_input, init) => {
@@ -238,7 +237,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
       }
     });
 
-    await t.test('确定性 4xx 保留恢复记录、提示修正或授权且不开放原载荷重试', async () => {
+    test('确定性 4xx 保留恢复记录、提示修正或授权且不开放原载荷重试', async () => {
       reset();
       fetchHandler = async (input, init) => {
         const path = String(input);
@@ -312,7 +311,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
       }
     });
 
-    await t.test('拒绝状态写回标签页存储失败时跨刷新保留拒绝锁', async () => {
+    test('拒绝状态写回标签页存储失败时跨刷新保留拒绝锁', async () => {
       reset();
       fetchHandler = async (input, init) => {
         const path = String(input);
@@ -355,7 +354,7 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
     });
 
     for (const status of [409, 500]) {
-      await t.test(`HTTP ${status} 不会进入确定拒绝解除流程`, async () => {
+      test(`HTTP ${status} 不会进入确定拒绝解除流程`, async () => {
         reset();
         fetchHandler = async (input, init) => {
           const path = String(input);
@@ -385,7 +384,6 @@ test('topic create recovery hook blocks false completion, ignores unmounted resu
         }
       });
     }
-  } finally {
-    dom.window.close();
-  }
 });
+
+afterAll(() => dom.window.close());

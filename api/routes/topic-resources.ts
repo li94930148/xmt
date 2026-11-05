@@ -1,5 +1,6 @@
 import express from 'express';
-import { queryAll, queryOne, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
+import { beijingNow, queryAll, queryOne, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { noStoreResponse } from '../middleware/no-store';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
@@ -7,7 +8,7 @@ import { canEditTopic, canViewTopic } from '../utils/access';
 import { getScopedResource, normalizeTagName, positiveInteger, recordResourceAuditInTransaction, resourceScopeArgs, resourceScopePredicate, userHasPermission } from '../services/resourceCenter';
 import { sendSafeServerError } from '../utils/response';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 async function getTopic(id: number) {
   return queryOne<{ id: number; creator_id: number | null; assignee_id: number | null }>(
@@ -69,7 +70,7 @@ router.post('/:id/asset-dimensions', authenticate, requirePermission('topic:upda
       const dimensionId = await tx.executeInsert(`INSERT INTO topic_asset_dimensions(topic_id, dimension_type, value, normalized_value, created_by)
         VALUES (?, ?, ?, ?, ?)`, [topicId, dimension.type, dimension.value, dimension.normalizedValue, req.user!.id]);
       await tx.execute(`INSERT INTO topic_history(topic_id, action, comment, operator_id, created_at)
-        VALUES (?, 'asset_dimension_added', ?, ?, datetime('now', '+8 hours'))`, [topicId, `${ASSET_DIMENSION_LABELS[dimension.type]}：${dimension.value}`, req.user!.id]);
+        VALUES (?, 'asset_dimension_added', ?, ?, ?)`, [topicId, `${ASSET_DIMENSION_LABELS[dimension.type]}：${dimension.value}`, req.user!.id, beijingNow()]);
       return dimensionId;
     });
     return res.status(201).json({ message: '维度已登记', id, data: { id, type: dimension.type, value: dimension.value } });
@@ -95,7 +96,7 @@ router.delete('/:topicId/asset-dimensions/:dimensionId', authenticate, requirePe
       if (!dimension) return false;
       await tx.execute('DELETE FROM topic_asset_dimensions WHERE id = ? AND topic_id = ?', [dimensionId, topicId]);
       await tx.execute(`INSERT INTO topic_history(topic_id, action, comment, operator_id, created_at)
-        VALUES (?, 'asset_dimension_removed', ?, ?, datetime('now', '+8 hours'))`, [topicId, `${ASSET_DIMENSION_LABELS[dimension.dimension_type as AssetDimensionType] || '内容维度'}：${dimension.value}`, req.user!.id]);
+        VALUES (?, 'asset_dimension_removed', ?, ?, ?)`, [topicId, `${ASSET_DIMENSION_LABELS[dimension.dimension_type as AssetDimensionType] || '内容维度'}：${dimension.value}`, req.user!.id, beijingNow()]);
       return true;
     });
     if (!removed) return res.status(404).json({ message: '维度记录不存在' });
@@ -148,8 +149,8 @@ router.post('/:id/resources', authenticate, requireAllPermissions('topic:update'
     const relationId = await runInTransaction(async (tx) => {
       const id = await tx.executeInsert(`
         INSERT INTO resource_relations(resource_id, target_type, target_id, relation_type, created_by, created_at)
-        VALUES (?, 'topic', ?, 'reference', ?, datetime('now', '+8 hours'))
-      `, [resourceId, topicId, req.user!.id]);
+        VALUES (?, 'topic', ?, 'reference', ?, ?)
+      `, [resourceId, topicId, req.user!.id, beijingNow()]);
       await recordResourceAuditInTransaction(tx, resourceId, req.user!.id, 'relation_add', {
         relation_id: id,
         target_type: 'topic',

@@ -1,4 +1,4 @@
-import { execute, queryOne, runInTransaction } from '../../database/utils.js';
+import { beijingNow, execute, queryOne, runInTransaction } from '../../database/utils.js';
 import type { AuthRepository } from './auth.repository.js';
 import type { AuthUserRecord } from './auth.types.js';
 import { activityLogTimestamp } from '../../services/activity-log.js';
@@ -47,8 +47,8 @@ export class SqliteAuthRepository implements AuthRepository {
   async changePasswordAndAudit(userId: number, passwordHash: string): Promise<void> {
     await runInTransaction(async (tx) => {
       const updated = await tx.execute(
-        "UPDATE users SET password = ?, force_change_password = 0, auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?",
-        [passwordHash, userId],
+        "UPDATE users SET password = ?, force_change_password = 0, auth_version = auth_version + 1, updated_at = ? WHERE id = ?",
+        [passwordHash, beijingNow(), userId],
       );
       if (!updated) throw new Error('AUTH_PASSWORD_TARGET_MISSING');
       await tx.execute('INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', [
@@ -58,14 +58,14 @@ export class SqliteAuthRepository implements AuthRepository {
   }
 
   async revokeLegacyTokens(userId: number): Promise<void> {
-    await execute("UPDATE users SET auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?", [userId]);
+    await execute("UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?", [beijingNow(), userId]);
   }
 
   async updateProfileAndAudit(userId: number, profile: { name: string; email: string }): Promise<void> {
     await runInTransaction(async (tx) => {
       const updated = await tx.execute(
-        "UPDATE users SET name = ?, email = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?",
-        [profile.name, profile.email, userId],
+        "UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?",
+        [profile.name, profile.email, beijingNow(), userId],
       );
       if (!updated) throw new Error('AUTH_PROFILE_TARGET_MISSING');
       await tx.execute('INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', [

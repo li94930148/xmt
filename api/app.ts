@@ -5,7 +5,6 @@
 import express, {
   type Request,
   type Response,
-  type NextFunction,
 } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -22,23 +21,26 @@ import { verifyToken } from './utils/jwt.js'
 import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
-import { parseTrustProxy } from './utils/trustProxy.js'
 import { HTTP_JSON_BODY_LIMIT } from './utils/limits.js'
-import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
+import { isAllowedRequestOrigin } from './security/origin-policy.js'
 import { requireDirectLoopback } from './security/internal-access.js'
 import { resolveServerBinding } from './config/server-bind.js'
+import { resolveAppRuntimeConfig } from './config/app-runtime.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
 import topicResourcesRoutes from './routes/topic-resources.js'
 import productionResourcesRoutes from './routes/production-resources.js'
 import { v1TopicsRouter } from './modules/topics/index.js'
-import { createAuthV1Module, isAuthV1Enabled } from './modules/auth/v1/index.js'
+import { createAuthV1Module } from './modules/auth/v1/index.js'
 import { authRolloutGovernanceRouter } from './modules/auth/rollout/auth-rollout.routes.js'
 import { authMetricsPrometheusExporter } from './modules/auth/events/index.js'
 import { createAuthMetricsHttpRouter, readAuthMetricsHttpConfig } from './modules/auth/metrics/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
 import { requestObservability } from './middleware/request-observability.js'
+import { asyncHandler } from './middleware/async-router.js'
+import { requestErrorHandler } from './middleware/request-error-handler.js'
+import { getProcessReadiness, markProcessUnhealthy } from './middleware/process-health.js'
 import { apiLogger } from './observability/logger.js'
 import { authRolloutRuntimeReadiness } from './config/auth-rollout-runtime.js'
 import { sanitizeServerErrorPayload, sendV1Error } from './utils/response.js'
@@ -98,6 +100,7 @@ import {
 } from './collaboration/coordination/socketAdapter.js'
 import { SessionService } from './modules/auth/session/session.service.js'
 import { SqliteSessionRepository } from './modules/auth/session/session.sqlite-repository.js'
+import { appVersion } from './config/index.js'
 import {
   SocketAuthService,
   createSocketAuthMiddleware,
@@ -108,13 +111,13 @@ import {
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version as string
+const appRuntimeConfig = resolveAppRuntimeConfig()
 
 const app: express.Application = express()
 
 // Production is client -> Caddy -> Node: trust exactly one proxy hop. Do not use `true`,
 // which would let a public client supply an arbitrary X-Forwarded-For address.
-app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY))
+app.set('trust proxy', appRuntimeConfig.trustProxyHops)
 
 // 自动检测 HTTPS 证书（局域网桌面通知需要 HTTPS）
 const certsDir = path.join(__dirname, '..', 'certs')
@@ -135,8 +138,11 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
 }
 
 export { server }
+let stopAutoSnapshot: (() => void) | null = null
+let inactiveRoomCleanupTimer: NodeJS.Timeout | null = null
+let shutdownPromise: Promise<void> | null = null
 
-const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
+const allowedOrigins = appRuntimeConfig.allowedOrigins
 
 export const io = new Server(server, {
   // Cap a single Socket.IO payload well below the HTTP JSON ceiling. This
@@ -347,11 +353,11 @@ app.use('/api/topics', topicsRoutes)
 app.use('/api/productions', productionResourcesRoutes)
 app.use('/api/docs', openApiRouter)
 app.use('/api/v1/auth-rollout', authRolloutGovernanceRouter)
-if (process.env.XMT_TOPICS_V1_ENABLED === 'true') {
+if (appRuntimeConfig.topicsV1Enabled) {
   app.use('/api/v1/topics', v1TopicsRouter)
 }
-if (isAuthV1Enabled()) {
-  const authV1Module = createAuthV1Module(process.env.XMT_AUTH_REFRESH_PEPPER?.trim() || '')
+if (appRuntimeConfig.authV1Enabled) {
+  const authV1Module = createAuthV1Module(appRuntimeConfig.authRefreshPepper)
   app.use('/api/v1/auth', authV1Module.router)
 }
 app.use('/api/users', usersRoutes)
@@ -390,8 +396,21 @@ app.use('/api/dashboard', homeDashboardRoutes)
 
 app.use(
   '/api/health',
-  async (req: Request, res: Response): Promise<void> => {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
     void req
+
+    if (!getProcessReadiness().ready) {
+      res.status(503).json({
+        success: false,
+        status: 'unhealthy',
+        service: 'xmt-api',
+        version: appVersion,
+        environment: appRuntimeConfig.environment,
+        time: new Date().toISOString(),
+        database: { ok: false },
+      })
+      return
+    }
 
     try {
       await queryOne('SELECT 1 as ok')
@@ -399,8 +418,8 @@ app.use(
         success: true,
         status: 'ok',
         service: 'xmt-api',
-        version: APP_VERSION,
-        environment: process.env.NODE_ENV || 'development',
+        version: appVersion,
+        environment: appRuntimeConfig.environment,
         time: new Date().toISOString(),
         database: {
           ok: true,
@@ -411,33 +430,18 @@ app.use(
         success: false,
         status: 'degraded',
         service: 'xmt-api',
-        version: APP_VERSION,
-        environment: process.env.NODE_ENV || 'development',
+        version: appVersion,
+        environment: appRuntimeConfig.environment,
         time: new Date().toISOString(),
         database: {
           ok: false,
         },
       })
     }
-  },
+  }),
 )
 
-app.use((error: Error & { status?: number; statusCode?: number; type?: string }, req: Request, res: Response, next: NextFunction) => {
-  const payloadTooLarge = error.type === 'entity.too.large' || error.status === 413 || error.statusCode === 413
-  void next
-  if (req.path.startsWith('/api/v1/')) {
-    sendV1Error(req, res, {
-      code: payloadTooLarge ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
-      message: payloadTooLarge ? '文件或内容过大，请精简后重试' : '暂时无法完成操作，请稍后重试。',
-    }, payloadTooLarge ? 413 : 500)
-    return
-  }
-  res.status(payloadTooLarge ? 413 : 500).json({
-    success: false,
-    error: payloadTooLarge ? '内容过大' : '操作暂未完成',
-    message: payloadTooLarge ? '文件或内容过大，请精简后重试' : '请稍后重试。',
-  })
-})
+app.use(requestErrorHandler)
 
 // 404 处理：API 路由返回 JSON，其他返回前端 index.html
 app.use((req: Request, res: Response) => {
@@ -606,7 +610,7 @@ export async function startServer() {
   }
 
   if (coordination.mode === 'single' || coordination.instanceCount === 1) {
-    autoSnapshot(30000, (snapshot) => {
+    stopAutoSnapshot = autoSnapshot(30000, (snapshot) => {
       io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
         docId: snapshot.docId,
         snapshotId: snapshot.id,
@@ -621,7 +625,7 @@ export async function startServer() {
     apiLogger.info({ module: 'collaboration', operation: 'ephemeral_snapshots.disabled' }, 'api.collaboration.ephemeral_snapshots_disabled')
   }
 
-  setInterval(() => {
+  inactiveRoomCleanupTimer = setInterval(() => {
     cleanupInactiveRooms()
   }, 60 * 1000)
 
@@ -630,19 +634,69 @@ export async function startServer() {
 
 }
 
-// 优雅关闭：进程退出前保存数据库
-process.on('SIGINT', () => {
-  apiLogger.info({ module: 'server', operation: 'shutdown.requested', signal: 'SIGINT' }, 'api.server.shutdown_requested')
-  closeCollaborationSocketAdapter()
-  closeDatabase()
-  process.exit(0)
-})
+export function shutdownServer(reason: string) {
+  if (shutdownPromise) return shutdownPromise
+  markProcessUnhealthy(reason === 'UNHANDLED_REJECTION' ? 'UNHANDLED_REJECTION' : 'SERVER_SHUTTING_DOWN')
+  shutdownPromise = (async () => {
+    stopAutoSnapshot?.()
+    stopAutoSnapshot = null
+    if (inactiveRoomCleanupTimer) clearInterval(inactiveRoomCleanupTimer)
+    inactiveRoomCleanupTimer = null
+    closeCollaborationSocketAdapter()
+    try {
+      await io.close()
+    } finally {
+      closeDatabase()
+    }
+  })()
+  return shutdownPromise
+}
 
-process.on('SIGTERM', () => {
-  apiLogger.info({ module: 'server', operation: 'shutdown.requested', signal: 'SIGTERM' }, 'api.server.shutdown_requested')
+export function forceCloseServerConnections() {
+  markProcessUnhealthy('FORCED_SERVER_SHUTDOWN')
+  stopAutoSnapshot?.()
+  stopAutoSnapshot = null
+  if (inactiveRoomCleanupTimer) clearInterval(inactiveRoomCleanupTimer)
+  inactiveRoomCleanupTimer = null
   closeCollaborationSocketAdapter()
+  io.disconnectSockets(true)
+  if (server.listening) {
+    try {
+      server.close((error) => {
+        if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
+          apiLogger.error({
+            module: 'server',
+            operation: 'forced_listener_close_failed',
+            error: { code: 'FORCED_LISTENER_CLOSE_FAILED', name: error.name || 'UnknownError' },
+          }, 'api.server.forced_listener_close_failed')
+        }
+      })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') throw error
+    }
+  }
+  server.closeAllConnections()
   closeDatabase()
-  process.exit(0)
-})
+}
+
+function installShutdownSignal(signal: 'SIGINT' | 'SIGTERM') {
+  process.once(signal, () => {
+    apiLogger.info({ module: 'server', operation: 'shutdown.requested', signal }, 'api.server.shutdown_requested')
+    void shutdownServer(signal).then(() => {
+      process.exitCode = 0
+    }).catch((error: unknown) => {
+      apiLogger.error({
+        module: 'server',
+        operation: 'shutdown.failed',
+        signal,
+        error: { code: 'SERVER_SHUTDOWN_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+      }, 'api.server.shutdown_failed')
+      process.exitCode = 1
+    })
+  })
+}
+
+installShutdownSignal('SIGINT')
+installShutdownSignal('SIGTERM')
 
 export default app

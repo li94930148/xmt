@@ -7,9 +7,13 @@ export function assessVersionGovernance({ version, lock, read }) {
   for (const file of ['docs/SYSTEM_VERSION.md', 'docs/SYSTEM_UPDATE.md', 'docs/系统更新说明.md', 'README.md', 'CHANGELOG.md', 'docs/CHANGELOG.md']) {
     if (!expected.test(read(file)) || firstVersion(file) !== version) errors.push(`最新版本不一致：${file}`);
   }
-  if (read('src/data/changelog.ts').match(/version:\s*'([^']+)'/)?.[1] !== version) errors.push('最新版本不一致：src/data/changelog.ts');
-  const healthSource = read('api/app.ts'); const viteSource = read('vite.config.ts');
-  if (!healthSource.includes("path.join(__dirname, '..', 'package.json')") || !/version:\s*APP_VERSION/.test(healthSource)) errors.push('health 版本源契约不一致');
+  if (read('src/data/latest-changelog-entry.ts').match(/version:\s*'([^']+)'/)?.[1] !== version) errors.push('最新版本不一致：src/data/latest-changelog-entry.ts');
+  if (!read('src/data/changelog.ts').includes('latestChangelogEntry')) errors.push('历史更新列表未包含最新版本摘要');
+  const healthSource = read('api/app.ts'); const systemSettingsSource = read('api/routes/system-settings.ts'); const versionSource = read('api/config/index.ts'); const viteSource = read('vite.config.ts');
+  if (!versionSource.includes("path.resolve(configDirectory, '..', '..', 'package.json')")
+    || !healthSource.includes("from './config/index.js'") || !/version:\s*appVersion/.test(healthSource)
+    || !systemSettingsSource.includes("from '../config/index.js'") || !/version:\s*appVersion/.test(systemSettingsSource)
+    || systemSettingsSource.includes('process.cwd()')) errors.push('API 版本源契约不一致');
   if (!viteSource.includes('packageJson.version')) errors.push('UI 版本源契约不一致');
   return errors;
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { getAuthRolloutModeLabel, getExistingLoginReadiness } from '../../src/pages/authRolloutPresentation';
 
 test('reports each effective login rollout mode accurately', () => {

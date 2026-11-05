@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { createAsyncRouter } from '../../../middleware/async-router';
 import { sendV1Error } from '../../../utils/response.js';
 import { AuthV1ServiceError, type AuthV1Service } from './auth.v1.service.js';
 import type { AuthV1Controller } from './auth.v1.controller.js';
@@ -44,7 +45,7 @@ export function createAuthV1Router(
   service: AuthV1Service,
   webMigrationEnabled = false,
 ) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   const authenticate = authenticateV1(service, webMigrationEnabled);
   router.post('/login', controller.login);
   router.post('/refresh', controller.refresh);

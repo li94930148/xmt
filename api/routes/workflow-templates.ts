@@ -1,5 +1,5 @@
-import { Router } from 'express';
 import { createHash } from 'node:crypto';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { noStoreResponse } from '../middleware/no-store';
 import { requirePermission } from '../middleware/permissions';
@@ -22,7 +22,7 @@ import {
   updateWorkflowTemplateWithRequest,
 } from '../services/workflowTemplateUpdate';
 
-const router = Router();
+const router = createAsyncRouter();
 const APPROVAL_OUTCOMES = new Set(['approved', 'rejected']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/i;
@@ -414,8 +414,8 @@ router.put('/:id', authenticate, requirePermission('system:template'), async (re
     await runInTransaction(async (tx) => {
       if (name) {
         await tx.execute(
-          `UPDATE workflow_templates SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-          [name, description || '', templateId]
+          `UPDATE workflow_templates SET name = ?, description = ?, updated_at = ? WHERE id = ?`,
+          [name, description || '', beijingNow(), templateId]
         );
       }
 

@@ -4,36 +4,6 @@ import { apiLogger } from '../observability/logger.js';
 
 type DbArg = string | number | boolean | null;
 
-/**
- * Transitional SQL compatibility boundary.
- *
- * Existing routes still contain former SQLite clock expressions while they
- * are migrated in small, reviewable batches. Before runtime DML execution they
- * are converted to a bound Beijing timestamp, so SQLite never calculates the
- * application time and every write receives an explicit value.
- */
-function bindLegacyBjtNow(sql: string, params: unknown[]): { sql: string; params: unknown[] } {
-  if (!/^\s*(?:INSERT|UPDATE|DELETE|SELECT|WITH)\b/i.test(sql)) return { sql, params };
-
-  const expression = /datetime\(\s*'now'\s*,\s*'\+8 hours'\s*\)|CURRENT_TIMESTAMP/gi;
-  let cursor = 0;
-  let rewritten = sql;
-  const values = [...params];
-  const timestamp = beijingNow();
-
-  while (true) {
-    expression.lastIndex = cursor;
-    const match = expression.exec(rewritten);
-    if (!match) break;
-    const index = match.index;
-    const placeholdersBefore = (rewritten.slice(0, index).match(/\?/g) ?? []).length;
-    values.splice(placeholdersBefore, 0, timestamp);
-    rewritten = `${rewritten.slice(0, index)}?${rewritten.slice(index + match[0].length)}`;
-    cursor = index + 1;
-  }
-  return { sql: rewritten, params: values };
-}
-
 export class DatabaseError extends Error {
   sql: string;
   params: unknown[];
@@ -50,10 +20,7 @@ export class DatabaseError extends Error {
   }
 }
 
-/**
- * 获取北京时间字符串，用于替代 SQL 中的 CURRENT_TIMESTAMP
- * 格式：YYYY-MM-DD HH:MM:SS
- */
+/** Returns the Beijing database timestamp format: YYYY-MM-DD HH:mm:ss. */
 export function beijingNow(): string {
   return formatBjtDatabase(nowBjt());
 }
@@ -82,10 +49,9 @@ function buildDatabaseError(operation: string, sql: string, params: unknown[], e
 
 export async function queryOne<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {
   try {
-    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql: prepared.sql,
-      args: normalizeParams(prepared.params),
+      sql,
+      args: normalizeParams(params),
     });
 
     if (result.rows.length === 0) {
@@ -100,10 +66,9 @@ export async function queryOne<T = Record<string, unknown>>(sql: string, params:
 
 export async function queryAll<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   try {
-    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql: prepared.sql,
-      args: normalizeParams(prepared.params),
+      sql,
+      args: normalizeParams(params),
     });
 
     return result.rows as unknown as T[];
@@ -114,10 +79,9 @@ export async function queryAll<T = Record<string, unknown>>(sql: string, params:
 
 export async function execute(sql: string, params: unknown[] = []): Promise<number> {
   try {
-    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql: prepared.sql,
-      args: normalizeParams(prepared.params),
+      sql,
+      args: normalizeParams(params),
     });
 
     return result.rowsAffected ?? 0;
@@ -131,10 +95,9 @@ export async function execute(sql: string, params: unknown[] = []): Promise<numb
  */
 export async function executeInsert(sql: string, params: unknown[] = []): Promise<number> {
   try {
-    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql: prepared.sql,
-      args: normalizeParams(prepared.params),
+      sql,
+      args: normalizeParams(params),
     });
 
     return Number(result.lastInsertRowid ?? 0);
@@ -156,8 +119,7 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
   const txContext: TransactionContext = {
     async queryOne<U = Record<string, unknown>>(sql: string, params: unknown[] = []) {
       try {
-        const prepared = bindLegacyBjtNow(sql, params);
-        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
+        const result = await transaction.execute({ sql, args: normalizeParams(params) });
         return result.rows.length === 0 ? null : (result.rows[0] as unknown as U);
       } catch (err) {
         throw buildDatabaseError('queryOne', sql, params, err);
@@ -165,8 +127,7 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async queryAll<U = Record<string, unknown>>(sql: string, params: unknown[] = []) {
       try {
-        const prepared = bindLegacyBjtNow(sql, params);
-        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
+        const result = await transaction.execute({ sql, args: normalizeParams(params) });
         return result.rows as unknown as U[];
       } catch (err) {
         throw buildDatabaseError('queryAll', sql, params, err);
@@ -174,8 +135,7 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async execute(sql: string, params: unknown[] = []) {
       try {
-        const prepared = bindLegacyBjtNow(sql, params);
-        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
+        const result = await transaction.execute({ sql, args: normalizeParams(params) });
         return result.rowsAffected ?? 0;
       } catch (err) {
         throw buildDatabaseError('execute', sql, params, err);
@@ -183,8 +143,7 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async executeInsert(sql: string, params: unknown[] = []) {
       try {
-        const prepared = bindLegacyBjtNow(sql, params);
-        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
+        const result = await transaction.execute({ sql, args: normalizeParams(params) });
         return Number(result.lastInsertRowid ?? 0);
       } catch (err) {
         throw buildDatabaseError('executeInsert', sql, params, err);

@@ -752,8 +752,8 @@ async function recordAudit(
 ) {
   await tx.execute(
     `INSERT INTO retro_audit_logs (retro_id, actor_id, action, before_status, after_status, comment, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
-    [retroId, actorId, action, beforeStatus || null, afterStatus || null, comment || null],
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [retroId, actorId, action, beforeStatus || null, afterStatus || null, comment || null, beijingNow()],
   );
 }
 
@@ -780,10 +780,11 @@ export async function createRetroTemplate(user: User | undefined, input: CreateR
     throw new RetrospectiveServiceError(400, 'INVALID_NAME', '请填写模板名称');
   }
   const category = parseCategory(input.category || 'custom') || 'custom';
+  const now = beijingNow();
   const templateId = await executeInsert(
     `INSERT INTO retro_templates
        (name, category, description, schema_json, metric_bindings_json, status, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
     [
       name,
       category,
@@ -791,6 +792,8 @@ export async function createRetroTemplate(user: User | undefined, input: CreateR
       stringifyJson(input.schemaJson || {}),
       stringifyJson(input.metricBindingsJson || {}),
       user.id,
+      now,
+      now,
     ],
   );
 
@@ -1094,11 +1097,12 @@ export async function createRetrospective(
       }
     }
 
+    const now = beijingNow();
     const createdId = await tx.executeInsert(
       `INSERT INTO retrospectives
          (template_id, title, scope_type, scope_id, period_start, period_end, status, summary_md, owner_id, created_by, created_at, updated_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft', '', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'), 1)`,
-      [templateId, title, scopeType, scopeId, periodStart, periodEnd, ownerId, user.id],
+       VALUES (?, ?, ?, ?, ?, ?, 'draft', '', ?, ?, ?, ?, 1)`,
+      [templateId, title, scopeType, scopeId, periodStart, periodEnd, ownerId, user.id, now, now],
     );
     await recordAudit(tx, createdId, user.id, 'create', undefined, 'draft');
     if (requestId && fingerprint) {
@@ -1230,18 +1234,18 @@ export async function updateRetrospective(
 
     const changed = await tx.execute(
       `UPDATE retrospectives
-       SET title = ?, summary_md = ?, version = version + 1, updated_at = datetime('now', '+8 hours')
+       SET title = ?, summary_md = ?, version = version + 1, updated_at = ?
        WHERE id = ? AND version = ?`,
-      [title, summaryMd, retroId, expectedVersion],
+      [title, summaryMd, beijingNow(), retroId, expectedVersion],
     );
     if (changed !== 1) {
       if (requestId && requestFingerprint) {
         await tx.execute(
           `INSERT INTO retrospective_update_request_keys
             (actor_id, retrospective_id, client_request_id, request_fingerprint, outcome, created_at)
-           VALUES (?, ?, ?, ?, 'conflict', datetime('now', '+8 hours'))
+           VALUES (?, ?, ?, ?, 'conflict', ?)
            ON CONFLICT (actor_id, retrospective_id, client_request_id) DO NOTHING`,
-          [user.id, retroId, requestId, requestFingerprint],
+          [user.id, retroId, requestId, requestFingerprint, beijingNow()],
         );
         const receipt = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
           `SELECT request_fingerprint, outcome FROM retrospective_update_request_keys
@@ -1261,9 +1265,9 @@ export async function updateRetrospective(
       await tx.execute(
         `INSERT INTO retrospective_update_request_keys
           (actor_id, retrospective_id, client_request_id, request_fingerprint, outcome, created_at)
-         VALUES (?, ?, ?, ?, 'processed', datetime('now', '+8 hours'))
+         VALUES (?, ?, ?, ?, 'processed', ?)
          ON CONFLICT (actor_id, retrospective_id, client_request_id) DO NOTHING`,
-        [user.id, retroId, requestId, requestFingerprint],
+        [user.id, retroId, requestId, requestFingerprint, beijingNow()],
       );
       const receipt = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
         `SELECT request_fingerprint, outcome FROM retrospective_update_request_keys
@@ -1434,7 +1438,7 @@ export async function generateRetrospectiveSnapshot(user: User | undefined, retr
       await tx.execute(
         `INSERT INTO retro_metric_snapshots
            (retro_id, metric_key, metric_name, value_num, value_text, compare_value_num, dimension_json, source_ref_json, captured_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           retroId,
           metric.metricKey,
@@ -1445,6 +1449,7 @@ export async function generateRetrospectiveSnapshot(user: User | undefined, retr
           stringifyJson({ scopeType: row.scope_type, scopeId: row.scope_id }),
           stringifyJson(metric.source),
           capturedAt,
+          beijingNow(),
         ],
       );
     }
@@ -1471,11 +1476,12 @@ export async function publishRetrospective(user: User | undefined, retroIdValue:
   }
 
   await runInTransaction(async (tx) => {
+    const now = beijingNow();
     const changed = await tx.execute(
       `UPDATE retrospectives
-       SET status = 'published', published_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
+       SET status = 'published', published_at = ?, version = version + 1, updated_at = ?
        WHERE id = ? AND status = ? AND version = ?`,
-      [retroId, String(row.status), Number(row.version || 1)],
+      [now, now, retroId, String(row.status), Number(row.version || 1)],
     );
     if (changed !== 1) {
       throw new RetrospectiveServiceError(409, 'RETRO_CHANGED', '复盘状态已变化，请刷新后重试');
@@ -1498,11 +1504,12 @@ export async function archiveRetrospective(user: User | undefined, retroIdValue:
   }
 
   await runInTransaction(async (tx) => {
+    const now = beijingNow();
     const changed = await tx.execute(
       `UPDATE retrospectives
-       SET status = 'archived', archived_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
+       SET status = 'archived', archived_at = ?, version = version + 1, updated_at = ?
        WHERE id = ? AND status = ? AND version = ?`,
-      [retroId, String(row.status), Number(row.version || 1)],
+      [now, now, retroId, String(row.status), Number(row.version || 1)],
     );
     if (changed !== 1) {
       throw new RetrospectiveServiceError(409, 'RETRO_CHANGED', '复盘状态已变化，请刷新后重试');
@@ -1553,19 +1560,20 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
       throw new RetrospectiveServiceError(409, 'RETRO_ARCHIVED', '复盘已归档，不能新增行动项');
     }
 
+    const now = beijingNow();
     actionId = await tx.executeInsert(
       `INSERT INTO retro_actions
          (retro_id, title, description_md, owner_id, due_date, status, result_md, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'todo', '', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-      [retroId, title, descriptionMd, ownerId, dueDate, user.id],
+       VALUES (?, ?, ?, ?, ?, 'todo', '', ?, ?, ?)`,
+      [retroId, title, descriptionMd, ownerId, dueDate, user.id, now, now],
     );
     await recordAudit(tx, retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${actionId}`);
     if (requestId) {
       await tx.execute(
         `INSERT INTO retro_action_create_request_keys
           (client_request_id, actor_id, retro_id, action_id, request_fingerprint, created_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
-        [requestId, user.id, retroId, actionId, fingerprint],
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [requestId, user.id, retroId, actionId, fingerprint, beijingNow()],
       );
     }
     created = true;
@@ -1684,7 +1692,7 @@ export async function updateRetroAction(
 
     const changed = await tx.execute(
       `UPDATE retro_actions
-       SET title = ?, description_md = ?, owner_id = ?, due_date = ?, status = ?, result_md = ?, closed_at = ?, updated_at = datetime('now', '+8 hours')
+       SET title = ?, description_md = ?, owner_id = ?, due_date = ?, status = ?, result_md = ?, closed_at = ?, updated_at = ?
        WHERE id = ?
          AND status IS ?
          AND title IS ?
@@ -1701,6 +1709,7 @@ export async function updateRetroAction(
         nextStatus,
         input.resultMd === undefined ? String(action.result_md || '') : String(input.resultMd || ''),
         closedAt,
+        beijingNow(),
         actionId,
         action.status,
         action.title,
@@ -1716,8 +1725,8 @@ export async function updateRetroAction(
         await tx.execute(
           `INSERT INTO retro_action_update_request_keys
             (actor_id, action_id, client_request_id, request_fingerprint, outcome, created_at)
-           VALUES (?, ?, ?, ?, 'conflict', datetime('now', '+8 hours'))`,
-          [user.id, actionId, requestId, requestFingerprint],
+           VALUES (?, ?, ?, ?, 'conflict', ?)`,
+          [user.id, actionId, requestId, requestFingerprint, beijingNow()],
         );
         conflictDetected = true;
         return;
@@ -1729,8 +1738,8 @@ export async function updateRetroAction(
       await tx.execute(
         `INSERT INTO retro_action_update_request_keys
           (actor_id, action_id, client_request_id, request_fingerprint, outcome, created_at)
-         VALUES (?, ?, ?, ?, 'processed', datetime('now', '+8 hours'))`,
-        [user.id, actionId, requestId, requestFingerprint],
+         VALUES (?, ?, ?, ?, 'processed', ?)`,
+        [user.id, actionId, requestId, requestFingerprint, beijingNow()],
       );
     }
     updated = true;

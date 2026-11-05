@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseStoredBjt } from '../shared/time/index.js';
 
 const root = mkdtempSync(path.join(tmpdir(), 'xmt-official-export-'));
 const databasePath = path.join(root, 'test.db');
@@ -154,6 +155,18 @@ const second=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as
 assert.equal((await queryOne<{count:number}>(`SELECT COUNT(*) count FROM creator_official_daily_metric_observations
   WHERE batch_id=(SELECT id FROM creator_ingest_batches WHERE batch_id=?)`, [batch]))?.count, 228, 'replaying an accepted batch does not duplicate its historical observations');
 const unchangedPayload={...payload,batch_id:crypto.randomUUID()}; const unchanged=await acceptCreatorDataSync(envelope(unchangedPayload),`Bearer ${token}`) as { result:{unchanged:number;daily_unchanged:number} }; assert.equal(unchanged.result.unchanged,3); assert.equal(unchanged.result.daily_unchanged,228);
+const savedUpdateTimes = await Promise.all([
+  queryOne<{ updated_at: string }>('SELECT updated_at FROM creator_official_metrics WHERE account_id=? ORDER BY id LIMIT 1', [creatorAccountId]),
+  queryOne<{ updated_at: string }>('SELECT updated_at FROM creator_official_daily_metrics WHERE account_id=? ORDER BY id LIMIT 1', [creatorAccountId]),
+  queryOne<{ updated_at: string }>('SELECT updated_at FROM douyin_works WHERE account_id=? ORDER BY id LIMIT 1', [douyinAccountId]),
+  queryOne<{ updated_at: string }>('SELECT updated_at FROM douyin_accounts WHERE id=?', [douyinAccountId]),
+  queryOne<{ updated_at: string }>('SELECT updated_at FROM creator_ingest_batches WHERE batch_id=?', [unchangedPayload.batch_id]),
+]);
+const updateTimes = savedUpdateTimes.map((row) => String(row?.updated_at || ''));
+assert(updateTimes.every(Boolean), 'all official-import update timestamps are persisted');
+assert.equal(new Set(updateTimes).size, 1, 'one official batch reuses one operation timestamp across updated records');
+const parsedUpdateTime = parseStoredBjt(updateTimes[0]);
+assert(parsedUpdateTime && Math.abs(Date.now() - parsedUpdateTime.getTime()) < 5 * 60_000, 'official-import update time is stored as current Beijing civil time');
 assert.equal((await queryOne<{fans_count:number;fans_count_available:number}>('SELECT fans_count,fans_count_available FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]))?.fans_count,2163,'同一天已有真实粉丝观测时，后续官方导出必须保留该值');
 const refreshedSha='e'.repeat(64); const refreshedPayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map((file,index)=>index===0?{...file,sha256:refreshedSha}:file)}; const refreshed=await acceptCreatorDataSync(envelope(refreshedPayload),`Bearer ${token}`) as { result:{unchanged:number} }; assert.equal(refreshed.result.unchanged,3);
 assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics WHERE source_file_sha256=?',[refreshedSha]))?.count,3,'相同指标也必须更新到最新官方文件来源，避免已移除作品继续累计');

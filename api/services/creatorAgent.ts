@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import {
   execute,
   executeInsert,
+  beijingNow,
   queryAll,
   queryOne,
   runInTransaction,
@@ -126,6 +127,7 @@ export async function createCreatorAgentBindingCode(userId:number,accountId:stri
   const payloadHash = bindingPayloadHash(normalizedAccountId, ttl);
   const code = crypto.randomBytes(18).toString('base64url');
   const expiresAt = new Date(Date.now() + ttl * 60_000).toISOString();
+  const operationTime = beijingNow();
   const encrypted = encryptBindingCode(code, secret, bindingRecoveryAad(userId, requestHash, normalizedAccountId, expiresAt));
 
   const recoverExisting = async () => {
@@ -164,8 +166,8 @@ export async function createCreatorAgentBindingCode(userId:number,accountId:stri
       await tx.execute(`UPDATE creator_agent_binding_code_recovery SET iv=NULL,auth_tag=NULL,ciphertext=NULL
         WHERE binding_code_id IN (SELECT id FROM creator_agent_binding_codes
           WHERE user_id=? AND platform='douyin' AND account_id=? AND used_at IS NULL)`, [userId, normalizedAccountId]);
-      await tx.execute(`UPDATE creator_agent_binding_codes SET used_at=CURRENT_TIMESTAMP
-        WHERE user_id=? AND platform='douyin' AND account_id=? AND used_at IS NULL`, [userId, normalizedAccountId]);
+      await tx.execute(`UPDATE creator_agent_binding_codes SET used_at=?
+        WHERE user_id=? AND platform='douyin' AND account_id=? AND used_at IS NULL`, [operationTime, userId, normalizedAccountId]);
       const bindingCodeId = await tx.executeInsert('INSERT INTO creator_agent_binding_codes(user_id,platform,account_id,code_hash,expires_at)VALUES(?,?,?,?,?)',[userId,'douyin',normalizedAccountId,bindingHash(code),expiresAt]);
       await tx.execute(`INSERT INTO creator_agent_binding_code_recovery(request_id_hash,actor_id,account_id,payload_hash,binding_code_id,key_version,iv,auth_tag,ciphertext,expires_at)
         VALUES(?,?,?,?,?,?,?,?,?,?)`, [requestHash,userId,normalizedAccountId,payloadHash,bindingCodeId,bindingRecoveryKeyVersion,encrypted.iv,encrypted.authTag,encrypted.ciphertext,expiresAt]);
@@ -213,6 +215,7 @@ async function registerCreatorAgentWith(
   accountId: string,
   deviceId: string,
   credentials: AgentRegistrationCredentials,
+  lastActiveAt = beijingNow(),
   preserveExistingCredentials = false,
 ) {
   if (platform !== "douyin" || !accountId || !deviceId)
@@ -228,14 +231,14 @@ async function registerCreatorAgentWith(
     id = existing.id;
     if (!preserveExistingCredentials) {
       await writer.execute(
-        "UPDATE creator_agents SET account_id=?,token_hash=?,encryption_key_hash=?,last_active_at=CURRENT_TIMESTAMP WHERE id=?",
-        [accountId, credentials.tokenHash, credentials.encryptionKeyHash, id],
+        "UPDATE creator_agents SET account_id=?,token_hash=?,encryption_key_hash=?,last_active_at=? WHERE id=?",
+        [accountId, credentials.tokenHash, credentials.encryptionKeyHash, lastActiveAt, id],
       );
     }
   } else
     id = await writer.executeInsert(
-      "INSERT INTO creator_agents(user_id,platform,account_id,device_id,token_hash,encryption_key_hash,last_active_at)VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)",
-      [userId, platform, accountId, deviceId, credentials.tokenHash, credentials.encryptionKeyHash],
+      "INSERT INTO creator_agents(user_id,platform,account_id,device_id,token_hash,encryption_key_hash,last_active_at)VALUES(?,?,?,?,?,?,?)",
+      [userId, platform, accountId, deviceId, credentials.tokenHash, credentials.encryptionKeyHash, lastActiveAt],
     );
   return {
     agent_id: id,
@@ -277,6 +280,7 @@ export async function bindCreatorAgent(code:string,device:Record<string,unknown>
   const deviceId=String(device.device_id||'');
   if(!deviceId)throw Object.assign(new Error('设备标识必填'),{statusCode:400});
   const codeHash=bindingHash(code);
+  const operationTime = beijingNow();
   const normalizedRequestId=recovery?normalizeBindRequestId(recovery.request_id):undefined;
   const recoverySecret=recovery?validateBindRecoverySecret(recovery.recovery_secret):undefined;
   const requestHash=normalizedRequestId?bindingRequestHash(normalizedRequestId):undefined;
@@ -298,10 +302,10 @@ export async function bindCreatorAgent(code:string,device:Record<string,unknown>
       'SELECT id,user_id,platform,account_id,expires_at,used_at FROM creator_agent_binding_codes WHERE code_hash=?',[codeHash],
     );
     if(!row||row.used_at||Date.parse(row.expires_at)<=Date.now())throw Object.assign(new Error('绑定码无效、已使用或已过期'),{statusCode:410});
-    const claimed=await tx.execute('UPDATE creator_agent_binding_codes SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL',[row.id]);
+    const claimed=await tx.execute('UPDATE creator_agent_binding_codes SET used_at=? WHERE id=? AND used_at IS NULL',[operationTime,row.id]);
     if(claimed!==1)throw Object.assign(new Error('绑定码已被使用'),{statusCode:410});
     const existingAgent=normalizedRequestId?await tx.queryOne<{id:number;token_hash:string}>('SELECT id,token_hash FROM creator_agents WHERE user_id=? AND platform=? AND device_id=?',[row.user_id,row.platform,deviceId]):null;
-    const bound=await registerCreatorAgentWith(tx,row.user_id,row.platform,row.account_id,deviceId,credentials,Boolean(normalizedRequestId));
+    const bound=await registerCreatorAgentWith(tx,row.user_id,row.platform,row.account_id,deviceId,credentials,operationTime,Boolean(normalizedRequestId));
     if(!normalizedRequestId||!recoverySecret||!requestHash||!payloadHash){
       await tx.execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=? WHERE id=?`,[String(device.device_name||''),String(device.os||''),String(device.agent_version||''),Number(device.protocol_version)||1,String(device.browser_type||''),String(device.browser_version||''),String(device.browser_engine||''),String(device.browser_runtime||''),String(device.session_mode||''),String(device.compatibility_status||'not_tested'),bound.agent_id]);
       await tx.execute('UPDATE creator_agent_binding_code_recovery SET iv=NULL,auth_tag=NULL,ciphertext=NULL WHERE binding_code_id=?',[row.id]);
@@ -329,6 +333,7 @@ export async function acknowledgeCreatorAgentBindResult(requestIdValue:unknown,r
   const requestId=normalizeBindRequestId(requestIdValue);
   const recoverySecret=validateBindRecoverySecret(recoverySecretValue);
   const requestHash=bindingRequestHash(requestId);
+  const operationTime = beijingNow();
   const outcome=await runInTransaction(async(tx)=>{
     const row=await tx.queryOne<BindResultRecoveryRow>(`SELECT r.request_id_hash,r.recovery_secret_hash,r.payload_hash,r.code_hash,r.agent_id,r.previous_token_hash,r.staged_token_hash,r.staged_encryption_key_hash,r.key_version,r.iv,r.auth_tag,r.ciphertext,r.expires_at,r.acknowledged_at,a.token_hash active_token_hash
       FROM creator_agent_bind_result_recovery r LEFT JOIN creator_agents a ON a.id=r.agent_id WHERE r.request_id_hash=?`,[requestHash]);
@@ -346,14 +351,14 @@ export async function acknowledgeCreatorAgentBindResult(requestIdValue:unknown,r
       return 'conflict' as const;
     }
     const device=receipt.device;
-    const applied=await tx.execute(`UPDATE creator_agents SET account_id=?,token_hash=?,encryption_key_hash=?,device_name=?,os=?,agent_version=?,protocol_version=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_active_at=CURRENT_TIMESTAMP WHERE id=? AND token_hash=?`,[
-      receipt.response.account_id,row.staged_token_hash,row.staged_encryption_key_hash,String(device.device_name||''),String(device.os||''),String(device.agent_version||''),Number(device.protocol_version)||1,String(device.browser_type||''),String(device.browser_version||''),String(device.browser_engine||''),String(device.browser_runtime||''),String(device.session_mode||''),String(device.compatibility_status||'not_tested'),row.agent_id,expectedCurrentTokenHash,
+    const applied=await tx.execute(`UPDATE creator_agents SET account_id=?,token_hash=?,encryption_key_hash=?,device_name=?,os=?,agent_version=?,protocol_version=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_active_at=? WHERE id=? AND token_hash=?`,[
+      receipt.response.account_id,row.staged_token_hash,row.staged_encryption_key_hash,String(device.device_name||''),String(device.os||''),String(device.agent_version||''),Number(device.protocol_version)||1,String(device.browser_type||''),String(device.browser_version||''),String(device.browser_engine||''),String(device.browser_runtime||''),String(device.session_mode||''),String(device.compatibility_status||'not_tested'),operationTime,row.agent_id,expectedCurrentTokenHash,
     ]);
     if(applied!==1){
       await tx.execute('UPDATE creator_agent_bind_result_recovery SET iv=NULL,auth_tag=NULL,ciphertext=NULL WHERE request_id_hash=?',[requestHash]);
       return 'conflict' as const;
     }
-    await tx.execute('UPDATE creator_agent_bind_result_recovery SET acknowledged_at=CURRENT_TIMESTAMP,iv=NULL,auth_tag=NULL,ciphertext=NULL WHERE request_id_hash=?',[requestHash]);
+    await tx.execute('UPDATE creator_agent_bind_result_recovery SET acknowledged_at=?,iv=NULL,auth_tag=NULL,ciphertext=NULL WHERE request_id_hash=?',[operationTime,requestHash]);
     return 'acknowledged' as const;
   });
   if(outcome==='not_found')throw Object.assign(new Error('绑定请求不存在或恢复凭据无效'),{statusCode:404});
@@ -366,7 +371,8 @@ export async function heartbeatCreatorAgent(body:Record<string,unknown>,authoriz
   if(!token||!agent||!(await bcrypt.compare(token,agent.token_hash)))throw Object.assign(new Error('Agent 身份认证失败'),{statusCode:401});
   if(String(body.account_id||'')!==agent.account_id)throw Object.assign(new Error('Agent 账号绑定不匹配'),{statusCode:403});
   if(body.protocol_version!==1)throw Object.assign(new Error('Agent 协议版本不受支持'),{statusCode:400});
-  await execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_login_status=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_heartbeat_at=CURRENT_TIMESTAMP,last_active_at=CURRENT_TIMESTAMP WHERE id=?`,[String(body.device_name||''),String(body.os||''),String(body.agent_version||''),Number(body.protocol_version)||1,String(body.browser_login_status||'unknown'),String(body.browser_type||''),String(body.browser_version||''),String(body.browser_engine||''),String(body.browser_runtime||''),String(body.session_mode||''),String(body.compatibility_status||'not_tested'),agent.id]);
+  const operationTime = beijingNow();
+  await execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_login_status=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_heartbeat_at=?,last_active_at=? WHERE id=?`,[String(body.device_name||''),String(body.os||''),String(body.agent_version||''),Number(body.protocol_version)||1,String(body.browser_login_status||'unknown'),String(body.browser_type||''),String(body.browser_version||''),String(body.browser_engine||''),String(body.browser_runtime||''),String(body.session_mode||''),String(body.compatibility_status||'not_tested'),operationTime,operationTime,agent.id]);
   return{success:true,server_time:new Date().toISOString(),protocol_version:1};
 }
 const parse = <T>(value: string | null | undefined, fallback: T): T => {

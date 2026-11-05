@@ -8,7 +8,7 @@ import type {
   ReviewDailyReportInput,
   SaveDailyReportDraftInput,
 } from '../types/dailyReports.js';
-import { beijingToday, queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { beijingNow, beijingToday, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { createMessage } from '../utils/messageHelper.js';
 import { apiLogger } from '../observability/logger.js';
 
@@ -353,8 +353,8 @@ async function recordAudit(
 ) {
   await tx.execute(
     `INSERT INTO daily_report_audit_logs (report_id, user_id, action, from_status, to_status, comment, payload_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
-    [reportId, userId, action, fromStatus || null, toStatus || null, comment || null, stringifyJson(payload)]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [reportId, userId, action, fromStatus || null, toStatus || null, comment || null, stringifyJson(payload), beijingNow()]
   );
 }
 
@@ -432,24 +432,26 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
       await tx.execute(
         `UPDATE daily_reports
          SET template_id = ?, status = 'draft', manual_summary_md = ?, risk_level = ?, version = ?,
-             updated_at = datetime('now', '+8 hours')
+             updated_at = ?
          WHERE id = ?`,
-        [templateId, manualSummary, riskLevel, nextVersion, currentReportId]
+        [templateId, manualSummary, riskLevel, nextVersion, beijingNow(), currentReportId]
       );
       await tx.execute(`DELETE FROM daily_report_items WHERE report_id = ?`, [currentReportId]);
     } else {
+      const now = beijingNow();
       currentReportId = await tx.executeInsert(
         `INSERT INTO daily_reports (user_id, report_date, template_id, status, manual_summary_md, risk_level, version, created_at, updated_at)
-         VALUES (?, ?, ?, 'draft', ?, ?, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-        [user.id, reportDate, templateId, manualSummary, riskLevel]
+         VALUES (?, ?, ?, 'draft', ?, ?, 1, ?, ?)`,
+        [user.id, reportDate, templateId, manualSummary, riskLevel, now, now]
       );
     }
 
     for (const item of items) {
+      const now = beijingNow();
       await tx.execute(
         `INSERT INTO daily_report_items
            (report_id, section_key, title, content_md, source_type, source_id, sort_order, meta_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           currentReportId,
           item.sectionKey,
@@ -459,6 +461,8 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
           item.sourceId ?? null,
           item.sortOrder || 0,
           stringifyJson(item.meta),
+          now,
+          now,
         ]
       );
     }
@@ -500,19 +504,20 @@ export async function autosaveDailyReport(user: User | undefined, input: SaveDai
     }
 
     const changed = await tx.execute(
-      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = datetime('now', '+8 hours')
+      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = ?
        WHERE id = ? AND user_id = ? AND status = 'draft'`,
-      [manualSummary, riskLevel, Number(existing.id), user.id],
+      [manualSummary, riskLevel, beijingNow(), Number(existing.id), user.id],
     );
     if (changed !== 1) {
       throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
     }
     await tx.execute(`DELETE FROM daily_report_items WHERE report_id = ?`, [Number(existing.id)]);
     for (const item of items) {
+      const now = beijingNow();
       await tx.execute(
         `INSERT INTO daily_report_items (report_id, section_key, title, content_md, sort_order, meta_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-        [Number(existing.id), item.sectionKey, item.title || null, item.contentMd || null, item.sortOrder || 0, stringifyJson(item.meta)]
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [Number(existing.id), item.sectionKey, item.title || null, item.contentMd || null, item.sortOrder || 0, stringifyJson(item.meta), now, now]
       );
     }
     return Number(existing.id);
@@ -547,12 +552,13 @@ export async function submitDailyReport(user: User | undefined, reportId: number
   }
 
   await runInTransaction(async (tx) => {
+    const now = beijingNow();
     const changed = await tx.execute(
       `UPDATE daily_reports
-       SET status = 'submitted', submitted_at = datetime('now', '+8 hours'), version = version + 1,
-           updated_at = datetime('now', '+8 hours')
+       SET status = 'submitted', submitted_at = ?, version = version + 1,
+           updated_at = ?
        WHERE id = ? AND status = ?`,
-      [reportId, String(row.status)]
+      [now, now, reportId, String(row.status)]
     );
     if (changed !== 1) {
       throw new DailyReportServiceError(409, 'REPORT_CHANGED', '日报状态已变化，请刷新后重试');
@@ -643,12 +649,13 @@ export async function reviewDailyReport(
   const nextStatus = action === 'approve' ? 'approved' : 'rejected';
   const comment = String(input.comment || '').trim();
   await runInTransaction(async (tx) => {
+    const now = beijingNow();
     const changed = await tx.execute(
       `UPDATE daily_reports
-       SET status = ?, reviewed_at = datetime('now', '+8 hours'), reviewed_by = ?, review_comment = ?,
-           version = version + 1, updated_at = datetime('now', '+8 hours')
+       SET status = ?, reviewed_at = ?, reviewed_by = ?, review_comment = ?,
+           version = version + 1, updated_at = ?
        WHERE id = ? AND status = 'submitted'`,
-      [nextStatus, user.id, comment, reportId]
+      [nextStatus, now, user.id, comment, now, reportId]
     );
     if (changed !== 1) {
       throw new DailyReportServiceError(409, 'REPORT_NOT_SUBMITTED', '只有已提交日报可以审核');
@@ -857,11 +864,12 @@ export async function generateDailyReportDraft(user: User | undefined, dateValue
 
   if (existing && EDITABLE_STATUSES.includes(String(existing.status) as DailyReportStatus)) {
     await runInTransaction(async (tx) => {
+      const now = beijingNow();
       const changed = await tx.execute(
         `UPDATE daily_reports
-         SET auto_summary_json = ?, updated_at = datetime('now', '+8 hours')
+         SET auto_summary_json = ?, updated_at = ?
          WHERE id = ? AND status = ?`,
-        [stringifyJson(autoSummary), Number(existing.id), String(existing.status)]
+        [stringifyJson(autoSummary), now, Number(existing.id), String(existing.status)]
       );
       if (changed === 1) {
         await recordAudit(tx, Number(existing.id), user.id, 'generate_draft', String(existing.status), String(existing.status), undefined, {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { expectedOfficialDailyDates, officialDailyWindowIsValid, summarizeOfficialDaily, type OfficialDailyPoint } from '../../api/services/douyinDataCenter.js';
 
 const point = (metric_date: string, views: number, overrides: Partial<OfficialDailyPoint> = {}): OfficialDailyPoint => ({

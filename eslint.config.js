@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   // 构建副本与 Python 环境内的第三方声明不是项目源码。
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/.worktrees/**', 'agent/dist-*/**', 'agent/release*/**', 'agent/.collector-runtime-build/**', 'collector/.venv*/**', 'android/.gradle/**', 'android/**/build/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/.worktrees/**', 'agent/dist-*/**', 'agent/release*/**', 'agent/.collector-runtime-build/**', 'collector/.venv*/**', 'android/.gradle/**', 'android/**/build/**'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -32,6 +32,12 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    files: ['api/**/*.{ts,tsx}'],
+    rules: {
+      'no-empty': ['error', { allowEmptyCatch: false }],
     },
   },
 )

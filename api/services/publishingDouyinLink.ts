@@ -185,11 +185,12 @@ export async function reconcilePublishingDouyinLinks(options: PublishingDouyinRe
       let inserted = 0;
       const linkedTopicIds = new Set<number>();
       for (const { publishing, match } of accepted) {
+        const linkedAt = beijingNow();
         const changes = await tx.execute(`
           INSERT OR IGNORE INTO publishing_douyin_links(
             publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
-          ) VALUES(?,?,?,?,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
-        `, [publishing.id, match.id, match.match_method, match.match_score, options.createdBy ?? null]);
+          ) VALUES(?,?,?,?,?,?,?)
+        `, [publishing.id, match.id, match.match_method, match.match_score, options.createdBy ?? null, linkedAt, linkedAt]);
         inserted += changes;
         if (changes > 0 && publishing.topic_id != null) {
           const topicId = Number(publishing.topic_id);
@@ -264,17 +265,18 @@ export async function setPublishingDouyinLink(
         [douyinWorkId, publishingId],
       );
       if (conflict) return { kind: 'conflict' as const, conflictPublishingId: Number(conflict.publishing_id) };
+      const linkedAt = beijingNow();
       await tx.execute(`
         INSERT INTO publishing_douyin_links(
           publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
-        ) VALUES(?,?, 'manual',1,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
+        ) VALUES(?,?, 'manual',1,?,?,?)
         ON CONFLICT(publishing_id) DO UPDATE SET
           douyin_work_id=excluded.douyin_work_id,
           match_method='manual',
           match_score=1,
           created_by=excluded.created_by,
           updated_at=excluded.updated_at
-      `, [publishingId, douyinWorkId, createdBy ?? null]);
+      `, [publishingId, douyinWorkId, createdBy ?? null, linkedAt, linkedAt]);
     } else if (previousWorkId !== null) {
       await tx.execute('DELETE FROM publishing_douyin_links WHERE publishing_id=?', [publishingId]);
     }

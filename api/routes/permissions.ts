@@ -1,9 +1,9 @@
-import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { createAsyncRouter } from '../middleware/async-router';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 
-const router = Router();
+const router = createAsyncRouter();
 
 // 获取所有权限（按模块分组）
 router.get('/', authenticate, requirePermission('system:permission'), async (req, res) => {

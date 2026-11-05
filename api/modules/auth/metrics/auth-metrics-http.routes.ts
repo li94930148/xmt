@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
-import { Router, type Request } from 'express';
+import { createAsyncRouter } from '../../../middleware/async-router';
+import {  type Request } from 'express';
 import type { PrometheusAuthMetricsExporter } from './prometheus/prometheus-auth-metrics.exporter.js';
 import type { AuthMetricsHttpConfig } from './auth-metrics-http.config.js';
 
@@ -32,7 +33,7 @@ export function createAuthMetricsHttpRouter(
   exporter: PrometheusAuthMetricsExporter,
   config: AuthMetricsHttpConfig,
 ) {
-  const router = Router();
+  const router = createAsyncRouter();
   router.get('/', (req: Request, res) => {
     if (!config.enabled) return res.status(404).end();
     if (!isIpAllowed(req.ip || req.socket.remoteAddress || '', config.allowedCidrs)) {

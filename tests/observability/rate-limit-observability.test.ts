@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
+import { test } from 'vitest';
 import { createLogFailedLogin, createRateLimiters, type RateLimitConfig } from '../../api/middleware/rateLimit.js';
 import { requestId } from '../../api/middleware/request-id.js';
 
+test('rate-limit logging correlates failures without logging sensitive fields', async () => {
 const records: Array<{ level: string; fields: Record<string, unknown>; message: string }> = [];
 const logger = {
   debug: (fields: Record<string, unknown>, message: string) => records.push({ level: 'debug', fields, message }),
@@ -70,3 +72,4 @@ try {
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
+});

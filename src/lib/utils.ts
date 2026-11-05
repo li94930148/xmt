@@ -2,6 +2,8 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { dateKeyBjt, formatBjtApi, formatBjtDisplay } from '@shared/time';
 
+export { formatBeijingDate } from './dateFormat';
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -31,14 +33,6 @@ export function formatUtcToBeijingTime(
   options?: Intl.DateTimeFormatOptions
 ): string {
   return formatTimeFromSource(dateStr, 'utc', options);
-}
-
-export function formatBeijingDate(dateStr: Date | number | string | undefined | null): string {
-  return formatBeijingTime(dateStr, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
 }
 
 export function getCurrentBeijingDateString(): string {

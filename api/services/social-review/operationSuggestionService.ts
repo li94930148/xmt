@@ -1,4 +1,4 @@
-import { execute, queryAll } from '../../database/utils.js';
+import { beijingNow, execute, queryAll } from '../../database/utils.js';
 
 export type OperationSuggestion = {
   type: 'content_direction' | 'publish_strategy' | 'performance_warning' | 'growth_opportunity';
@@ -50,8 +50,8 @@ export async function generateAccountSuggestions(accountId: number) {
   await execute(`DELETE FROM social_operation_suggestions WHERE account_id = ? AND source = 'system'`, [accountId]);
   for (const item of suggestions) await execute(
     `INSERT INTO social_operation_suggestions (account_id, type, title, content, source, created_at)
-     VALUES (?, ?, ?, ?, 'system', datetime('now', '+8 hours')) ON CONFLICT(account_id, type, title, content) DO NOTHING`,
-    [accountId, item.type, item.title, item.content],
+     VALUES (?, ?, ?, ?, 'system', ?) ON CONFLICT(account_id, type, title, content) DO NOTHING`,
+    [accountId, item.type, item.title, item.content, beijingNow()],
   );
   return suggestions;
 }

@@ -19,6 +19,7 @@ import { generateAccountSuggestions } from './operationSuggestionService.js';
 import { collectDouyinPerformanceMetrics, mergeDouyinPerformanceMetrics, type DouyinPerformanceSyncResult } from './douyinPerformanceService.js';
 import { collectDouyinInteractionMetrics, mergeDouyinInteractionMetrics } from './douyinInteractionService.js';
 import type { SocialCollectDiagnostic } from './adapters/base.js';
+import { formatBjtDatabase } from '../../../shared/time/index.js';
 
 type DbAccountRow = Record<string, unknown>;
 
@@ -108,11 +109,12 @@ export async function getSocialAccount(accountId: number) {
 }
 
 export async function createIngestionJob(account: SocialAccount, status = 'running', triggerSource: 'manual' | 'scheduled' = 'manual', retryCount = 0) {
+  const startedAt = formatBjtDatabase();
   const jobId = await executeInsert(
     `INSERT INTO social_ingestion_jobs
       (account_id, platform, strategy, status, trigger_source, retry_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-    [account.id, account.platform, account.fetch_strategy, status, triggerSource, retryCount],
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [account.id, account.platform, account.fetch_strategy, status, triggerSource, retryCount, startedAt, startedAt, startedAt],
   );
   return getIngestionJob(jobId);
 }
@@ -128,29 +130,31 @@ export async function getIngestionJob(jobId: number) {
 }
 
 async function updateJobSuccess(jobId: number) {
+  const finishedAt = formatBjtDatabase();
   await execute(
     `UPDATE social_ingestion_jobs
         SET status = 'success',
             last_error = NULL,
-            finished_at = datetime('now', '+8 hours'),
-            updated_at = datetime('now', '+8 hours')
+            finished_at = ?,
+            updated_at = ?
       WHERE id = ?`,
-    [jobId],
+    [finishedAt, finishedAt, jobId],
   );
   const job = await getIngestionJob(jobId);
   if (job?.account_id != null) await refreshIngestionHealth(Number(job.account_id));
 }
 
 async function updateJobFailed(jobId: number, errorMessage: string, failureType: IngestionFailureType) {
+  const finishedAt = formatBjtDatabase();
   await execute(
     `UPDATE social_ingestion_jobs
         SET status = 'failed',
             last_error = ?,
             failure_type = ?,
-            finished_at = datetime('now', '+8 hours'),
-            updated_at = datetime('now', '+8 hours')
+            finished_at = ?,
+            updated_at = ?
       WHERE id = ?`,
-    [errorMessage, failureType, jobId],
+    [errorMessage, failureType, finishedAt, finishedAt, jobId],
   );
   const job = await getIngestionJob(jobId);
   if (job?.account_id != null) await refreshIngestionHealth(Number(job.account_id));
@@ -161,11 +165,12 @@ export async function saveSocialSnapshot(
   snapshot: NormalizedAccountSnapshot,
   videos: NormalizedVideoSnapshot[],
 ) {
+  const operationTime = formatBjtDatabase();
   await execute(
     `INSERT INTO social_snapshots
       (account_id, platform, snapshot_date, followers, following_count, likes_total, video_count,
        works_count, engagement_est, source_method, source_project, raw_json, fetched_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, snapshot_date) DO UPDATE SET
        followers = excluded.followers,
        following_count = excluded.following_count,
@@ -190,7 +195,8 @@ export async function saveSocialSnapshot(
       snapshot.source_method ?? null,
       snapshot.source_project ?? null,
       toJson(snapshot.raw_json),
-      snapshot.fetched_at ?? new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }),
+      snapshot.fetched_at ?? operationTime,
+      operationTime,
     ],
   );
 
@@ -228,7 +234,7 @@ export async function saveSocialSnapshot(
       if (video.title) await syncVideoContentCategory(Number(existing.id), video.title);
     } else {
       insertCount += 1;
-      await execute(`INSERT INTO social_videos (account_id, snapshot_id, platform, internal_video_key, external_video_id, title, video_url, cover_url, publish_time, likes, comments, shares, collects, views, duration, status, visibility, source_type, raw_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`, [account.id, snapshotId, account.platform, internalVideoKey, video.external_video_id ?? null, video.title ?? null, video.video_url ?? null, video.cover_url ?? null, video.publish_time ?? null, metricForWrite(video.likes, null), metricForWrite(video.comments, null), metricForWrite(video.shares, null), metricForWrite(video.collects, null), metricForWrite(video.views, null), video.duration ?? null, video.status ?? null, video.visibility ?? null, video.source_type ?? 'social_review', toJson(video.raw_json)]);
+      await execute(`INSERT INTO social_videos (account_id, snapshot_id, platform, internal_video_key, external_video_id, title, video_url, cover_url, publish_time, likes, comments, shares, collects, views, duration, status, visibility, source_type, raw_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [account.id, snapshotId, account.platform, internalVideoKey, video.external_video_id ?? null, video.title ?? null, video.video_url ?? null, video.cover_url ?? null, video.publish_time ?? null, metricForWrite(video.likes, null), metricForWrite(video.comments, null), metricForWrite(video.shares, null), metricForWrite(video.collects, null), metricForWrite(video.views, null), video.duration ?? null, video.status ?? null, video.visibility ?? null, video.source_type ?? 'social_review', toJson(video.raw_json), operationTime]);
       const inserted = await queryOne<Record<string, unknown>>('SELECT id FROM social_videos WHERE platform = ? AND account_id = ? AND internal_video_key = ? LIMIT 1', [account.platform, account.id, internalVideoKey]);
       if (inserted?.id && video.title) await syncVideoContentCategory(Number(inserted.id), video.title);
     }
@@ -236,9 +242,9 @@ export async function saveSocialSnapshot(
 
   await execute(
     `UPDATE social_accounts
-        SET last_fetched_at = ?, updated_at = datetime('now', '+8 hours')
+        SET last_fetched_at = ?, updated_at = ?
       WHERE id = ?`,
-    [snapshot.fetched_at ?? new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }), account.id],
+    [snapshot.fetched_at ?? operationTime, operationTime, account.id],
   );
   await saveCurrentVideoMetricSnapshots(account.id, snapshot.snapshot_date);
   await refreshAccountVideoInsights(account.id);

@@ -1,7 +1,7 @@
-import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+import { createAsyncRouter } from './middleware/async-router.js';
 import { apiErrorSchema, apiSuccessSchema } from '@shared/schema/error.schema';
 import { idSchema } from '@shared/schema/common.schema';
 import {
@@ -1258,7 +1258,7 @@ export function generateOpenApiDocument() {
 }
 
 export const openApiDocument = generateOpenApiDocument();
-export const openApiRouter = express.Router();
+export const openApiRouter = createAsyncRouter();
 
 openApiRouter.get('/openapi.json', (_req, res) => res.json(openApiDocument));
 openApiRouter.use('/', swaggerUi.serve, swaggerUi.setup(openApiDocument, {

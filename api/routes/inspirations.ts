@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
@@ -8,7 +9,7 @@ import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
 import { InspirationPromotionError, promoteInspirationInTransaction } from '../modules/inspirations/inspiration-promotion';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 const inspirationSelect = `
   SELECT
@@ -313,8 +314,8 @@ router.post('/:id/comments', authenticate, async (req, res) => {
         created = true;
 
         const updatedRows = await tx.execute(
-          `UPDATE inspirations SET updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-          [id]
+          `UPDATE inspirations SET updated_at = ? WHERE id = ?`,
+          [beijingNow(), id]
         );
         if (updatedRows !== 1) throw new Error('INSPIRATION_COMMENT_PARENT_UPDATE_FAILED');
       }
@@ -453,8 +454,8 @@ router.post('/:id/vote', authenticate, async (req, res) => {
         if (!voteCount) throw new Error('INSPIRATION_VOTE_COUNT_UNAVAILABLE');
         const votes = Number(voteCount.total);
         const updatedRows = await tx.execute(
-          `UPDATE inspirations SET votes = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-          [votes, id],
+          `UPDATE inspirations SET votes = ?, updated_at = ? WHERE id = ?`,
+          [votes, beijingNow(), id],
         );
         if (updatedRows !== 1) throw new Error('INSPIRATION_VOTE_PARENT_UPDATE_FAILED');
         await tx.execute(
@@ -513,8 +514,8 @@ router.post('/:id/vote', authenticate, async (req, res) => {
 
       const votes = Number(voteCount.total);
       const updatedRows = await tx.execute(
-        `UPDATE inspirations SET votes = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-        [votes, id]
+        `UPDATE inspirations SET votes = ?, updated_at = ? WHERE id = ?`,
+        [votes, beijingNow(), id]
       );
       if (updatedRows !== 1) throw new Error('INSPIRATION_VOTE_PARENT_UPDATE_FAILED');
 

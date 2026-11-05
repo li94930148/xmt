@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import bcrypt from 'bcrypt';
+import { parseStoredBjt } from '../shared/time/index.js';
 
 const tempRoot = mkdtempSync(path.join(tmpdir(), 'xmt-sync-v2102-'));
 process.env.XMT_DB_PATH = path.join(tempRoot, 'contract.db');
@@ -81,6 +82,13 @@ for (let attempt = 0; attempt < 10; attempt += 1) {
   assert.equal(result.works, 12);
   assert.equal(result.duplicate, attempt > 0);
 }
+const completedTaskTime = await queryOne<{ end_time: string; last_active_at: string }>(`SELECT task.end_time, agent.last_active_at
+  FROM creator_sync_tasks task JOIN creator_agents agent ON agent.id=task.agent_id
+  WHERE task.agent_id=? ORDER BY task.id DESC LIMIT 1`, [101]);
+assert(completedTaskTime);
+assert.equal(completedTaskTime.end_time, completedTaskTime.last_active_at, 'agent activity and completed sync task share one Beijing operation time');
+const parsedTaskTime = parseStoredBjt(completedTaskTime.end_time);
+assert(parsedTaskTime && Math.abs(Date.now() - parsedTaskTime.getTime()) < 5 * 60_000, 'completed sync time is stored in Beijing civil time');
 
 const douyinAccount = await queryOne<{ id: number }>('SELECT id FROM douyin_accounts WHERE douyin_uid=?', ['contract-account']);
 assert(douyinAccount);
@@ -148,4 +156,4 @@ assert.equal(Number(repairedLink?.creator_account_id), 1, 'internal creator_acco
 console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; managed cover persisted; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent; unavailable account metadata preserved.');
 
 db.close();
-try { rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch {}
+rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

@@ -4,6 +4,18 @@ import path from 'path';
 import { getDatabasePath, getDatabaseUrl } from './path';
 import { runDatabaseMigrations } from './migrations/runner';
 import { apiLogger } from '../observability/logger.js';
+import { createBootstrapUserPlan } from '../config/bootstrap-users.js';
+import { formatBjtDatabase } from '../../shared/time/index.js';
+import { ensureAchievementSchemaColumns } from './achievement-schema.js';
+import { renameLegacyDouyinVideosTable } from './douyin-videos-schema.js';
+import { ensureDouyinSchemaColumns } from './douyin-schema-columns.js';
+import { ensureSocialVideoSchemaColumns } from './social-videos-schema.js';
+import { ensureSocialMetadataSchemaColumns } from './social-metadata-schema.js';
+import {
+  backfillMissingTopicSubmissionTimes,
+  ensureWorkflowContentSchemaColumns,
+} from './workflow-content-schema.js';
+import { ensureLegacySchemaColumns } from './legacy-schema-columns.js';
 
 export const dbPath = getDatabasePath();
 const dbDir = path.dirname(dbPath);
@@ -17,6 +29,20 @@ export const db = createClient({
   url: getDatabaseUrl(),
 });
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+export async function configureDatabaseConnection() {
+  await db.execute(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+  await db.execute('PRAGMA synchronous = NORMAL');
+}
+
+async function insertAppMeta(key: string, value: string) {
+  await db.execute({
+    sql: 'INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, ?)',
+    args: [key, value, formatBjtDatabase()],
+  });
+}
+
 export async function initDatabase() {
   apiLogger.info({ module: 'database', operation: 'database.initializing', storage: 'libsql' }, 'api.database.initializing');
 
@@ -24,6 +50,10 @@ export async function initDatabase() {
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
+
+  // Give concurrent local SQLite readers/writers a bounded chance to finish
+  // before callers fall back to operation-level SQLITE_BUSY retries.
+  await configureDatabaseConnection();
 
   // 启用 WAL 模式，提升并发性能
   await db.execute('PRAGMA journal_mode = WAL');
@@ -37,9 +67,8 @@ export async function initDatabase() {
   await createIndexes();
 }
 
-// 北京时间默认值表达式（SQLite 用 +8 hours 偏移）
-// 注意：CREATE TABLE 的 DEFAULT 只能用 CURRENT_TIMESTAMP（表已存在不会重建）
-// 运行时 INSERT/UPDATE 统一用 datetime('now', '+8 hours')
+// Existing CREATE TABLE defaults are kept for schema compatibility. Runtime
+// writes pass explicit values formatted with the shared Beijing-time contract.
 
 async function initTables() {
   await db.execute(`
@@ -230,23 +259,9 @@ async function initTables() {
     )
   `);
 
-  try {
-    await db.execute(`ALTER TABLE resources ADD COLUMN content TEXT`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-
-  try {
-    await db.execute(`ALTER TABLE users ADD COLUMN force_change_password BOOLEAN DEFAULT 0`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-
-  try {
-    await db.execute(`ALTER TABLE messages ADD COLUMN link TEXT`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
+  await ensureLegacySchemaColumns(db, 'resources');
+  await ensureLegacySchemaColumns(db, 'users');
+  await ensureLegacySchemaColumns(db, 'messages');
 
   // === 新增表 ===
 
@@ -317,11 +332,8 @@ async function initTables() {
     UNIQUE(user_id, achievement_id)
   )`);
 
-  // 尝试给旧表加新字段（兼容已有数据库）
-  try { await db.execute(`ALTER TABLE achievements ADD COLUMN points INTEGER DEFAULT 10`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE achievements ADD COLUMN category TEXT DEFAULT 'milestone'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE achievements ADD COLUMN rarity TEXT DEFAULT 'common'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE achievements ADD COLUMN sort_order INTEGER DEFAULT 0`); } catch (e) {}
+  // 只为旧表补齐缺失字段；schema 查询或 ALTER 失败必须阻断初始化。
+  await ensureAchievementSchemaColumns(db);
 
   // 公告/便签
   await db.execute(`CREATE TABLE IF NOT EXISTS announcements (
@@ -396,31 +408,11 @@ async function initTables() {
 
   // OpenAPI data model. Existing douyin_accounts is extended in-place so historical
   // crawl records remain recoverable; legacy columns are documented as deprecated.
-  for (const statement of [
-    `ALTER TABLE douyin_accounts ADD COLUMN user_id INTEGER`,
-    `ALTER TABLE douyin_accounts ADD COLUMN open_id TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN union_id TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN nickname TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN avatar TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN access_token_encrypt TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN refresh_token_encrypt TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN expires_at DATETIME`,
-    `ALTER TABLE douyin_accounts ADD COLUMN status TEXT DEFAULT 'pending_authorization'`,
-    `ALTER TABLE douyin_accounts ADD COLUMN updated_at DATETIME`,
-    `ALTER TABLE douyin_accounts ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
-    `ALTER TABLE douyin_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'oauth'`,
-    `ALTER TABLE douyin_accounts ADD COLUMN business_token TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN business_scope TEXT`,
-  ]) { try { await db.execute(statement); } catch { /* 字段已存在时跳过 */ } }
+  await ensureLegacySchemaColumns(db, 'douyin_accounts');
 
   // The prior douyin_videos requires snapshot_id and is a crawl-only contract.
   // Rename, do not drop, then create the OpenAPI-owned video table.
-  try {
-    const legacyVideoColumns = await db.execute(`PRAGMA table_info(douyin_videos)`);
-    if (legacyVideoColumns.rows.some((row) => String(row.name) === 'snapshot_id')) {
-      await db.execute(`ALTER TABLE douyin_videos RENAME TO douyin_videos_legacy_deprecated`);
-    }
-  } catch {}
+  await renameLegacyDouyinVideosTable(db);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
@@ -501,18 +493,9 @@ async function initTables() {
     UNIQUE(account_id, snapshot_date),
     FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
   )`);
-  for (const statement of [
-    `ALTER TABLE douyin_account_statistics ADD COLUMN play_count INTEGER DEFAULT 0`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN new_fans INTEGER DEFAULT 0`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN new_like_count INTEGER DEFAULT 0`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN new_comment_count INTEGER DEFAULT 0`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN profile_view_count INTEGER DEFAULT 0`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN raw_data_json TEXT`,
-    `ALTER TABLE douyin_account_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
-    `ALTER TABLE douyin_videos ADD COLUMN status TEXT NOT NULL DEFAULT 'deprecated_pending_business_auth'`,
-    `ALTER TABLE douyin_videos ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
-    `ALTER TABLE douyin_video_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
-  ]) { try { await db.execute(statement); } catch {} }
+  // Old installations may lack these columns. Only missing fields are added;
+  // schema and ALTER failures must stop initialization instead of being hidden.
+  await ensureDouyinSchemaColumns(db);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_fans_source_statistics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
@@ -615,26 +598,7 @@ async function initTables() {
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_work_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT,work_id INTEGER NOT NULL,score REAL NOT NULL DEFAULT 0,level TEXT NOT NULL CHECK(level IN ('viral','excellent','normal','low')),analysis_json TEXT NOT NULL DEFAULT '{}',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(work_id) REFERENCES creator_content_items(id) ON DELETE CASCADE)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_trend_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,period TEXT NOT NULL CHECK(period IN ('7d','30d','90d')),metric TEXT NOT NULL CHECK(metric IN ('plays','fans','interactions','publishes')),value REAL NOT NULL DEFAULT 0,snapshot_time DATETIME NOT NULL,UNIQUE(account_id,period,metric,snapshot_time),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_reports (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,type TEXT NOT NULL CHECK(type IN ('daily','weekly','monthly')),content_json TEXT NOT NULL DEFAULT '{}',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
-  for (const statement of [
-    `ALTER TABLE douyin_accounts ADD COLUMN douyin_uid TEXT`,
-    `ALTER TABLE douyin_accounts ADD COLUMN fans_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_accounts ADD COLUMN fans_count_available INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_accounts ADD COLUMN following_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_accounts ADD COLUMN works_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_accounts ADD COLUMN total_likes INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_accounts ADD COLUMN last_sync_time DATETIME`,
-    `ALTER TABLE douyin_accounts ADD COLUMN creator_account_id INTEGER`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN sync_time DATETIME`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN api_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN error_message TEXT`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN task_id TEXT`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN contract_version TEXT`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN collection_mode TEXT`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN snapshot_id TEXT`,
-    `ALTER TABLE douyin_sync_logs ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}'`,
-  ]) { try { await db.execute(statement); } catch {} }
+  await ensureLegacySchemaColumns(db, 'douyin_sync_logs');
   await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_accounts_uid ON douyin_accounts(douyin_uid)`);
   await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_accounts_creator_scope ON douyin_accounts(creator_account_id)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_works (
@@ -642,12 +606,12 @@ async function initTables() {
     play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,share_count INTEGER NOT NULL DEFAULT 0,collect_count INTEGER NOT NULL DEFAULT 0,
     duration REAL NOT NULL DEFAULT 0,completion_rate REAL NOT NULL DEFAULT 0,interaction_rate REAL NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_id,aweme_id),FOREIGN KEY(content_id) REFERENCES creator_content_items(id) ON DELETE SET NULL,FOREIGN KEY(account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE)`);
-  try { await db.execute(`ALTER TABLE douyin_works ADD COLUMN content_id INTEGER`); } catch {}
+  await ensureLegacySchemaColumns(db, 'douyin_works');
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_daily_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_date DATE NOT NULL,fans_count INTEGER NOT NULL DEFAULT 0,works_count INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,share_count INTEGER NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_id,snapshot_date),FOREIGN KEY(account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE)`);
-  try { await db.execute(`ALTER TABLE douyin_daily_snapshots ADD COLUMN fans_count_available INTEGER NOT NULL DEFAULT 0`); } catch { /* 字段已存在时跳过 */ }
+  await ensureLegacySchemaColumns(db, 'douyin_daily_snapshots');
   await db.execute(`UPDATE douyin_accounts SET fans_count_available=1 WHERE fans_count>0 AND fans_count_available=0`);
   await db.execute(`UPDATE douyin_daily_snapshots SET fans_count_available=1 WHERE fans_count>0 AND fans_count_available=0`);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_work_snapshots (
@@ -668,7 +632,7 @@ async function initTables() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_sync_logs_snapshot ON douyin_sync_logs(account_id,snapshot_id) WHERE snapshot_id IS NOT NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_works_content ON douyin_works(content_id) WHERE content_id IS NOT NULL`,
   ]) await db.execute(statement);
-  for (const statement of [`ALTER TABLE creator_api_raw_records ADD COLUMN hash TEXT`,`ALTER TABLE creator_api_raw_records ADD COLUMN compression TEXT NOT NULL DEFAULT 'none'`]) { try { await db.execute(statement); } catch {} }
+  await ensureLegacySchemaColumns(db, 'creator_api_raw_records');
   for (const sql of [
     `CREATE INDEX IF NOT EXISTS idx_creator_accounts_owner ON creator_platform_accounts(user_id,platform)`,
     `CREATE INDEX IF NOT EXISTS idx_creator_items_account_publish ON creator_content_items(account_id,publish_time DESC)`,
@@ -705,8 +669,6 @@ async function initTables() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(platform, external_account_id)
   )`);
-
-  try { await db.execute(`ALTER TABLE social_accounts ADD COLUMN credential_ref TEXT`); } catch (e) {}
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -755,14 +717,7 @@ async function initTables() {
     FOREIGN KEY (snapshot_id) REFERENCES social_snapshots(id) ON DELETE CASCADE
   )`);
 
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN internal_video_key TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN source_type TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN duration INTEGER`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN status TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN visibility TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN avg_play_duration REAL`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN completion_rate_5s REAL`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN bounce_rate_2s REAL`); } catch (e) {}
+  await ensureSocialVideoSchemaColumns(db);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_ingestion_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -778,8 +733,6 @@ async function initTables() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE SET NULL
   )`);
-  try { await db.execute(`ALTER TABLE social_ingestion_jobs ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'manual'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_ingestion_jobs ADD COLUMN failure_type TEXT`); } catch (e) {}
   await db.execute(`CREATE TABLE IF NOT EXISTS social_scheduled_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
@@ -840,14 +793,9 @@ async function initTables() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
   )`);
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN expired_reason TEXT`); } catch (e) {}
   // Credential health is metadata only. Authentication material is deliberately not
   // written here; browser sessions remain in the operator-controlled browser profile.
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_check_time DATETIME`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_success_time DATETIME`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_failure_time DATETIME`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN failure_reason TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN expire_detected_at DATETIME`); } catch (e) {}
+  await ensureSocialMetadataSchemaColumns(db);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_login_sessions (
     id TEXT PRIMARY KEY,
@@ -874,7 +822,7 @@ async function initTables() {
     UNIQUE(video_id),
     FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
   )`);
-  try { await db.execute(`ALTER TABLE video_performance_scores ADD COLUMN growth_score REAL NOT NULL DEFAULT 0`); } catch (e) {}
+  await ensureLegacySchemaColumns(db, 'video_performance_scores');
   await db.execute(`CREATE TABLE IF NOT EXISTS video_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id INTEGER NOT NULL,
@@ -920,7 +868,7 @@ async function initTables() {
     unmatched_count INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
-  try { await db.execute(`ALTER TABLE video_metric_snapshots ADD COLUMN interaction_rate REAL NOT NULL DEFAULT 0`); } catch (e) {}
+  await ensureLegacySchemaColumns(db, 'video_metric_snapshots');
   await db.execute(`CREATE TABLE IF NOT EXISTS video_insights (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id INTEGER NOT NULL,
@@ -953,8 +901,7 @@ async function initTables() {
     UNIQUE(account_id, report_type, period_start, period_end),
     FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
   )`);
-  try { await db.execute(`ALTER TABLE social_review_reports ADD COLUMN period_type TEXT NOT NULL DEFAULT '30d'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE social_review_reports ADD COLUMN report_json TEXT`); } catch (e) {}
+  await ensureLegacySchemaColumns(db, 'social_review_reports');
   await db.execute(`UPDATE social_review_reports SET report_json = summary_json WHERE report_json IS NULL`);
   await db.execute(`CREATE TABLE IF NOT EXISTS social_operation_suggestions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1036,13 +983,7 @@ async function initTables() {
     FOREIGN KEY (template_id) REFERENCES daily_report_templates(id),
     FOREIGN KEY (reviewed_by) REFERENCES users(id)
   )`);
-  for (const statement of [
-    `ALTER TABLE daily_reports ADD COLUMN content TEXT`,
-    `ALTER TABLE daily_reports ADD COLUMN summary TEXT`,
-    `ALTER TABLE daily_reports ADD COLUMN tomorrow_plan TEXT`,
-    `ALTER TABLE daily_reports ADD COLUMN receiver_ids TEXT`,
-    `ALTER TABLE daily_reports ADD COLUMN cc_user_ids TEXT`,
-  ]) { try { await db.execute(statement); } catch {} }
+  await ensureLegacySchemaColumns(db, 'daily_reports');
 
   await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1403,61 +1344,12 @@ async function initTables() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // 选题关联审批流（添加列）
-  try {
-    await db.execute(`ALTER TABLE topics ADD COLUMN workflow_template_id INTEGER`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-
-  try {
-    await db.execute(`ALTER TABLE topics ADD COLUMN submitted_at DATETIME`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-
-  // 回填已有选题的 submitted_at（使用 created_at 作为默认值）
-  try {
-    await db.execute(`UPDATE topics SET submitted_at = created_at WHERE submitted_at IS NULL`);
-  } catch (e) {
-    // 忽略
-  }
-
-  // 选题大纲（独立于创作管理）
-  try {
-    await db.execute(`ALTER TABLE topics ADD COLUMN outline TEXT`);
-  } catch (e) {
-    // 列已存在，忽略
-  }
-
-  // === Tiptap 编辑器迁移字段 ===
-
-  // production 表新增字段
-  try { await db.execute(`ALTER TABLE production ADD COLUMN content_json TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production ADD COLUMN content_markdown TEXT`); } catch (e) {}
-
-  // production_history 表新增字段
-  try { await db.execute(`ALTER TABLE production_history ADD COLUMN content_json TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production_history ADD COLUMN content_markdown TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production_history ADD COLUMN version_state TEXT DEFAULT 'historical'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production_history ADD COLUMN superseded_by_version TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production_history ADD COLUMN superseded_at DATETIME`); } catch (e) {}
-
-  // topics 表新增字段
-  try { await db.execute(`ALTER TABLE topics ADD COLUMN outline_json TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE topics ADD COLUMN outline_markdown TEXT`); } catch (e) {}
-
-  // === 编辑器增强字段 ===
-  try { await db.execute(`ALTER TABLE production ADD COLUMN toc_json TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production ADD COLUMN comments_json TEXT`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production ADD COLUMN editor_version TEXT DEFAULT 'tiptap-1'`); } catch (e) {}
-  try { await db.execute(`ALTER TABLE production ADD COLUMN last_saved_at DATETIME`); } catch (e) {}
-
-  // publishing 表新增字段：本地编辑的剧本内容（不回写创作管理）
-  try { await db.execute(`ALTER TABLE publishing ADD COLUMN script_content TEXT`); } catch (e) {}
-
-  // shooting 表新增字段：本地编辑的剧本内容（不回写创作管理）
-  try { await db.execute(`ALTER TABLE shooting ADD COLUMN script_content TEXT`); } catch (e) {}
+  // Add legacy topic/workflow/editor columns by schema inspection. Schema and
+  // ALTER errors remain fatal instead of being mistaken for duplicate columns.
+  await ensureWorkflowContentSchemaColumns(db);
+  // The tables and submitted_at column are now guaranteed to exist; preserve
+  // the historical created_at fallback and let unexpected backfill errors surface.
+  await backfillMissingTopicSubmissionTimes(db);
 
   // 数据回填：将现有 HTML content 转为 markdown
   await migrateHtmlToMarkdown();
@@ -1512,30 +1404,36 @@ async function initTables() {
   const adminExists = adminResult.rows.length > 0 && Number(adminResult.rows[0].count) > 0;
 
   if (!adminExists) {
-    const bcrypt = await import('bcrypt');
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    await db.execute({
-      sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ['admin', hashedPassword, 'admin@local.dev', 'admin', '管理员', 1, 1]
-    });
-
-    const directorPassword = await bcrypt.hash('director123', 10);
-    await db.execute({
-      sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ['director', directorPassword, 'director@local.dev', 'director', '编导', 1, 1]
-    });
-
-    const member1Password = await bcrypt.hash('member123', 10);
-    await db.execute({
-      sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ['member1', member1Password, 'member1@local.dev', 'member', '员工张三', 1, 1]
-    });
-
-    const member2Password = await bcrypt.hash('member123', 10);
-    await db.execute({
-      sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ['member2', member2Password, 'member2@local.dev', 'member', '员工李四', 1, 1]
-    });
+    const bootstrapPlan = createBootstrapUserPlan();
+    if (bootstrapPlan.mode === 'production-skipped') {
+      apiLogger.warn({
+        module: 'database',
+        operation: 'default_users.bootstrap_skipped',
+        reason: 'production_bootstrap_disabled',
+      }, 'api.database.default_users_bootstrap_skipped');
+    } else {
+      const bcrypt = await import('bcrypt');
+      for (const user of bootstrapPlan.users) {
+        const hashedPassword = await bcrypt.hash(user.password, 10);
+        await db.execute({
+          sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: [user.username, hashedPassword, user.email, user.role, user.name, 1, 1],
+        });
+      }
+      if (bootstrapPlan.mode === 'production' || process.stdout.isTTY) {
+        for (const user of bootstrapPlan.users) {
+          apiLogger.warn({
+            module: 'database',
+            operation: 'default_users.bootstrap_credentials',
+            username: user.username,
+            // This one-time field is intentionally distinct from normal
+            // password fields, which the logger redacts. It is emitted only
+            // after a newly generated bootstrap account is inserted.
+            bootstrapCredential: user.password,
+          }, 'api.database.default_user_bootstrap_credential');
+        }
+      }
+    }
   }
   // Default users are created after the original role backfill. Reconcile only
   // those bootstrap accounts when no explicit RBAC assignment exists.
@@ -1637,7 +1535,7 @@ async function runTimeMigrations() {
   const metricAvailabilityMigration = await db.execute({ sql: `SELECT value FROM app_meta WHERE key = ?`, args: ['social_review_unknown_interaction_20260714'] });
   if (metricAvailabilityMigration.rows.length === 0) {
     await db.execute(`UPDATE social_videos SET likes = NULL, comments = NULL, shares = NULL, collects = NULL WHERE source_type = 'creator_item_api' AND likes = 0 AND comments = 0 AND shares = 0 AND collects = 0`);
-    await db.execute({ sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`, args: ['social_review_unknown_interaction_20260714', 'done'] });
+    await insertAppMeta('social_review_unknown_interaction_20260714', 'done');
   }
 
   // Idempotent permission migration for databases that already have roles.
@@ -1698,10 +1596,7 @@ async function runTimeMigrations() {
       await db.execute(sql);
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: ['tz_migration_20260611', 'done'],
-    });
+    await insertAppMeta('tz_migration_20260611', 'done');
   }
 
   const rolePermissionSyncKey = 'role_perm_sync_20260616_member_editor_scope';
@@ -1757,10 +1652,7 @@ async function runTimeMigrations() {
       });
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: [rolePermissionSyncKey, 'done'],
-    });
+    await insertAppMeta(rolePermissionSyncKey, 'done');
   }
 
   const permissionSeedSyncKey = 'permission_seed_sync_20260616_followup';
@@ -1830,10 +1722,7 @@ async function runTimeMigrations() {
       }
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: [permissionSeedSyncKey, 'done'],
-    });
+    await insertAppMeta(permissionSeedSyncKey, 'done');
   }
 
   const systemSettingsSeedSyncKey = 'permission_seed_sync_20260616_system_settings';
@@ -1863,10 +1752,7 @@ async function runTimeMigrations() {
       });
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: [systemSettingsSeedSyncKey, 'done'],
-    });
+    await insertAppMeta(systemSettingsSeedSyncKey, 'done');
   }
 
   const dailyReportSeedSyncKey = 'daily_report_seed_sync_20260701';
@@ -1947,9 +1833,10 @@ async function runTimeMigrations() {
     );
 
     if (defaultTemplate.rows.length === 0) {
+      const templateCreatedAt = formatBjtDatabase();
       await db.execute({
         sql: `INSERT INTO daily_report_templates (name, description, sections_json, is_default, active, created_at, updated_at)
-              VALUES (?, ?, ?, 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+              VALUES (?, ?, ?, 1, 1, ?, ?)`,
         args: [
           '默认日报模板',
           '日报 MVP 默认模板',
@@ -1959,14 +1846,13 @@ async function runTimeMigrations() {
             { key: 'risk', title: '风险与阻塞' },
             { key: 'tomorrow', title: '明日计划' },
           ]),
+          templateCreatedAt,
+          templateCreatedAt,
         ],
       });
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: [dailyReportSeedSyncKey, 'done'],
-    });
+    await insertAppMeta(dailyReportSeedSyncKey, 'done');
   }
 
   const dailyWorkspacePermissionSyncKey = 'daily_workspace_permission_sync_20260803';
@@ -1993,7 +1879,7 @@ async function runTimeMigrations() {
         if (permissionId) await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [roleId, permissionId] });
       }
     }
-    await db.execute({ sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, 'done', datetime('now', '+8 hours'))`, args: [dailyWorkspacePermissionSyncKey] });
+    await insertAppMeta(dailyWorkspacePermissionSyncKey, 'done');
   }
 
   const retroSeedSyncKey = 'retro_seed_sync_20260702';
@@ -2076,10 +1962,11 @@ async function runTimeMigrations() {
     );
 
     if (defaultRetroTemplate.rows.length === 0) {
+      const templateCreatedAt = formatBjtDatabase();
       await db.execute({
         sql: `INSERT INTO retro_templates
           (name, category, description, schema_json, metric_bindings_json, status, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, 'active', datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
         args: [
           'Weekly content retrospective',
           'weekly',
@@ -2101,14 +1988,13 @@ async function runTimeMigrations() {
               'daily_reports_risk_count',
             ],
           }),
+          templateCreatedAt,
+          templateCreatedAt,
         ],
       });
     }
 
-    await db.execute({
-      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-      args: [retroSeedSyncKey, 'done'],
-    });
+    await insertAppMeta(retroSeedSyncKey, 'done');
   }
 }
 

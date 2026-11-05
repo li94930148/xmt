@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { queryOne, runInTransaction, type TransactionContext } from '../database/utils';
+import { beijingNow, queryOne, runInTransaction, type TransactionContext } from '../database/utils';
 
 export type WorkflowTemplateUpdateNode = {
   name: string;
@@ -168,8 +168,8 @@ export async function updateWorkflowTemplateWithRequest(
     }
 
     await tx.execute(
-      `UPDATE workflow_templates SET name=?,description=?,updated_at=datetime('now', '+8 hours') WHERE id=?`,
-      [payload.name, payload.description || '', templateId],
+      `UPDATE workflow_templates SET name=?,description=?,updated_at=? WHERE id=?`,
+      [payload.name, payload.description || '', beijingNow(), templateId],
     );
     await tx.execute('DELETE FROM workflow_nodes WHERE template_id=?', [templateId]);
     for (let index = 0; index < payload.nodes.length; index += 1) {
@@ -185,8 +185,8 @@ export async function updateWorkflowTemplateWithRequest(
     await tx.execute(
       `INSERT INTO workflow_template_update_request_keys
         (client_request_id,actor_id,template_id,request_fingerprint,created_at)
-       VALUES(?,?,?,?,datetime('now', '+8 hours'))`,
-      [normalizedRequestId, actorId, templateId, requestFingerprint],
+       VALUES(?,?,?,?,?)`,
+      [normalizedRequestId, actorId, templateId, requestFingerprint, beijingNow()],
     );
     return { templateId, replayed: false };
   });

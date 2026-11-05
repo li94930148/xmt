@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@libsql/client';
+import { parseStoredBjt } from '../../shared/time/index.js';
 
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-creator-sync-single-flight-'));
 const databasePath = path.join(temporaryDirectory, 'creator-sync.test.db');
@@ -108,11 +109,13 @@ try {
     await execute(`UPDATE creator_sync_tasks SET claimed_at_ms=0
       WHERE platform='douyin' AND account=? AND status='running'`, [account]);
     await claimCreatorSyncTask(agentIds[1]!, 'task-after-expiry', 'douyin', account, new Date().toISOString());
-    const abandoned = await queryOne<{ status: string; error_message: string | null; claimed_at_ms: number }>(
-      `SELECT status,error_message,claimed_at_ms FROM creator_sync_tasks WHERE agent_id=? AND task_id=?`,
+    const abandoned = await queryOne<{ status: string; end_time: string; error_message: string | null; claimed_at_ms: number }>(
+      `SELECT status,end_time,error_message,claimed_at_ms FROM creator_sync_tasks WHERE agent_id=? AND task_id=?`,
       [winner.agent_id, winner.task_id],
     );
     assert.equal(abandoned?.status, 'failed', 'an abandoned running row should be finalized during lease takeover');
+    const leaseEndTime = parseStoredBjt(abandoned?.end_time);
+    assert(leaseEndTime && Math.abs(Date.now() - leaseEndTime.getTime()) < 5 * 60_000, 'expired task is finalized with Beijing civil time');
     assert.match(abandoned?.error_message || '', /租约过期/);
     assert.equal(abandoned?.claimed_at_ms, 0);
     const activeClaim = await queryOne<{ agent_id: number; task_id: string }>(`SELECT agent_id,task_id FROM creator_sync_tasks WHERE account=? AND status='running'`, [account]);

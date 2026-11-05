@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
+import { test } from 'vitest';
 import { AuthRuntime } from '../../src/auth/runtime/auth-runtime.js';
 import { MemoryAccessTokenStore } from '../../src/auth/runtime/token-memory-store.js';
 import { ApiClient } from '../../packages/api-client/client.js';
@@ -18,6 +19,7 @@ import {
 import { CsrfService } from '../../api/modules/auth/web/csrf.service.js';
 import type { AuthV1User } from '../../shared/schema/auth.schema.js';
 
+test('web authentication runtime and client contracts', async () => {
 const user: AuthV1User = {
   id: 7,
   username: 'runtime-user',
@@ -218,4 +220,4 @@ assert.equal(csrf.verifyDoubleSubmit('session-1', csrfToken, csrfToken), true);
 assert.equal(csrf.verifyDoubleSubmit('session-1', csrfToken, `${csrfToken}x`), false);
 assert.equal(csrf.verifyToken('session-1', `${csrfToken}x`), false);
 
-console.log('Auth Web Runtime and infrastructure tests passed');
+});

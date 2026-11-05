@@ -9,7 +9,7 @@
 1. 用户点击“绑定抖音账号”，调用 `POST /api/douyin/accounts/bind`（或 `GET /api/douyin/oauth/url`）。
 2. 服务端创建一次性 state 并返回抖音授权地址。
 3. 抖音回调 `GET /api/douyin/oauth/callback?code=&state=`。
-4. 服务端以 code 换取令牌，将 access_token 和 refresh_token 以 AES-256-GCM 加密保存，建立账号关系。
+4. 服务端以 code 换取令牌，将 access_token 和 refresh_token 以独立的 `XMT_TOKEN_ENCRYPTION_KEY` 进行 AES-256-GCM 加密保存，建立账号关系。
 
 ## 接口
 
@@ -30,7 +30,7 @@
 
 ## 审核通过后的配置
 
-在部署密钥中设置 `DOUYIN_CLIENT_KEY`、`DOUYIN_CLIENT_SECRET`、`DOUYIN_REDIRECT_URI`、`DOUYIN_WEBHOOK_URL`。生产回调建议为 `https://lanyaomedia.com/api/douyin/oauth/callback`，Webhook 为 `https://lanyaomedia.com/api/douyin/webhook`。在抖音控制台登记相同的授权回调、安全域名及 HTTPS Webhook URL，再申请所需用户、视频和数据 scope。
+在部署密钥中设置 `DOUYIN_CLIENT_KEY`、`DOUYIN_CLIENT_SECRET`、`DOUYIN_REDIRECT_URI`、`DOUYIN_WEBHOOK_URL` 和独立的 `XMT_TOKEN_ENCRYPTION_KEY`。该密钥需为 32 字节随机值的 Base64，不能复用 JWT 或抖音客户端密钥。生产启动会校验此密钥；初次启用或轮换必须先备份、停服并完成迁移脚本 dry-run 与 apply。生产回调建议为 `https://lanyaomedia.com/api/douyin/oauth/callback`，Webhook 为 `https://lanyaomedia.com/api/douyin/webhook`。在抖音控制台登记相同的授权回调、安全域名及 HTTPS Webhook URL，再申请所需用户、视频和数据 scope。
 
 ## Webhook
 

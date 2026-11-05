@@ -1,12 +1,13 @@
 ﻿﻿import express from 'express';
-import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { canManageOwnedResource, isPrivilegedUser } from '../utils/access';
 import { recordResourceAuditInTransaction } from '../services/resourceCenter';
 import { sendSafeServerError } from '../utils/response';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 router.use((_, res, next) => {
   res.setHeader('Deprecation', 'true');
@@ -163,11 +164,12 @@ router.delete('/archives/:id', authenticate, requirePermission('resource:delete'
       return res.status(403).json({ message: '无权限删除该归档' });
     }
     const deleted = await runInTransaction(async (tx) => {
+      const deletedAt = beijingNow();
       const changed = await tx.execute(
         `UPDATE resources
-         SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours')
+         SET status='deleted', deleted_at=?, updated_by=?, updated_at=?
          WHERE id=? AND COALESCE(status,'published') <> 'deleted' AND deleted_at IS NULL`,
-        [req.user!.id, Number(resource.id)],
+        [deletedAt, req.user!.id, deletedAt, Number(resource.id)],
       );
       if (changed !== 1) return false;
       await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'delete', {

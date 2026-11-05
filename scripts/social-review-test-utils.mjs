@@ -2,6 +2,7 @@ import 'dotenv/config';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@libsql/client';
 import path from 'path';
+import { getSmokePasswordForLogin } from './require-smoke-password.mjs';
 
 export const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3001/api';
 
@@ -47,7 +48,7 @@ export async function createLocalAdminToken() {
 export async function login() {
   if (process.env.TOKEN) return process.env.TOKEN;
   const username = process.env.SMOKE_USERNAME || 'admin';
-  const password = process.env.SMOKE_PASSWORD || 'admin123';
+  const password = getSmokePasswordForLogin();
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -54,6 +54,7 @@ async function repositoryTests() {
   assert.equal(created?.title, 'Repository 创建');
   assert.equal(created?.status, 'pending');
   assert.ok(typeof created?.stage_entered_at === 'string' && created.stage_entered_at.length > 0, 'new topics record their first stage entry time');
+  assert.equal(created?.submitted_at, created?.stage_entered_at, 'topic creation binds one shared Beijing timestamp to submission and initial stage entry');
 
   const page = await repository.list({ page: 1, limit: 10, actorId: testUserId, viewAll: true, search: 'Repository' });
   assert.equal(page.total, 1);

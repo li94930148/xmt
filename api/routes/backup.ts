@@ -1,5 +1,5 @@
-import { Router } from 'express';
 import { createHash, randomUUID } from 'node:crypto';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import fs from 'fs';
@@ -10,7 +10,7 @@ import { db } from '../database/db';
 import { BackupLockBusyError, isBackupLockHeld, withBackupLock } from '../database/backup-lock.js';
 import { getBackupSources, listBackupInventory, resolveInventoryBackup } from '../services/backupInventory.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 const DB_PATH = getDatabasePath();
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');

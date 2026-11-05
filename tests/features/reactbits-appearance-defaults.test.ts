@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { defaultReactBitsAppearanceConfig, REACT_BITS_APPEARANCE_KEY, type ReactBitsAppearanceConfig } from '../../src/features/reactbits-appearance/types';
 import { reactBitsPresets } from '../../src/features/reactbits-appearance/presets';
 import { useReactBitsAppearanceStore } from '../../src/store/reactBitsAppearanceStore';

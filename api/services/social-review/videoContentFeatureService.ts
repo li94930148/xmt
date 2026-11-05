@@ -1,4 +1,4 @@
-import { execute, queryAll, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryAll, queryOne } from '../../database/utils.js';
 import { syncVideoContentCategory } from './contentCategoryService.js';
 
 type Feature = { featureType: string; featureValue: string };
@@ -49,8 +49,8 @@ export async function refreshVideoContentFeatures(videoId: number) {
   await execute(`DELETE FROM video_content_features WHERE video_id = ? AND source = 'system'`, [videoId]);
   for (const feature of features) await execute(
     `INSERT INTO video_content_features (video_id, feature_type, feature_value, source, created_at)
-     VALUES (?, ?, ?, 'system', datetime('now', '+8 hours')) ON CONFLICT(video_id, feature_type, feature_value) DO NOTHING`,
-    [videoId, feature.featureType, feature.featureValue],
+     VALUES (?, ?, ?, 'system', ?) ON CONFLICT(video_id, feature_type, feature_value) DO NOTHING`,
+    [videoId, feature.featureType, feature.featureValue, beijingNow()],
   );
   return features;
 }

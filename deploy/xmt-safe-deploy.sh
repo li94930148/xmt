@@ -23,6 +23,7 @@ PREVIOUS_SHA=""
 TARGET_SHA=""
 BACKUP_FILE=""
 DEPLOY_STARTED=0
+TOKEN_MIGRATION_RESTORE_REQUIRED=0
 RUNTIME_ENV_SOURCE=""
 
 log() {
@@ -66,30 +67,121 @@ process_start_time() {
 }
 
 backup_database() {
-  [ -f "$DB_PATH" ] || fail "Database file not found; refusing deploy without backup: $DB_PATH"
+  if [ ! -f "$DB_PATH" ]; then
+    log "ERROR: Database file not found; refusing deploy without backup: $DB_PATH"
+    return 1
+  fi
 
-  install -d -m 0750 "$BACKUP_DIR"
+  if ! install -d -m 0750 "$BACKUP_DIR"; then
+    log "ERROR: Unable to create database backup directory: $BACKUP_DIR"
+    return 1
+  fi
   local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S)-$$.db"
 
   log "Backing up database before deploy"
   local lock_directory="${BACKUP_LOCK_PATH}.d"
   if ! mkdir -m 0700 "$lock_directory" 2>/dev/null; then
-    [[ -d "$lock_directory" && ! -L "$lock_directory" ]] || fail "Database backup lock is busy"
-    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)" owner_pid owner_start actual_start
+    if [[ ! -d "$lock_directory" || -L "$lock_directory" ]]; then
+      log "ERROR: Database backup lock is busy"
+      return 1
+    fi
+    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)" owner_pid="" owner_start="" actual_start=""
     IFS=: read -r owner_pid owner_start <<< "$owner"; actual_start="$(process_start_time "$owner_pid")"
-    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && { ! kill -0 "$owner_pid" 2>/dev/null || { [[ -n "$owner_start" && -n "$actual_start" && "$owner_start" != "$actual_start" ]]; }; }; then rm -rf "$lock_directory"; mkdir -m 0700 "$lock_directory" || fail "Database backup lock recovery failed"; else fail "Database backup lock is busy"; fi
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && { ! kill -0 "$owner_pid" 2>/dev/null || { [[ -n "$owner_start" && -n "$actual_start" && "$owner_start" != "$actual_start" ]]; }; }; then
+      if ! rm -rf "$lock_directory" || ! mkdir -m 0700 "$lock_directory"; then
+        log "ERROR: Database backup lock recovery failed"
+        return 1
+      fi
+    else
+      log "ERROR: Database backup lock is busy"
+      return 1
+    fi
   fi
   trap 'rm -rf "$lock_directory"' RETURN
-  printf '%s:%s\n' "$$" "$(process_start_time "$$")" > "$lock_directory/owner"
-  sqlite3 "$DB_PATH" ".backup '$backup_file'" || fail "Database backup failed"
+  if ! printf '%s:%s\n' "$$" "$(process_start_time "$$")" > "$lock_directory/owner"; then
+    log "ERROR: Unable to write database backup lock owner"
+    return 1
+  fi
+  if ! sqlite3 "$DB_PATH" ".backup '$backup_file'"; then
+    rm -f "$backup_file"
+    log "ERROR: Database backup failed"
+    return 1
+  fi
 
-  [ -s "$backup_file" ] || fail "Database backup is empty: $backup_file"
-  sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok" || fail "Database backup quick_check failed: $backup_file"
-  sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null || fail "Database backup cannot be opened: $backup_file"
+  if [ ! -s "$backup_file" ]; then
+    rm -f "$backup_file"
+    log "ERROR: Database backup is empty"
+    return 1
+  fi
+  if ! sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok"; then
+    rm -f "$backup_file"
+    log "ERROR: Database backup quick_check failed"
+    return 1
+  fi
+  if ! sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null; then
+    rm -f "$backup_file"
+    log "ERROR: Database backup cannot be opened"
+    return 1
+  fi
   log "Database backup created: $backup_file"
   BACKUP_FILE="$backup_file"
   rm -rf "$lock_directory"
   trap - RETURN
+}
+
+restore_database_backup() {
+  if [ -z "$BACKUP_FILE" ] || [ ! -s "$BACKUP_FILE" ]; then
+    log "ERROR: Verified rollback backup is unavailable"
+    return 1
+  fi
+  if ! pm2 stop "$PM2_APP"; then
+    log "ERROR: Unable to stop $PM2_APP before restoring the pre-migration database"
+    return 1
+  fi
+
+  local restore_file="${DB_PATH}.rollback.$$"
+  if [ -e "$restore_file" ]; then
+    log "ERROR: Database restore path already exists: $restore_file"
+    return 1
+  fi
+  if ! cp --preserve=mode -- "$BACKUP_FILE" "$restore_file"; then
+    log "ERROR: Unable to stage the verified database rollback backup"
+    return 1
+  fi
+  if [ -e "$DB_PATH" ] && { ! chown --reference="$DB_PATH" "$restore_file" || ! chmod --reference="$DB_PATH" "$restore_file"; }; then
+    rm -f -- "$restore_file"
+    log "ERROR: Unable to preserve database ownership and permissions during rollback restore"
+    return 1
+  fi
+  if ! sqlite3 "$restore_file" "PRAGMA quick_check;" | grep -qx "ok"; then
+    rm -f -- "$restore_file"
+    log "ERROR: Staged database rollback backup failed quick_check"
+    return 1
+  fi
+  if [ -n "$(sqlite3 "$restore_file" "PRAGMA foreign_key_check;")" ]; then
+    rm -f -- "$restore_file"
+    log "ERROR: Staged database rollback backup has foreign key violations"
+    return 1
+  fi
+  if ! rm -f -- "$DB_PATH-wal" "$DB_PATH-shm"; then
+    rm -f -- "$restore_file"
+    log "ERROR: Unable to remove stopped database sidecars before rollback restore"
+    return 1
+  fi
+  if ! mv -f -- "$restore_file" "$DB_PATH"; then
+    rm -f -- "$restore_file"
+    log "ERROR: Unable to restore the pre-migration database backup"
+    return 1
+  fi
+  if ! sqlite3 "$DB_PATH" "PRAGMA quick_check;" | grep -qx "ok"; then
+    log "ERROR: Restored database failed quick_check"
+    return 1
+  fi
+  if [ -n "$(sqlite3 "$DB_PATH" "PRAGMA foreign_key_check;")" ]; then
+    log "ERROR: Restored database has foreign key violations"
+    return 1
+  fi
+  log "Pre-migration database backup restored and verified"
 }
 
 rollback_code() {
@@ -98,10 +190,30 @@ rollback_code() {
     exit "$failed_status"
   fi
   trap - ERR
-  log "Deploy failed; rolling application code back to $PREVIOUS_SHA (database is intentionally not rolled back)"
-  git checkout --detach "$PREVIOUS_SHA" || true
-  npm ci || true
-  pm2 restart "$PM2_APP" --update-env || true
+  if [ "$TOKEN_MIGRATION_RESTORE_REQUIRED" -eq 1 ]; then
+    log "Deploy failed after token migration; restoring database backup before the previous application"
+    if ! restore_database_backup; then
+      log "Database rollback failed; leaving $PM2_APP stopped for manual recovery"
+      pm2 stop "$PM2_APP" || true
+      exit "$failed_status"
+    fi
+    TOKEN_MIGRATION_RESTORE_REQUIRED=0
+  fi
+  log "Deploy failed; rolling application code back to $PREVIOUS_SHA"
+  if ! git checkout --detach "$PREVIOUS_SHA"; then
+    log "Application checkout rollback failed; leaving $PM2_APP stopped"
+    pm2 stop "$PM2_APP" || true
+    exit "$failed_status"
+  fi
+  if ! npm ci; then
+    log "Application dependency rollback failed; leaving $PM2_APP stopped"
+    pm2 stop "$PM2_APP" || true
+    exit "$failed_status"
+  fi
+  if ! pm2 restart "$PM2_APP" --update-env; then
+    log "Application restart rollback failed; manual intervention is required"
+    exit "$failed_status"
+  fi
   pm2 save || true
   if check_health && check_home_fallback; then
     log "Application code rollback completed and health checks passed"
@@ -148,6 +260,65 @@ prepare_runtime_environment() {
   [ -n "$runtime_env_file" ] || return 0
   export XMT_RUNTIME_ENV_FILE="$runtime_env_file"
   RUNTIME_ENV_SOURCE="runtime_env_file"
+}
+
+run_token_encryption_migration() {
+  if ! node -e "const scripts=require('./package.json').scripts||{};process.exit(scripts['migrate:douyin-token-encryption']?0:1)"; then
+    log "Target has no Douyin token encryption migration; skipping token migration"
+    return 0
+  fi
+
+  local dry_run_result legacy_token_count
+  log "Checking for legacy Douyin tokens before stopping the service"
+  if ! dry_run_result="$(npm run --silent migrate:douyin-token-encryption)"; then
+    log "ERROR: Douyin token migration dry-run failed"
+    rollback_code 1
+  fi
+  log "Douyin token dry-run result: $dry_run_result"
+  if ! legacy_token_count="$(printf '%s' "$dry_run_result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const r=JSON.parse(s);if(!Number.isSafeInteger(r.encryptedTokens)||r.encryptedTokens<0)throw new Error();process.stdout.write(String(r.encryptedTokens))}catch{console.error('Invalid sanitized token dry-run result');process.exit(1)}})")"; then
+    log "ERROR: Unable to read the sanitized token dry-run count"
+    rollback_code 1
+  fi
+  if [ "$legacy_token_count" -eq 0 ]; then
+    log "No legacy Douyin tokens need migration"
+    return 0
+  fi
+
+  log "Stopping PM2 before the token migration"
+  if ! pm2 stop "$PM2_APP"; then
+    log "ERROR: Unable to stop $PM2_APP before the token migration"
+    rollback_code 1
+  fi
+  if ! backup_database; then
+    log "ERROR: Unable to create a quiesced database backup before the token migration"
+    rollback_code 1
+  fi
+  log "Running Restore Drill on the quiesced token migration backup"
+  if ! npm run ops:backup-restore-drill -- --backup="$BACKUP_FILE"; then
+    log "ERROR: Quiesced token migration backup Restore Drill failed"
+    rollback_code 1
+  fi
+  log "Rechecking token data after stopping the service"
+  if ! dry_run_result="$(npm run --silent migrate:douyin-token-encryption)"; then
+    log "ERROR: Quiesced Douyin token migration dry-run failed"
+    rollback_code 1
+  fi
+  log "Quiesced Douyin token dry-run result: $dry_run_result"
+  if ! legacy_token_count="$(printf '%s' "$dry_run_result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const r=JSON.parse(s);if(!Number.isSafeInteger(r.encryptedTokens)||r.encryptedTokens<0)throw new Error();process.stdout.write(String(r.encryptedTokens))}catch{console.error('Invalid sanitized token dry-run result');process.exit(1)}})")"; then
+    log "ERROR: Unable to read the quiesced token dry-run count"
+    rollback_code 1
+  fi
+  if [ "$legacy_token_count" -eq 0 ]; then
+    log "No legacy Douyin tokens remain after the quiesced dry-run"
+    return 0
+  fi
+
+  TOKEN_MIGRATION_RESTORE_REQUIRED=1
+  log "Applying the backup-protected Douyin token migration"
+  if ! npm run migrate:douyin-token-encryption -- --apply --backup="$BACKUP_FILE"; then
+    log "ERROR: Douyin token migration apply failed"
+    rollback_code 1
+  fi
 }
 
 require_command git
@@ -203,8 +374,13 @@ if ! npm run check || ! npm run build; then restore_worktree_without_restart; fa
 DEPLOY_STARTED=1
 trap rollback_code ERR
 
+if ! pm2 describe "$PM2_APP" >/dev/null; then
+  log "ERROR: PM2 app not found: $PM2_APP"
+  rollback_code 1
+fi
+run_token_encryption_migration
+
 log "Restarting PM2 app: $PM2_APP"
-pm2 describe "$PM2_APP" >/dev/null || fail "PM2 app not found: $PM2_APP"
 pm2 restart "$PM2_APP" --update-env
 pm2 save
 
@@ -234,4 +410,7 @@ log "Removing development-only dependencies after all build and runtime checks"
 if ! npm prune --omit=dev; then rollback_code 1; fi
 if ! npm ls --omit=dev --depth=0 >/dev/null; then rollback_code 1; fi
 
+TOKEN_MIGRATION_RESTORE_REQUIRED=0
+DEPLOY_STARTED=0
+trap - ERR
 log "Deploy completed successfully"

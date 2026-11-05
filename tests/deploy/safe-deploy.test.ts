@@ -7,6 +7,10 @@ import { describe, it } from 'vitest';
 describe('safe deployment contract', () => {
   it('preserves database, migration, runtime and rollback gates', () => {
     const script = fs.readFileSync(path.resolve('deploy/xmt-safe-deploy.sh'), 'utf8');
+    const targetFlow = script.slice(script.indexOf('log "Checking target version consistency before service restart"'));
+    const migrationStart = script.indexOf('run_token_encryption_migration() {');
+    const migrationEnd = script.indexOf('\n}\n\nrequire_command', migrationStart);
+    const migrationFlow = script.slice(migrationStart, migrationEnd);
     const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
@@ -22,14 +26,24 @@ describe('safe deployment contract', () => {
     assert.match(script, /Checked-out target does not match TARGET_SHA_EXPECTED/);
     assert.match(script, /trap rollback_code ERR/);
     assert.match(script, /git checkout --detach "\$PREVIOUS_SHA"/);
+    assert.match(script, /TOKEN_MIGRATION_RESTORE_REQUIRED=1/);
+    assert.match(script, /restore_database_backup\(\)/);
+    assert.match(script, /PRAGMA foreign_key_check/);
+    assert.match(script, /restoring database backup before the previous application/);
     assert.match(script, /rollback_code 1/);
     assert.match(script, /Installing target dependencies without restarting the live application/);
     assert.match(script, /restore_worktree_without_restart/);
     assert.match(script, /npm ci; then restore_worktree_without_restart/);
     assert.ok(script.indexOf('npm ci; then restore_worktree_without_restart') < script.indexOf('npm run migration:check'), 'target dependencies install before migration gate');
-    assert.ok(script.indexOf('npm run version:check') < script.indexOf('ops:backup-restore-drill'), 'version gate before restore drill');
-    assert.ok(script.indexOf('ops:backup-restore-drill') < script.indexOf('npm run migration:check'), 'restore drill before migration gate');
-    assert.ok(script.indexOf('npm run migration:check') < script.lastIndexOf('pm2 restart'), 'migration gate before the target PM2 restart');
+    assert.ok(targetFlow.indexOf('npm run version:check') < targetFlow.indexOf('ops:backup-restore-drill'), 'version gate before restore drill');
+    assert.ok(targetFlow.indexOf('ops:backup-restore-drill') < targetFlow.indexOf('npm run migration:check'), 'restore drill before migration gate');
+    assert.ok(targetFlow.indexOf('npm run migration:check') < targetFlow.lastIndexOf('pm2 restart'), 'migration gate before the target PM2 restart');
+    assert.ok(targetFlow.indexOf('npm run check || ! npm run build') < targetFlow.indexOf('run_token_encryption_migration\n'), 'build completes before live token migration begins');
+    assert.ok(migrationFlow.indexOf('npm run --silent migrate:douyin-token-encryption') < migrationFlow.indexOf('pm2 stop "$PM2_APP"'), 'read-only token scan happens before stopping the service');
+    assert.ok(migrationFlow.indexOf('pm2 stop "$PM2_APP"') < migrationFlow.indexOf('backup_database'), 'a quiesced backup is created after stopping the service');
+    assert.ok(migrationFlow.indexOf('ops:backup-restore-drill -- --backup="$BACKUP_FILE"') < migrationFlow.indexOf('--apply --backup="$BACKUP_FILE"'), 'token migration backup is restore-drilled before apply');
+    assert.ok(targetFlow.indexOf('run_token_encryption_migration\n') < targetFlow.lastIndexOf('pm2 restart'), 'token migration completes before target service restart');
+    assert.ok(script.indexOf('restore_database_backup') < script.indexOf('git checkout --detach "$PREVIOUS_SHA"'), 'database is restored before old code is checked out');
     assert.match(script, /Production requires XMT_RUNTIME_ENV_FILE/);
     assert.ok(script.indexOf('ops:runtime-env-check') < script.lastIndexOf('pm2 restart'), 'runtime env gate before PM2 restart');
     assert.ok(script.indexOf('ops:runtime-env-readback') > script.lastIndexOf('pm2 restart'), 'runtime readback after PM2 restart');

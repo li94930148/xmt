@@ -39,6 +39,14 @@ if later verification fails, keep the service stopped and restore the verified
 pre-migration backup before restarting the previous version. Do not deploy the
 new server until the dry-run and migration both pass with the final runtime key.
 
+The safe deployment runner now checks for legacy token formats before stopping
+the service. When legacy tokens exist, it stops XMT, creates a fresh quiesced
+backup, runs a Restore Drill and a second dry-run, then applies the migration
+before restarting the target version. If a later deployment gate fails, it
+restores and verifies that exact pre-migration backup before checking out or
+restarting the previous application version. When no legacy tokens remain, the
+runner skips the stop-and-migrate step.
+
 Use these commands during a controlled deployment, without printing secrets:
 
 ```bash

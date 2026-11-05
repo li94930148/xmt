@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import express from 'express';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createAsyncRouter } from '../../api/middleware/async-router.js';
+import { requestErrorHandler } from '../../api/middleware/request-error-handler.js';
 
 // 必须在导入 app 之前设置，与项目其他后端测试保持一致
 process.env.JWT_SECRET = 'error-response-http-contract-test-secret';
@@ -27,7 +28,7 @@ const { closeDatabase } = await import('../../api/database/db.js');
 const PROBE_TABLE = 'no_such_table_for_http_contract';
 const PROBE_PARAM = 'super-secret-binding-value';
 
-const probeRouter = express.Router();
+const probeRouter = createAsyncRouter();
 probeRouter.get('/__error_contract_probe', async (_req, res) => {
   try {
     await queryOne(`SELECT * FROM ${PROBE_TABLE} WHERE token = ?`, [PROBE_PARAM]);
@@ -37,14 +38,22 @@ probeRouter.get('/__error_contract_probe', async (_req, res) => {
     res.status(500).json({ message: '操作失败', error });
   }
 });
+probeRouter.get('/__async_error_contract_probe', async () => {
+  throw Object.assign(new Error(PROBE_PARAM), {
+    sql: `SELECT * FROM ${PROBE_TABLE} WHERE token = ?`,
+    params: [PROBE_PARAM],
+  });
+});
 
-// app 末尾有一个 "API not found" 的兜底，直接 app.use 会被它吃掉，
-// 因此把探针层插到兜底之前，确保走的是真实的中间件链。
+// 将探针路由放在统一错误中间件之前，验证真实 Express 4 请求链。
 const stack = (app as unknown as { _router: { stack: unknown[] } })._router.stack;
 app.use('/api', probeRouter);
 const routerLayer = stack.pop();
-const insertAt = Math.max(stack.length - 1, 0);
-stack.splice(insertAt, 0, routerLayer);
+const errorHandlerIndex = stack.findIndex((layer) =>
+  (layer as { handle?: unknown }).handle === requestErrorHandler,
+);
+assert(errorHandlerIndex >= 0, '真实 app 应挂载统一请求错误中间件');
+stack.splice(errorHandlerIndex, 0, routerLayer);
 
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -65,6 +74,15 @@ try {
   // 同时在保留业务语义：message 要留，且要给出可追踪的错误码
   assert.equal(body.includes('操作失败'), true, '业务 message 不应被一并抹掉');
   assert.equal(body.includes('INTERNAL_ERROR'), true, '应返回 INTERNAL_ERROR 便于前后端定位');
+
+  const asyncErrorResponse = await fetch(`http://127.0.0.1:${port}/api/__async_error_contract_probe`);
+  const asyncErrorBody = await asyncErrorResponse.text();
+  assert.equal(asyncErrorResponse.status, 500, '未捕获的异步路由异常应由全局错误中间件返回 500');
+  assert.equal(asyncErrorBody.includes('INTERNAL_ERROR'), true, '异步路由错误应返回 INTERNAL_ERROR');
+  assert.equal(asyncErrorBody.includes(PROBE_TABLE), false, '异步错误响应泄露了 SQL 表名');
+  assert.equal(asyncErrorBody.includes(PROBE_PARAM), false, '异步错误响应泄露了绑定参数');
+  assert.equal(asyncErrorBody.includes('"sql"'), false, '异步错误响应泄露了 sql 字段');
+  assert.equal(asyncErrorBody.includes('"params"'), false, '异步错误响应泄露了 params 字段');
 
   const notFoundResponse = await fetch(`http://127.0.0.1:${port}/api/__missing_error_contract_probe`);
   const notFoundBody = await notFoundResponse.json() as { error?: string };

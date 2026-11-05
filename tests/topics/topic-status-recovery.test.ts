@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { completeTopicStatusRecovery, isSameTopicStatusRecovery, type TopicStatusRecoveryIdentity } from '../../src/pages/topicStatusRecovery';
 
 test('completion of topic A recovery preserves topic B pending marker and lock', () => {

@@ -45,6 +45,8 @@ export default function Achievements() {
   const [recentAchievements, setRecentAchievements] = useState<RecentAchievement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
   const [checking, setChecking] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [seedRecovery, setSeedRecovery] = useState<SeedRecovery | null>(null);
@@ -60,9 +62,14 @@ export default function Achievements() {
   const seedMutationLockRef = useRef(false);
   const seedVerificationLockRef = useRef(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setLoadError(false);
+  const fetchData = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+    if (background) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+      setLoadError(false);
+    }
+    setRefreshError(false);
     try {
       const [allRes, myRes, progressRes, statsRes, leaderboardRes, recentRes] = await Promise.all([
         getAchievements(),
@@ -78,10 +85,13 @@ export default function Achievements() {
       setStats(statsRes);
       setLeaderboard(Array.isArray(leaderboardRes) ? leaderboardRes : []);
       setRecentAchievements(Array.isArray(recentRes) ? recentRes : []);
+      setLoadError(false);
     } catch {
-      setLoadError(true);
+      if (background) setRefreshError(true);
+      else setLoadError(true);
     } finally {
-      setLoading(false);
+      if (background) setRefreshing(false);
+      else setLoading(false);
     }
   }, []);
 
@@ -126,7 +136,7 @@ export default function Achievements() {
       } else {
         appStore.addNotification({ title: '检查完成', message: '暂无新成就解锁', type: 'info' });
       }
-      fetchData();
+      void fetchData({ background: true });
     } catch (error) {
       appStore.addNotification({
         title: '检查失败',
@@ -210,7 +220,7 @@ export default function Achievements() {
     try {
       const result = await seedAchievements();
       appStore.addNotification({ title: '初始化完成', message: result.message, type: 'success' });
-      await fetchData();
+      await fetchData({ background: true });
     } catch (error) {
       if (!isDefinitiveSeedRejection(error)) {
         const recovery: SeedRecovery = {
@@ -277,15 +287,15 @@ export default function Achievements() {
           {allAchievements.length > 0 && (
             <button
               onClick={handleCheck}
-              disabled={checking}
+              disabled={checking || refreshing}
               className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
             >
-              {checking ? (
+              {checking || refreshing ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <RefreshCw className="w-4 h-4" />
               )}
-              <span className="font-medium text-sm">检查新成就</span>
+              <span className="font-medium text-sm">{checking ? '正在检查…' : refreshing ? '正在刷新…' : '检查新成就'}</span>
             </button>
           )}
         </div>
@@ -318,6 +328,20 @@ export default function Achievements() {
               </button>
             ) : null}
           </div>
+        </div>
+      ) : null}
+
+      {refreshError ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+          <span>成就检查或初始化已确认，但页面数据刷新失败；当前已确认结果仍保留。请只重试读取，不会重新提交写入。</span>
+          <button
+            type="button"
+            onClick={() => void fetchData({ background: true })}
+            disabled={refreshing}
+            className={`shrink-0 px-4 py-2 ${styles.buttonSecondary} rounded-xl disabled:opacity-50`}
+          >
+            {refreshing ? '正在重新读取…' : '只重新读取成就数据'}
+          </button>
         </div>
       ) : null}
 

@@ -4,20 +4,22 @@ import {
   notificationPreferencesMatch,
   saveNotificationPreferences,
 } from '../../src/api/notificationSettings';
+import { describe, it } from 'vitest';
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { 'Content-Type': 'application/json' },
 });
 
-async function run() {
-  const calls: string[] = [];
-  const data = await getNotificationSettings('test-token', async (input, init) => {
-    calls.push(String(input));
-    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-token');
-    if (String(input).endsWith('/preferences')) return response([{ channel: 'email', event_type: 'review', enabled: true }]);
-    if (String(input).endsWith('/channels')) return response([{ id: 'email', name: '邮件', description: '' }]);
-    return response([{ id: 'review', name: '审核', description: '' }]);
+describe('notification settings load and save recovery', () => {
+  it('loads preferences and resolves ambiguous save outcomes without replay', async () => {
+    const calls: string[] = [];
+    const data = await getNotificationSettings('test-token', async (input, init) => {
+      calls.push(String(input));
+      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-token');
+      if (String(input).endsWith('/preferences')) return response([{ channel: 'email', event_type: 'review', enabled: true }]);
+      if (String(input).endsWith('/channels')) return response([{ id: 'email', name: '邮件', description: '' }]);
+      return response([{ id: 'review', name: '审核', description: '' }]);
   });
   assert.equal(calls.length, 3);
   assert.equal(data.preferences[0].enabled, true);
@@ -92,6 +94,5 @@ async function run() {
     { kind: 'rejected', message: '通知偏好保存失败，请重试' },
     'status-code fallback text is not shown as a user message',
   );
-}
-
-void run().then(() => console.log('Notification settings load contract passed'));
+  });
+});

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { execute, queryAll, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryAll, queryOne } from '../../database/utils.js';
 import { getDouyinConfig } from './constants.js';
 export function verifyWebhook(rawBody: string, signature?: string) {
   const secret = getDouyinConfig().webhookSecret;
@@ -21,7 +21,7 @@ export async function processPendingWebhookEvents() {
     try {
       await execute(`UPDATE douyin_webhook_events SET status='processing' WHERE id=?`, [event.id]);
       JSON.parse(event.payload);
-      await execute(`UPDATE douyin_webhook_events SET status='processed', processed_at=CURRENT_TIMESTAMP WHERE id=?`, [event.id]);
+      await execute(`UPDATE douyin_webhook_events SET status='processed', processed_at=? WHERE id=?`, [beijingNow(), event.id]);
     } catch { await execute(`UPDATE douyin_webhook_events SET status='failed' WHERE id=?`, [event.id]); }
   }
 }

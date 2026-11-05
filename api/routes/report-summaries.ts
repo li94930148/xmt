@@ -1,10 +1,11 @@
 import express, { type Request, type Response } from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { ReportSummaryUpdateBaseConflictError, ReportSummaryUpdateRequestConflictError, ReportSummaryUpdateTargetMissingError, createReportSummaryBaseFingerprint, getReportSummaryUpdateRequestStatus, updateReportSummaryWithRequest, type ReportSummaryTarget, type ReportSummaryWriteValues } from '../services/reportSummaryUpdate.js';
 import { authenticate } from '../middleware/auth.js';
-import { execute, queryAll, queryOne } from '../database/utils.js';
+import { beijingNow, execute, queryAll, queryOne } from '../database/utils.js';
 import { sendSafeServerError } from '../utils/response.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/i;
 router.use(['/monthly/requests/:requestId', '/yearly/requests/:requestId'], (_req, res, next) => {
@@ -174,18 +175,20 @@ async function saveRecord(req: Request, res: Response, kind: 'monthly' | 'yearly
 
     const table = kind === 'monthly' ? 'monthly_summaries' : 'yearly_summaries';
     if (kind === 'monthly') {
+      const now = beijingNow();
       await execute(
         `INSERT INTO monthly_summaries (user_id, year, month, content_md, work_summary_md, key_projects_md, issues_plan_md, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, year, month) DO UPDATE SET content_md = excluded.content_md, work_summary_md = excluded.work_summary_md, key_projects_md = excluded.key_projects_md, issues_plan_md = excluded.issues_plan_md, updated_at = excluded.updated_at`,
-        [req.user!.id, year, month, values.content_md, values.work_summary_md, values.key_projects_md, values.issues_plan_md],
+        [req.user!.id, year, month, values.content_md, values.work_summary_md, values.key_projects_md, values.issues_plan_md, now, now],
       );
     } else {
+      const now = beijingNow();
       await execute(
         `INSERT INTO yearly_summaries (user_id, year, content_md, annual_summary_md, achievements_md, shortcomings_md, next_year_plan_md, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id, year) DO UPDATE SET content_md = excluded.content_md, annual_summary_md = excluded.annual_summary_md, achievements_md = excluded.achievements_md, shortcomings_md = excluded.shortcomings_md, next_year_plan_md = excluded.next_year_plan_md, updated_at = excluded.updated_at`,
-        [req.user!.id, year, values.content_md, values.annual_summary_md, values.achievements_md, values.shortcomings_md, values.next_year_plan_md],
+        [req.user!.id, year, values.content_md, values.annual_summary_md, values.achievements_md, values.shortcomings_md, values.next_year_plan_md, now, now],
       );
     }
     const where = kind === 'monthly' ? 'user_id = ? AND year = ? AND month = ?' : 'user_id = ? AND year = ?';

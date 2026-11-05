@@ -111,13 +111,26 @@ try {
   assert.equal(otherRetroReuse.status, 409, 'same request key cannot replay across retrospectives');
 
   const otherActorStatus = await fetch(statusUrl, { headers: secondActorHeaders });
+  assert.equal(otherActorStatus.status, 200);
+  assert.equal(otherActorStatus.headers.get('cache-control'), 'no-store');
   assert.deepEqual((await otherActorStatus.json() as { data: unknown }).data, { state: 'not_found' }, 'status does not reveal another actor result');
   const otherRetroStatus = await fetch(`${baseUrl}/${otherRetroId}/actions/create-requests/${requestId}`, { headers: actorHeaders });
+  assert.equal(otherRetroStatus.status, 200);
+  assert.equal(otherRetroStatus.headers.get('cache-control'), 'no-store');
   assert.deepEqual((await otherRetroStatus.json() as { data: unknown }).data, { state: 'not_found' }, 'status is isolated by retrospective');
   const unknownStatus = await fetch(`${baseUrl}/${retroId}/actions/create-requests/00112233-4455-4677-8899-aabbccddeeff`, { headers: actorHeaders });
+  assert.equal(unknownStatus.status, 200);
+  assert.equal(unknownStatus.headers.get('cache-control'), 'no-store');
   assert.deepEqual((await unknownStatus.json() as { data: unknown }).data, { state: 'not_found' });
   const unauthorizedStatus = await fetch(statusUrl, { headers: readOnlyHeaders });
   assert.equal(unauthorizedStatus.status, 403, 'read-only status preserves the existing action-manage permission');
+  assert.equal(unauthorizedStatus.headers.get('cache-control'), 'no-store');
+  const invalidStatus = await fetch(`${baseUrl}/${retroId}/actions/create-requests/not-a-uuid`, { headers: actorHeaders });
+  assert.equal(invalidStatus.status, 400);
+  assert.equal(invalidStatus.headers.get('cache-control'), 'no-store');
+  const unauthenticatedStatus = await fetch(statusUrl);
+  assert.equal(unauthenticatedStatus.status, 401);
+  assert.equal(unauthenticatedStatus.headers.get('cache-control'), 'no-store');
   const unauthorizedCreate = await fetch(`${baseUrl}/${retroId}/actions`, {
     method: 'POST', headers: { ...readOnlyHeaders, 'X-Idempotency-Key': '00112233-4455-4677-8899-aabbccddeeff' },
     body: JSON.stringify({ title: '无权限行动项' }),
@@ -126,6 +139,7 @@ try {
 
   const retryId = 'd01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';
   const retryStatus = await fetch(`${baseUrl}/${retroId}/actions/create-requests/${retryId}`, { headers: actorHeaders });
+  assert.equal(retryStatus.headers.get('cache-control'), 'no-store');
   assert.deepEqual((await retryStatus.json() as { data: unknown }).data, { state: 'not_found' }, 'only a confirmed not-found result is retryable');
   const concurrentId = 'e01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';
   const concurrent = await Promise.all([1, 2].map(() => fetch(`${baseUrl}/${retroId}/actions`, {

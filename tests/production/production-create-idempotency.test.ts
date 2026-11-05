@@ -22,6 +22,10 @@ const memberId = await executeInsert(
   ['production-create-member', 'unused', '', 'member', 'Production Create Member'],
 );
 await execute(`INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='member'`, [memberId]);
+const outsiderId = await executeInsert(
+  `INSERT INTO users(username,password,email,role,name,enabled,force_change_password) VALUES(?,?,?,?,?,1,0)`,
+  ['production-create-outsider', 'unused', '', 'analyst', 'Production Create Outsider'],
+);
 const topicId = await executeInsert(
   `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,'approved')`,
   ['创作创建幂等回归', '', 'other', director.id, director.id],
@@ -62,13 +66,36 @@ try {
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM production WHERE topic_id=?', [topicId]))?.count, 1,
     'retrying the same create request returns the original record without duplicate production rows');
 
+  const productionDetail = await fetch(`${base}/production/${created.productionId}`, { headers: headers(director.id) });
+  assert.equal(productionDetail.status, 200);
+  assert.equal(productionDetail.headers.get('cache-control'), 'no-store', 'production detail responses must not be cached');
+  const forbiddenProductionDetail = await fetch(`${base}/production/${created.productionId}`, { headers: headers(outsiderId) });
+  assert.equal(forbiddenProductionDetail.status, 403, 'production detail keeps the existing topic-scope authorization');
+  assert.equal(forbiddenProductionDetail.headers.get('cache-control'), 'no-store');
+  const missingProductionDetail = await fetch(`${base}/production/999999`, { headers: headers(director.id) });
+  assert.equal(missingProductionDetail.status, 404);
+  assert.equal(missingProductionDetail.headers.get('cache-control'), 'no-store');
+  const unauthenticatedProductionDetail = await fetch(`${base}/production/${created.productionId}`);
+  assert.equal(unauthenticatedProductionDetail.status, 401);
+  assert.equal(unauthenticatedProductionDetail.headers.get('cache-control'), 'no-store');
+
   const readBackResponse = await fetch(`${base}/production/create-request/${requestId}`, { headers: headers(director.id) });
   assert.equal(readBackResponse.status, 200);
+  assert.equal(readBackResponse.headers.get('Cache-Control'), 'no-store');
   assert.deepEqual(await readBackResponse.json(), { productionId: created.productionId });
-  assert.equal((await fetch(`${base}/production/create-request/${requestId}`, { headers: headers(memberId) })).status, 404,
+  const hiddenStatus = await fetch(`${base}/production/create-request/${requestId}`, { headers: headers(memberId) });
+  assert.equal(hiddenStatus.status, 404,
     'create status lookup does not disclose another user\'s request key');
-  assert.equal((await fetch(`${base}/production/create-request/not-a-uuid`, { headers: headers(director.id) })).status, 400);
-  assert.equal((await fetch(`${base}/production/create-request/11111111-1111-4111-8111-111111111111`, { headers: headers(director.id) })).status, 404);
+  assert.equal(hiddenStatus.headers.get('Cache-Control'), 'no-store');
+  const invalidStatus = await fetch(`${base}/production/create-request/not-a-uuid`, { headers: headers(director.id) });
+  assert.equal(invalidStatus.status, 400);
+  assert.equal(invalidStatus.headers.get('Cache-Control'), 'no-store');
+  const missingStatus = await fetch(`${base}/production/create-request/11111111-1111-4111-8111-111111111111`, { headers: headers(director.id) });
+  assert.equal(missingStatus.status, 404);
+  assert.equal(missingStatus.headers.get('Cache-Control'), 'no-store');
+  const unauthenticatedStatus = await fetch(`${base}/production/create-request/${requestId}`);
+  assert.equal(unauthenticatedStatus.status, 401);
+  assert.equal(unauthenticatedStatus.headers.get('Cache-Control'), 'no-store');
 
   assert.equal((await fetch(`${base}/production`, {
     method: 'POST',
@@ -82,8 +109,13 @@ try {
   })).status, 400);
 
   await execute('DELETE FROM production WHERE id=?', [created.productionId]);
-  assert.equal((await fetch(`${base}/production/create-request/${requestId}`, { headers: headers(director.id) })).status, 410,
+  const deletedStatus = await fetch(`${base}/production/create-request/${requestId}`, { headers: headers(director.id) });
+  assert.equal(deletedStatus.status, 410,
     'a deleted record remains a terminal replay tombstone');
+  assert.equal(deletedStatus.headers.get('Cache-Control'), 'no-store');
+  const deletedProductionDetail = await fetch(`${base}/production/${created.productionId}`, { headers: headers(director.id) });
+  assert.equal(deletedProductionDetail.status, 404);
+  assert.equal(deletedProductionDetail.headers.get('cache-control'), 'no-store');
   assert.equal((await fetch(`${base}/production`, { method: 'POST', headers: headers(director.id), body: JSON.stringify(payload) })).status, 410,
     'retry cannot recreate a record after its idempotent create was later deleted');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM production WHERE topic_id=?', [topicId]))?.count, 0);

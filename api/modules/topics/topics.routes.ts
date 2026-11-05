@@ -1,16 +1,18 @@
 import express from 'express';
+import { createAsyncRouter } from '../../middleware/async-router';
 import { authenticate } from '../../middleware/auth';
+import { noStoreResponse } from '../../middleware/no-store';
 import { requirePermission } from '../../middleware/permissions';
 import type { TopicController } from './topics.controller';
 
 export function createLegacyTopicsRouter(controller: TopicController) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   router.get('/', authenticate, controller.legacyList);
   router.get('/create-requests/:requestId', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
   }, authenticate, controller.legacyTopicCreateRequestStatus);
-  router.get('/:id', authenticate, controller.legacyGet);
+  router.get('/:id', noStoreResponse, authenticate, controller.legacyGet);
   router.get('/:id/versions', authenticate, controller.legacyOutlineVersions);
   router.post('/', authenticate, requirePermission('topic:create'), controller.legacyCreate);
   router.put('/:id', authenticate, requirePermission('topic:update'), controller.legacyUpdate);
@@ -21,13 +23,13 @@ export function createLegacyTopicsRouter(controller: TopicController) {
   return router;
 }
 export function createV1TopicsRouter(controller: TopicController) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   router.get('/', authenticate, controller.v1List);
   router.get('/create-requests/:requestId', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
     next();
   }, authenticate, controller.v1TopicCreateRequestStatus);
-  router.get('/:id', authenticate, controller.v1Get);
+  router.get('/:id', noStoreResponse, authenticate, controller.v1Get);
   router.get('/:id/versions', authenticate, controller.v1OutlineVersions);
   router.post('/', authenticate, requirePermission('topic:create'), controller.v1Create);
   router.put('/:id', authenticate, requirePermission('topic:update'), controller.v1Update);

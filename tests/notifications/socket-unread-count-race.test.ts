@@ -2,16 +2,21 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
+import { test } from 'vitest';
 
+test('socket unread-count refresh ignores stale responses', async () => {
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://xmt.test/' });
-Object.assign(globalThis, {
-  window: dom.window,
-  document: dom.window.document,
-  localStorage: dom.window.localStorage,
-  sessionStorage: dom.window.sessionStorage,
-});
-Object.defineProperty(globalThis, 'navigator', { configurable: true, value: dom.window.navigator });
-const { createUnreadCountRefresher } = await import('../../src/hooks/useSocket');
+const globalKeys = ['window', 'document', 'localStorage', 'sessionStorage', 'navigator'] as const;
+const previousGlobals = new Map(globalKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+try {
+  Object.defineProperties(globalThis, {
+    window: { configurable: true, writable: true, value: dom.window },
+    document: { configurable: true, writable: true, value: dom.window.document },
+    localStorage: { configurable: true, writable: true, value: dom.window.localStorage },
+    sessionStorage: { configurable: true, writable: true, value: dom.window.sessionStorage },
+    navigator: { configurable: true, writable: true, value: dom.window.navigator },
+  });
+  const { createUnreadCountRefresher } = await import('../../src/hooks/useSocket');
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -80,5 +85,12 @@ previousUserRead.resolve({ unreadCount: 123 });
 await staleUserRequest;
 assert.equal(unreadCount, 4, 'a previous user response cannot overwrite the active account count');
 
-dom.window.close();
-console.log('Socket unread-count race tests passed: newest response wins and stale socket/user responses are ignored.');
+} finally {
+  for (const key of globalKeys) {
+    const descriptor = previousGlobals.get(key);
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else delete (globalThis as Record<string, unknown>)[key];
+  }
+  dom.window.close();
+}
+});

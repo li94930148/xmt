@@ -66,8 +66,15 @@ const request = (url: string, token: string, method = 'GET', body?: unknown) => 
 const anchor = { quote: '原始段落', context: JSON.stringify({ before: '', after: '内容' }), from: 1, to: 5 };
 
 try {
-  assert.equal((await request(base, outsiderToken)).status, 403, 'review records retain production visibility scope');
-  assert.equal((await request(`${base}?version=v9.0`, memberToken)).status, 404, 'unknown versions cannot be used as thread scopes');
+  const unauthenticatedList = await fetch(base);
+  assert.equal(unauthenticatedList.status, 401, 'thread lists require authentication');
+  assert.equal(unauthenticatedList.headers.get('cache-control'), 'no-store', 'unauthenticated thread lists are never cached');
+  const forbiddenList = await request(base, outsiderToken);
+  assert.equal(forbiddenList.status, 403, 'review records retain production visibility scope');
+  assert.equal(forbiddenList.headers.get('cache-control'), 'no-store', 'forbidden thread lists are never cached');
+  const unknownVersionList = await request(`${base}?version=v9.0`, memberToken);
+  assert.equal(unknownVersionList.status, 404, 'unknown versions cannot be used as thread scopes');
+  assert.equal(unknownVersionList.headers.get('cache-control'), 'no-store', 'missing-version thread lists are never cached');
   assert.equal((await request(base, memberToken, 'POST', { version: 'v2.0', kind: 'comment', anchor, summary: '不允许跨版本创建' })).status, 409);
   assert.equal((await request(base, memberToken, 'POST', { version: 'v1.0', kind: 'comment', anchor: { ...anchor, to: 0 }, summary: '错误锚点' })).status, 400);
 
@@ -159,6 +166,7 @@ try {
   assert.equal(reply.status, 201);
   const list = await request(base, memberToken);
   assert.equal(list.status, 200);
+  assert.equal(list.headers.get('cache-control'), 'no-store', 'successful thread lists are never cached');
   const listed = (await list.json() as { data: Array<{ id: number; kind: string; anchor_quote: string; replies: Array<{ content: string }> }> }).data;
   assert.equal(listed.length, 5);
   assert.equal(listed.find((thread) => thread.id === commentId)?.replies[0]?.content, '我会补充依据。');

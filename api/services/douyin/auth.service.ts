@@ -4,7 +4,7 @@ import { exchangeCodeForToken } from './client.js';
 import { encryptToken } from './token.service.js';
 import { decryptToken } from './token.service.js';
 import { fetchAuthorizedUserProfile } from './user.service.js';
-import { queryOne, runInTransaction } from '../../database/utils.js';
+import { beijingNow, queryOne, runInTransaction } from '../../database/utils.js';
 import type { OAuthState } from './types.js';
 import { apiLogger } from '../../observability/logger.js';
 
@@ -38,9 +38,10 @@ export async function completeAuthorization(code: string, state: string) {
   }
   const accountName = profile.nickname || (data as { nickname?: string }).nickname || '抖音账号';
   const profileUrl = profile.avatar || '';
+  const updatedAt = beijingNow();
   const accountId = await runInTransaction(async (tx) => {
-    const id = existing?.id ?? await tx.executeInsert(`INSERT INTO douyin_accounts (name, profile_url, user_id, open_id, union_id, access_token_encrypt, refresh_token_encrypt, expires_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)`, [accountName, profileUrl, saved.userId, data.open_id, data.union_id ?? null, access, refresh, expiresAt]);
-    if (existing) await tx.execute(`UPDATE douyin_accounts SET user_id=?, union_id=?, nickname=?, avatar=?, access_token_encrypt=?, refresh_token_encrypt=?, expires_at=?, status='active', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [saved.userId, profile.union_id ?? data.union_id ?? null, profile.nickname ?? null, profile.avatar ?? null, access, refresh, expiresAt, id]);
+    const id = existing?.id ?? await tx.executeInsert(`INSERT INTO douyin_accounts (name, profile_url, user_id, open_id, union_id, access_token_encrypt, refresh_token_encrypt, expires_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`, [accountName, profileUrl, saved.userId, data.open_id, data.union_id ?? null, access, refresh, expiresAt, updatedAt]);
+    if (existing) await tx.execute(`UPDATE douyin_accounts SET user_id=?, union_id=?, nickname=?, avatar=?, access_token_encrypt=?, refresh_token_encrypt=?, expires_at=?, status='active', updated_at=? WHERE id=?`, [saved.userId, profile.union_id ?? data.union_id ?? null, profile.nickname ?? null, profile.avatar ?? null, access, refresh, expiresAt, updatedAt, id]);
     else await tx.execute(`UPDATE douyin_accounts SET nickname=?, avatar=?, union_id=? WHERE id=?`, [profile.nickname ?? null, profile.avatar ?? null, profile.union_id ?? data.union_id ?? null, id]);
     return id;
   });

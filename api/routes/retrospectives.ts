@@ -1,5 +1,7 @@
 import express, { type Request, type Response } from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
+import { noStoreResponse } from '../middleware/no-store.js';
 import {
   RetrospectiveServiceError,
   archiveRetrospective,
@@ -32,8 +34,13 @@ import type {
 } from '../types/retrospectives.js';
 import { apiLogger } from '../observability/logger.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
+router.use('/create-requests/:requestId', noStoreResponse);
+router.use('/:id/actions/create-requests/:requestId', noStoreResponse);
+router.use('/actions/:actionId/update-requests/:requestId', noStoreResponse);
+router.use('/:id/update-requests/:requestId', noStoreResponse);
+router.get('/:id', noStoreResponse);
 router.use(authenticate);
 
 function getQueryString(req: Request, key: string) {

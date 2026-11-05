@@ -85,15 +85,24 @@ try {
 
   const stateResponse = await fetch(`${baseUrl}/create-requests/${requestId}`, { headers: actorHeaders });
   assert.equal(stateResponse.status, 200);
+  assert.equal(stateResponse.headers.get('Cache-Control'), 'no-store', 'created status must not be cached');
   assert.deepEqual((await stateResponse.json() as { data: unknown }).data, {
     state: 'created', retrospectiveId,
   });
   const isolatedStateResponse = await fetch(`${baseUrl}/create-requests/${requestId}`, { headers: readOnlyHeaders });
   assert.equal(isolatedStateResponse.status, 200, 'status lookup does not require retrospective create permission');
+  assert.equal(isolatedStateResponse.headers.get('Cache-Control'), 'no-store', 'actor-scoped not-found status must not be cached');
   assert.deepEqual((await isolatedStateResponse.json() as { data: unknown }).data, { state: 'not_found' }, 'another actor cannot observe the original actor result');
   const unknownStateResponse = await fetch(`${baseUrl}/create-requests/00112233-4455-4677-8899-aabbccddeeff`, { headers: readOnlyHeaders });
   assert.equal(unknownStateResponse.status, 200);
+  assert.equal(unknownStateResponse.headers.get('Cache-Control'), 'no-store', 'missing status must not be cached');
   assert.deepEqual((await unknownStateResponse.json() as { data: unknown }).data, { state: 'not_found' });
+  const invalidStateResponse = await fetch(`${baseUrl}/create-requests/not-a-uuid`, { headers: actorHeaders });
+  assert.equal(invalidStateResponse.status, 400);
+  assert.equal(invalidStateResponse.headers.get('Cache-Control'), 'no-store', 'invalid status must not be cached');
+  const unauthenticatedStateResponse = await fetch(`${baseUrl}/create-requests/${requestId}`);
+  assert.equal(unauthenticatedStateResponse.status, 401);
+  assert.equal(unauthenticatedStateResponse.headers.get('Cache-Control'), 'no-store', 'authentication failure must not be cached');
 
   const noPermissionCreate = await fetch(baseUrl, {
     method: 'POST',
@@ -122,6 +131,7 @@ try {
   await database.execute('DELETE FROM role_permissions WHERE role_id=?', [temporaryRoleId]);
   const revokedPermissionState = await fetch(`${baseUrl}/create-requests/${readOnlyRequestId}`, { headers: readOnlyHeaders });
   assert.equal(revokedPermissionState.status, 200, 'actor can read back a prior result after create permission is revoked');
+  assert.equal(revokedPermissionState.headers.get('Cache-Control'), 'no-store', 'recovered status remains uncached after permission changes');
   assert.deepEqual((await revokedPermissionState.json() as { data: unknown }).data, {
     state: 'created', retrospectiveId: Number(readOnlyCreated.data.retrospective.id),
   });

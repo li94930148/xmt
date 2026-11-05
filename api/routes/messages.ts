@@ -1,9 +1,10 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { queryOne, queryAll, execute, runInTransaction, beijingNow } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { localizeMessage } from '../utils/messageLocalization';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const MESSAGE_CLEAR_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidMessageClearRequestId(value: unknown): value is string {

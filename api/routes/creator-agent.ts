@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { acknowledgeCreatorAgentBindResult, bindCreatorAgent, createCreatorAgentBindingCode, getCreatorAgentBindingCodeRecovery, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
@@ -7,11 +8,13 @@ import { creatorInsightService, getCreatorInsights } from '../services/creatorIn
 import { canManageCreatorAccount, grantCreatorAccountAccess } from '../services/creatorAccess.js';
 import { canManageCreatorData, resolveManageScope, resolveViewScope } from '../services/creatorDataVisibility.js';
 import { requirePermission, userHasPermission } from '../middleware/permissions.js';
+import { noStoreResponse } from '../middleware/no-store.js';
 import { creatorAnalyticsService, type ReportType } from '../services/creatorAnalytics.js';
 import { getDouyinDashboard, getDouyinManagedCover, getDouyinSyncLogs, getDouyinTrends, getDouyinWorkDetail, getDouyinWorkReview, getDouyinWorks } from '../services/douyinDataCenter.js';
 import { attachCreatorTopicSuggestionFeedback, saveCreatorTopicSuggestionFeedback } from '../services/creatorTopicSuggestionFeedback.js';
 import { queryAll } from '../database/utils.js';
-const router=express.Router();
+import { formatBjtDatabase } from '../../shared/time/index.js';
+const router=createAsyncRouter();
 const creatorError = (res: express.Response, error: unknown, fallback: string, defaultStatus = 500) => {
   if (error instanceof CreatorSyncAlreadyRunningError) {
     return res.set('Retry-After', '5').status(503).json({ success: false, code: 'CREATOR_SYNC_BUSY', message: error.message });
@@ -29,7 +32,7 @@ const creatorBindingRecoveryError = (res:express.Response,error:unknown,fallback
   if(status===503)return res.status(503).json({message:error instanceof Error?error.message:fallback});
   return creatorError(res,error,fallback);
 };
-router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= datetime('now','+8 hours','-2 minutes') THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){creatorError(res,error,'Agent 状态加载失败');}});
+router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const heartbeatCutoff=formatBjtDatabase(Date.now()-2*60*1000);const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= ? THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`,[heartbeatCutoff]);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){creatorError(res,error,'Agent 状态加载失败');}});
 router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});const suggestions=data.topic_suggestions?{...data.topic_suggestions,items:await attachCreatorTopicSuggestionFeedback(scope.id,req.user!.id,data.topic_suggestions.items)}:undefined;res.json({...data,topic_suggestions:suggestions,access_level:scope.access_level});}catch(error){creatorError(res,error,'抖音驾驶舱加载失败');}});
 router.post('/douyin/suggestions/:suggestionId/feedback',authenticate,requirePermission('creator:data:view'),async(req,res)=>{
   try{
@@ -110,7 +113,7 @@ router.post('/accounts/:id/access',authenticate,requirePermission('creator:data:
 
 router.get('/works/:id/analysis',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步账号'});const period=req.query.period==='24h'||req.query.period==='30d'?req.query.period:'7d';const analysis=await creatorAnalyticsService.work(scope.id,Number(req.params.id),period);if(!analysis)return res.status(404).json({message:'作品不存在或不在查看范围内'});res.json(analysis);}catch(error){creatorError(res,error,'作品分析失败');}});
 router.get('/trends',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步账号'});const period=req.query.period==='7d'||req.query.period==='90d'?req.query.period:'30d';res.json(await creatorAnalyticsService.trends(scope.id,period));}catch(error){creatorError(res,error,'趋势计算失败');}});
-router.get('/reports',authenticate,requirePermission('creator:report:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步账号'});res.json(await creatorAnalyticsService.reports(scope.id));}catch(error){creatorError(res,error,'报告查询失败');}});
+router.get('/reports',noStoreResponse,authenticate,requirePermission('creator:report:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步账号'});res.json(await creatorAnalyticsService.reports(scope.id));}catch(error){creatorError(res,error,'报告查询失败');}});
 router.post('/reports/generate',authenticate,requirePermission('creator:report:manage'),async(req,res)=>{try{const scope=await resolveCreatorManageScope(req.user!.role,requestedPlatformUid(req.body?.account_id));if(!scope)return res.status(403).json({message:'仅管理员或负责人可管理账号'});const type:ReportType=req.body?.type==='daily'||req.body?.type==='monthly'?req.body.type:'weekly';res.status(201).json(await creatorAnalyticsService.generateReport(scope.id,type));}catch(error){creatorError(res,error,'报告生成失败');}});
 router.delete('/reports/:id',authenticate,requirePermission('creator:report:manage'),async(req,res)=>{try{const scope=await resolveCreatorManageScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(403).json({message:'仅管理员或负责人可管理账号'});await creatorAnalyticsService.deleteReport(scope.id,Number(req.params.id));res.status(204).end();}catch(error){creatorError(res,error,'报告删除失败');}});
 export default router;

@@ -181,7 +181,7 @@ try {
   assert.deepEqual([fallback.views, fallback.likes, fallback.comments, fallback.shares], [3, 2, 4, 1]);
 
   const partialMetricResponse = await fetch(`${base}/publishing/${publishingId}`, {
-    method: 'PUT', headers, body: JSON.stringify({ views: 7 }),
+    method: 'PUT', headers, body: JSON.stringify({ views: 7, expected_baseline: { views: null } }),
   });
   assert.equal(partialMetricResponse.status, 200);
   assert.deepEqual(

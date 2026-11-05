@@ -1,7 +1,8 @@
 import express, { type Request, type Response } from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
-import { execute, executeInsert, queryAll, queryOne } from '../database/utils.js';
+import { beijingNow, execute, executeInsert, queryAll, queryOne } from '../database/utils.js';
 import {
   DailyReportServiceError,
   autosaveDailyReport,
@@ -16,7 +17,7 @@ import {
 import type { DailyReportStatus, ReviewDailyReportInput, SaveDailyReportDraftInput } from '../types/dailyReports.js';
 import { apiLogger } from '../observability/logger.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 router.use(authenticate);
 
@@ -101,7 +102,8 @@ router.post('/templates', requirePermission('report:template:create'), async (re
   try {
     const name = String(req.body?.name || '').trim();
     if (!name) return res.status(400).json({ success: false, message: '模板名称不能为空' });
-    const id = await executeInsert(`INSERT INTO daily_report_templates (name, description, sections_json, is_default, sort_order, user_id, active, created_by, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, 1, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`, [name, String(req.body?.description || ''), JSON.stringify(req.body?.sections || []), Number(req.body?.sortOrder || 0), req.user!.id, req.user!.id]);
+    const now = beijingNow();
+    const id = await executeInsert(`INSERT INTO daily_report_templates (name, description, sections_json, is_default, sort_order, user_id, active, created_by, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?, ?)`, [name, String(req.body?.description || ''), JSON.stringify(req.body?.sections || []), Number(req.body?.sortOrder || 0), req.user!.id, req.user!.id, now, now]);
     const row = await queryOne(`SELECT id, name, description, sections_json, is_default, sort_order, user_id FROM daily_report_templates WHERE id = ?`, [id]);
     res.status(201).json({ success: true, data: row });
   } catch (error) { handleDailyReportError(error, res); }
@@ -112,7 +114,7 @@ router.put('/templates/:id', requirePermission('report:template:update'), async 
     const id = parseId(req.params.id);
     const existing = await queryOne<Record<string, unknown>>(`SELECT * FROM daily_report_templates WHERE id = ? AND active = 1`, [id]);
     if (!existing || (existing.user_id && Number(existing.user_id) !== req.user!.id && req.user!.role !== 'admin')) return res.status(404).json({ success: false, message: '模板不存在或无权修改' });
-    await execute(`UPDATE daily_report_templates SET name = ?, description = ?, sections_json = ?, sort_order = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [String(req.body?.name || existing.name), String(req.body?.description ?? existing.description ?? ''), JSON.stringify(req.body?.sections || JSON.parse(String(existing.sections_json || '[]'))), Number(req.body?.sortOrder ?? existing.sort_order ?? 0), id]);
+    await execute(`UPDATE daily_report_templates SET name = ?, description = ?, sections_json = ?, sort_order = ?, updated_at = ? WHERE id = ?`, [String(req.body?.name || existing.name), String(req.body?.description ?? existing.description ?? ''), JSON.stringify(req.body?.sections || JSON.parse(String(existing.sections_json || '[]'))), Number(req.body?.sortOrder ?? existing.sort_order ?? 0), beijingNow(), id]);
     res.json({ success: true, data: await queryOne(`SELECT id, name, description, sections_json, is_default, sort_order, user_id FROM daily_report_templates WHERE id = ?`, [id]) });
   } catch (error) { handleDailyReportError(error, res); }
 });
@@ -122,7 +124,7 @@ router.delete('/templates/:id', requirePermission('report:template:delete'), asy
     const id = parseId(req.params.id);
     const existing = await queryOne<Record<string, unknown>>(`SELECT user_id, is_default FROM daily_report_templates WHERE id = ? AND active = 1`, [id]);
     if (!existing || existing.is_default || (existing.user_id && Number(existing.user_id) !== req.user!.id && req.user!.role !== 'admin')) return res.status(404).json({ success: false, message: '模板不存在或不可删除' });
-    await execute(`UPDATE daily_report_templates SET active = 0, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [id]);
+    await execute(`UPDATE daily_report_templates SET active = 0, updated_at = ? WHERE id = ?`, [beijingNow(), id]);
     res.json({ success: true, data: { deleted: true } });
   } catch (error) { handleDailyReportError(error, res); }
 });

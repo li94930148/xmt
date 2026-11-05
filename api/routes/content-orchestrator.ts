@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { getEventStream } from '../collaboration/protocol/eventStream';
@@ -8,7 +9,7 @@ import {
   resolveSystemState,
 } from '../../src/content/orchestrator/contentOSOrchestrator';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 function timelineSources(docId: string) {
   return {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { douyinDataNormalizer } from '../api/services/douyinDataNormalizer.js';
 import { analyzeDouyinWorks, calculateDouyinAccountHealth } from '../api/services/douyinOperationsAnalytics.js';
 

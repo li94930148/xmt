@@ -74,9 +74,20 @@ try {
 
   const readBack = await fetch(`${endpoint}/create-request/${clientRequestId}`, { headers });
   assert.equal(readBack.status, 200);
+  assert.equal(readBack.headers.get('Cache-Control'), 'no-store', 'confirmed create status must not be cached');
   const readBackBody = await readBack.json() as { id: number; inspiration: { id: number; title: string } };
   assert.equal(readBackBody.id, body.id, 'read-only request lookup identifies the original saved row');
   assert.equal(readBackBody.inspiration.title, '已确认的灵感');
+
+  const missingReadBack = await fetch(`${endpoint}/create-request/00112233-4455-4677-8899-aabbccddeeff`, { headers });
+  assert.equal(missingReadBack.status, 404);
+  assert.equal(missingReadBack.headers.get('Cache-Control'), 'no-store', 'missing create status must not be cached');
+  const invalidReadBack = await fetch(`${endpoint}/create-request/not-a-uuid`, { headers });
+  assert.equal(invalidReadBack.status, 400);
+  assert.equal(invalidReadBack.headers.get('Cache-Control'), 'no-store', 'invalid create status must not be cached');
+  const unauthenticatedReadBack = await fetch(`${endpoint}/create-request/${clientRequestId}`);
+  assert.equal(unauthenticatedReadBack.status, 401);
+  assert.equal(unauthenticatedReadBack.headers.get('Cache-Control'), 'no-store', 'authentication failures must not be cached');
 
   const persisted = await queryOne<{ id: number; title: string }>('SELECT id, title FROM inspirations WHERE id = ?', [body.id]);
   assert.deepEqual(persisted, { id: body.id, title: '已确认的灵感' }, 'the returned record is already persisted');
@@ -91,6 +102,7 @@ try {
   assert.equal(replayAfterDeletion.status, 410, 'a delayed retry cannot recreate an inspiration deleted after its original commit');
   const deletedReadBack = await fetch(`${endpoint}/create-request/${clientRequestId}`, { headers });
   assert.equal(deletedReadBack.status, 410, 'read-back preserves the distinction between not-yet-created and already-deleted');
+  assert.equal(deletedReadBack.headers.get('Cache-Control'), 'no-store', 'deleted create status must not be cached');
 
   const concurrentRequestId = 'd01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a51';
   const concurrentPayload = { title: '并发重放灵感', description: '同一编号同时到达', category: '故事', client_request_id: concurrentRequestId };

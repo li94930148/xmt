@@ -16,7 +16,7 @@ const { default: creatorAgentRoutes } = await import('../api/routes/creator-agen
 
 await initDatabase();
 
-await execute(`UPDATE users SET username='admin-scope-test',role='admin',name='Scope Test Admin',enabled=1 WHERE id=1`);
+await execute(`UPDATE users SET username='admin-scope-test',role='admin',name='Scope Test Admin',enabled=1,force_change_password=0 WHERE id=1`);
 
 const tiedUpdatedAt = '2026-07-24 09:00:00';
 await execute(`INSERT INTO creator_platform_accounts(id,user_id,platform,platform_uid,account_name,updated_at) VALUES(1,1,'douyin','douyin-old','old douyin',?)`, [tiedUpdatedAt]);

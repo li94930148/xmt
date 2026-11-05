@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
-import { StaticRouter } from 'react-router';
+import { MemoryRouter } from 'react-router-dom';
 import { LegacyPublishedArchiveSnapshotView } from '../../src/components/resource-center/ArchiveSnapshotView';
 import { getSafeArchiveHttpUrl, parseLegacyPublishedArchive } from '../../src/components/resource-center/parseLegacyPublishedArchive';
 
@@ -246,10 +246,10 @@ test('renders exact per-publication source snapshots and keeps source links behi
   let restrictedMarkup = '';
   let authorizedMarkup = '';
   try {
-    restrictedMarkup = renderToStaticMarkup(createElement(StaticRouter, { location: '/' },
+    restrictedMarkup = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/'] },
       createElement(LegacyPublishedArchiveSnapshotView, { snapshot: result.snapshot }),
     ));
-    authorizedMarkup = renderToStaticMarkup(createElement(StaticRouter, { location: '/' },
+    authorizedMarkup = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/'] },
       createElement(LegacyPublishedArchiveSnapshotView, { snapshot: result.snapshot, canViewProduction: true }),
     ));
   } finally {

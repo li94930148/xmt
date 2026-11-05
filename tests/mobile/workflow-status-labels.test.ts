@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
 import { getWorkflowStatusLabel, isKnownWorkflowStatus } from '../../src/platform/workflow-status-labels';
 
 const shootingLabels = {
@@ -16,20 +17,26 @@ const publishingLabels = {
   scheduled: '已定时',
 } as const;
 
-for (const [status, label] of Object.entries(shootingLabels)) {
-  assert.equal(getWorkflowStatusLabel('shooting', status), label);
-  assert.equal(isKnownWorkflowStatus('shooting', status), true);
-}
+describe('workflow status labels', () => {
+  it('maps shooting workflow statuses and recognizes known values', () => {
+    for (const [status, label] of Object.entries(shootingLabels)) {
+      assert.equal(getWorkflowStatusLabel('shooting', status), label);
+      assert.equal(isKnownWorkflowStatus('shooting', status), true);
+    }
+  });
 
-for (const [status, label] of Object.entries(publishingLabels)) {
-  assert.equal(getWorkflowStatusLabel('publishing', status), label);
-  assert.equal(isKnownWorkflowStatus('publishing', status), true);
-}
+  it('maps publishing workflow statuses and recognizes known values', () => {
+    for (const [status, label] of Object.entries(publishingLabels)) {
+      assert.equal(getWorkflowStatusLabel('publishing', status), label);
+      assert.equal(isKnownWorkflowStatus('publishing', status), true);
+    }
+  });
 
-for (const kind of ['shooting', 'publishing'] as const) {
-  assert.equal(getWorkflowStatusLabel(kind, 'legacy_waiting'), '状态待确认');
-  assert.equal(getWorkflowStatusLabel(kind, null), '状态待确认');
-  assert.equal(isKnownWorkflowStatus(kind, 'legacy_waiting'), false);
-}
-
-console.log('Shooting and publishing status labels passed');
+  it('uses a neutral label for missing or unknown statuses', () => {
+    for (const kind of ['shooting', 'publishing'] as const) {
+      assert.equal(getWorkflowStatusLabel(kind, 'legacy_waiting'), '状态待确认');
+      assert.equal(getWorkflowStatusLabel(kind, null), '状态待确认');
+      assert.equal(isKnownWorkflowStatus(kind, 'legacy_waiting'), false);
+    }
+  });
+});

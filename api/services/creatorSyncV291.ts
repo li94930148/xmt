@@ -7,6 +7,7 @@ import { isOfficialCalendarDate, officialCollectionTimeIsValid, officialDailyWin
 import { requireCreatorAgentV1 } from './creatorAgentProtocol.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
 import { CREATOR_SYNC_MAX_PAYLOAD_BYTES, CREATOR_SYNC_MAX_PAYLOAD_MB } from '../utils/limits.js';
+import { formatBjtDatabase } from '../../shared/time/index.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
@@ -26,10 +27,11 @@ export async function claimCreatorSyncTask(agentId: number, taskId: string, plat
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const inserted = await runInTransaction(async (tx) => {
-        await tx.execute(`UPDATE creator_sync_tasks SET status='failed',end_time=CURRENT_TIMESTAMP,
+        const operationTime = formatBjtDatabase();
+        await tx.execute(`UPDATE creator_sync_tasks SET status='failed',end_time=?,
           error_message=COALESCE(error_message,'同步租约过期，已释放占用'),claimed_at_ms=0
           WHERE platform=? AND account=? AND status='running'
-          AND claimed_at_ms <= ${DATABASE_NOW_MS} - ?`, [platform, account, CREATOR_SYNC_CLAIM_LEASE_MS]);
+          AND claimed_at_ms <= ${DATABASE_NOW_MS} - ?`, [operationTime, platform, account, CREATOR_SYNC_CLAIM_LEASE_MS]);
         return tx.execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status,claimed_at_ms)
           VALUES(?,?,?,?,?,'running',${DATABASE_NOW_MS}) ON CONFLICT(agent_id,task_id) DO UPDATE SET
           status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL,claimed_at_ms=excluded.claimed_at_ms
@@ -105,7 +107,8 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
     if (/SQLITE_(BUSY|LOCKED)|database (?:is )?(?:locked|busy)/i.test(message)) throw new CreatorSyncAlreadyRunningError();
     throw error;
   }
-  await execute("DELETE FROM creator_agent_nonces WHERE created_at < datetime('now','+8 hours','-1 day')");
+  const nonceRetentionCutoff = formatBjtDatabase(Date.now() - 24 * 60 * 60 * 1000);
+  await execute('DELETE FROM creator_agent_nonces WHERE created_at < ?', [nonceRetentionCutoff]);
   try { const envelope = body.data as {iv:string;tag:string;ciphertext:string}; const decipher = crypto.createDecipheriv('aes-256-gcm', key(token), Buffer.from(envelope.iv,'base64')); decipher.setAuthTag(Buffer.from(envelope.tag,'base64')); return { agent, payload: JSON.parse(decipher.update(envelope.ciphertext,'base64','utf8') + decipher.final('utf8')) as JsonRecord }; }
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }
@@ -186,6 +189,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       throw Object.assign(new Error(`官方导出 ${period} 周期日期无效：必须是采集日对应的北京时间完整自然日窗口`), { statusCode: 422 });
     }
   }
+  const operationTime = formatBjtDatabase();
   return runInTransaction(async tx => {
     await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,status) VALUES(?,?,?,'active') ON CONFLICT(user_id,platform,platform_uid) DO NOTHING`, [agent.user_id, agent.platform, agent.account_id]);
     const account = await tx.queryOne<{id:number}>('SELECT id FROM creator_platform_accounts WHERE user_id=? AND platform=? AND platform_uid=?', [agent.user_id, agent.platform, agent.account_id]);
@@ -211,11 +215,11 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       const valueText=text(value), previous=await tx.queryOne<{value_text:string;collected_at:string}>('SELECT value_text,collected_at FROM creator_official_metrics WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?',[account.id,sourceItemKey,metricDate,metricCode]);
       if (previous && Date.parse(previous.collected_at) > Date.parse(snapshotTime)) { staleIgnored++; return; }
       if (previous?.value_text === valueText) {
-        await tx.execute('UPDATE creator_official_metrics SET source_file_sha256=?,parser_version=?,collected_at=?,updated_at=CURRENT_TIMESTAMP WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?', [sha,parserVersion,snapshotTime,account.id,sourceItemKey,metricDate,metricCode]);
+        await tx.execute('UPDATE creator_official_metrics SET source_file_sha256=?,parser_version=?,collected_at=?,updated_at=? WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?', [sha,parserVersion,snapshotTime,operationTime,account.id,sourceItemKey,metricDate,metricCode]);
         unchanged++;
         return;
       }
-      const numeric=Number(value); await tx.execute(`INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,source_item_key,metric_date,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=CURRENT_TIMESTAMP`,[account.id,sourceItemKey,metricDate,metricCode,valueText,Number.isFinite(numeric)?numeric:null,unit,'official_export',sha,parserVersion,snapshotTime]);
+      const numeric=Number(value); await tx.execute(`INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,source_item_key,metric_date,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=?`,[account.id,sourceItemKey,metricDate,metricCode,valueText,Number.isFinite(numeric)?numeric:null,unit,'official_export',sha,parserVersion,snapshotTime,operationTime]);
       if (previous) updated++; else inserted++;
     };
     const defaultSha=text(sourceFiles[0]?.sha256);
@@ -251,7 +255,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       for (const candidate of matchedWorks) {
         const nextPlay=views??candidate.play_count, nextLikes=likes??candidate.like_count, nextComments=comments??candidate.comment_count, nextShares=shares??candidate.share_count, nextCollects=favorites??candidate.collect_count;
         const interactionRate=nextPlay>0?(nextLikes+nextComments+nextShares+nextCollects)/nextPlay:0;
-        await tx.execute('UPDATE douyin_works SET play_count=?,like_count=?,comment_count=?,share_count=?,collect_count=?,completion_rate=?,interaction_rate=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,candidate.id]);
+        await tx.execute('UPDATE douyin_works SET play_count=?,like_count=?,comment_count=?,share_count=?,collect_count=?,completion_rate=?,interaction_rate=?,updated_at=? WHERE id=?', [nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,operationTime,candidate.id]);
         await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate,source_type,source_file_sha256,has_play_count,has_like_count,has_comment_count,has_share_count)
           VALUES(?,?,?,?,?,?,?,?,?,'douyin_official_export',?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,has_play_count=excluded.has_play_count,has_like_count=excluded.has_like_count,has_comment_count=excluded.has_comment_count,has_share_count=excluded.has_share_count`,
         [candidate.id,snapshotTime,nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,contentSha,Number(views !== null),Number(likes !== null),Number(comments !== null),Number(shares !== null)]);
@@ -275,8 +279,8 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
         if (previous && Date.parse(previous.collected_at) > Date.parse(snapshotTime)) { staleIgnored++; continue; }
         if (previous?.value_text === valueText) dailyUnchanged++; else if (previous) dailyUpdated++; else dailyInserted++;
         await tx.execute(`INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,metric_date,source_period,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=CURRENT_TIMESTAMP`,
-        [account.id,metricDate,period,code,valueText,valueNumber,unit,sha,parserVersion,snapshotTime]);
+          VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,metric_date,source_period,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=?`,
+        [account.id,metricDate,period,code,valueText,valueNumber,unit,sha,parserVersion,snapshotTime,operationTime]);
       }
     }
     for (const item of incomeMetrics) await store(null,dateKey(item.metric_date)!,text(item.metric_code),item.value,text(item.unit),sourceSha('income'));
@@ -288,12 +292,12 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       // previously observed account value into a new dated fan observation.
       [douyinAccount.id,dateKey(snapshotTime),0,0,contentMetrics.length,officialTotal('views'),officialTotal('likes'),officialTotal('comments'),officialTotal('shares')]);
     }
-    if (douyinAccount) await tx.execute('UPDATE douyin_accounts SET last_sync_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [snapshotTime,douyinAccount.id]);
+    if (douyinAccount) await tx.execute('UPDATE douyin_accounts SET last_sync_time=?,updated_at=? WHERE id=?', [snapshotTime,operationTime,douyinAccount.id]);
     const warnings = [
       ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),
       ...(ambiguousContentRows ? [`${ambiguousContentRows} 条官方作品存在多个标题与发布日期相同的本地候选，已保留官方汇总并等待人工确认`] : []),
     ];
-    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings,...(dataQuality ? { data_quality: dataQuality } : {})}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
+    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings,...(dataQuality ? { data_quality: dataQuality } : {})}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=? WHERE id=?',[JSON.stringify(result),operationTime,batch.id]);
     return {success:true,batch_id:batchId,duplicate_batch:false,...result};
   });
 }
@@ -313,13 +317,16 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
     const modules: Record<string, 'success' | 'failed'> = { douyin_contract: 'failed' };
     const errors: Record<string, string> = {};
     let result: Awaited<ReturnType<typeof persistDouyinContractV2102>> | null = null;
+    let completedAt: string | undefined;
     try {
       result = await persistDouyinContractV2102(agent, payload, snapshotTime, taskId);
       modules.douyin_contract = 'success';
-      await execute('UPDATE creator_agents SET last_active_at=CURRENT_TIMESTAMP WHERE id=?', [agent.id]);
+      completedAt = formatBjtDatabase();
+      await execute('UPDATE creator_agents SET last_active_at=? WHERE id=?', [completedAt, agent.id]);
     } catch (error) {
       errors.douyin_contract = error instanceof Error ? error.message : String(error);
     }
+    const finishedAt = completedAt ?? formatBjtDatabase();
     const finished = await finishTask(agent.id, taskId, modules, errors, snapshotTime, result?.creator_account_id || 0, {
       contract_version: '2.10.2',
       snapshot_id: result?.snapshot_id || text(payload.snapshot_id || syncTask.snapshot_id),
@@ -327,14 +334,15 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
       works: result?.works || 0,
       duplicate: result?.duplicate || false,
       summary: result?.summary || {},
-    });
+    }, finishedAt);
     if (!result) throw Object.assign(new Error(errors.douyin_contract || 'v2.10.2 同步失败'), { statusCode: 400, result: finished });
     return finished;
   }
   const modules:Record<string,'success'|'failed'>={account:'failed',works:'failed',metrics:'failed',trends:'failed',account_metrics:'failed',fans:'failed',raw:'failed',page_schema:'failed',douyin_business:'failed',insights:'failed'}; const errors:Record<string,string>={};
   const attempt = async (name:string, run:()=>Promise<void>) => { try { await run(); modules[name]='success'; } catch(error) { modules[name]='failed'; errors[name]=error instanceof Error?error.message:String(error); } };
   let accountId = 0;
-  await attempt('account', async()=>runInTransaction(async tx=>{await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,nickname,avatar,account_name,status,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id,platform,platform_uid) DO UPDATE SET nickname=excluded.nickname,avatar=excluded.avatar,account_name=excluded.account_name,status=excluded.status,updated_at=CURRENT_TIMESTAMP`,[agent.user_id,agent.platform,platformUid,text(account.nickname),text(account.avatar),text(account.account_name||account.nickname),text(account.status,'active')]);const row=await tx.queryOne<{id:number}>('SELECT id FROM creator_platform_accounts WHERE user_id=? AND platform=? AND platform_uid=?',[agent.user_id,agent.platform,platformUid]);if(!row)throw new Error('账号写入失败');accountId=row.id;await tx.execute(`INSERT INTO creator_account_access(account_id,user_id,access_level) VALUES(?,?,'manage') ON CONFLICT(account_id,user_id) DO UPDATE SET access_level='manage'`,[accountId,agent.user_id]);}));
+  const accountUpdatedAt = formatBjtDatabase();
+  await attempt('account', async()=>runInTransaction(async tx=>{await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,nickname,avatar,account_name,status,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,platform,platform_uid) DO UPDATE SET nickname=excluded.nickname,avatar=excluded.avatar,account_name=excluded.account_name,status=excluded.status,updated_at=?`,[agent.user_id,agent.platform,platformUid,text(account.nickname),text(account.avatar),text(account.account_name||account.nickname),text(account.status,'active'),accountUpdatedAt,accountUpdatedAt]);const row=await tx.queryOne<{id:number}>('SELECT id FROM creator_platform_accounts WHERE user_id=? AND platform=? AND platform_uid=?',[agent.user_id,agent.platform,platformUid]);if(!row)throw new Error('账号写入失败');accountId=row.id;await tx.execute(`INSERT INTO creator_account_access(account_id,user_id,access_level) VALUES(?,?,'manage') ON CONFLICT(account_id,user_id) DO UPDATE SET access_level='manage'`,[accountId,agent.user_id]);}));
   if (!accountId) { for(const name of Object.keys(modules).filter(name=>name!=='account')) errors[name]='账号模块失败，已跳过'; return finishTask(agent.id,taskId,modules,errors,snapshotTime,accountId); }
   const contents=array(payload.contents,5000),metrics=array(payload.metrics,20000),trends=array(payload.trends,50000),rawRecords=array(payload.raw_records,10000),schemas=array(payload.page_schemas,10000);
   await attempt('works',async()=>runInTransaction(async tx=>{for(const item of contents){const itemId=text(item.platform_item_id||item.item_id);if(!itemId)continue;await tx.execute(`INSERT INTO creator_content_items(account_id,platform,platform_item_id,title,cover_url,publish_time,duration,status,raw_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,platform,platform_item_id) DO UPDATE SET title=excluded.title,cover_url=CASE WHEN trim(excluded.cover_url)<>'' THEN excluded.cover_url ELSE creator_content_items.cover_url END,publish_time=excluded.publish_time,duration=excluded.duration,status=excluded.status,raw_json=excluded.raw_json`,[accountId,agent.platform,itemId,text(item.title),coverUrl(item),text(item.publish_time||item.published_at)||null,number(item.duration),text(item.status),json(item.raw_json??item)]);}}));
@@ -355,13 +363,15 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
       }
     });
   });
-  await attempt('page_schema',async()=>runInTransaction(async tx=>{for(const item of schemas)await tx.execute(`INSERT INTO creator_page_schema(page,tab,api,fields,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(page,tab,api) DO UPDATE SET fields=excluded.fields,updated_at=CURRENT_TIMESTAMP`,[text(item.page),text(item.tab),text(item.api),json(item.fields)]);}));
+  const pageSchemaUpdatedAt = formatBjtDatabase();
+  await attempt('page_schema',async()=>runInTransaction(async tx=>{for(const item of schemas)await tx.execute(`INSERT INTO creator_page_schema(page,tab,api,fields,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(page,tab,api) DO UPDATE SET fields=excluded.fields,updated_at=?`,[text(item.page),text(item.tab),text(item.api),json(item.fields),pageSchemaUpdatedAt,pageSchemaUpdatedAt]);}));
   await attempt('douyin_business',async()=>{await persistNormalizedDouyinSync(agent,payload,snapshotTime,taskId);});
   await attempt('insights',async()=>{await creatorInsightService.generate(accountId);});
-  await execute('UPDATE creator_agents SET last_active_at=CURRENT_TIMESTAMP WHERE id=?',[agent.id]);
-  return finishTask(agent.id,taskId,modules,errors,snapshotTime,accountId,{contents:contents.length,metrics:metrics.length,trends:trends.length,raw_records:rawRecords.length});
+  const completedAt = formatBjtDatabase();
+  await execute('UPDATE creator_agents SET last_active_at=? WHERE id=?',[completedAt,agent.id]);
+  return finishTask(agent.id,taskId,modules,errors,snapshotTime,accountId,{contents:contents.length,metrics:metrics.length,trends:trends.length,raw_records:rawRecords.length},completedAt);
 }
 
 export const acceptCreatorDataSyncV291 = acceptCreatorDataSync;
 
-async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=?,claimed_at_ms=0 WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}
+async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={},finishedAt=formatBjtDatabase()){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=?,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=?,claimed_at_ms=0 WHERE agent_id=? AND task_id=?',[finishedAt,status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import test from 'node:test';
+import { test } from 'vitest';
 import PlatformBadge from '../../src/components/studio/PlatformBadge';
 import { getPlatformLabel } from '../../src/platform/platform-labels';
 

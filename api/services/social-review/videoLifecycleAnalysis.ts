@@ -1,4 +1,4 @@
-import { execute, queryAll, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryAll, queryOne } from '../../database/utils.js';
 
 type MetricPoint = {
   snapshotDate: string;
@@ -84,8 +84,8 @@ export async function refreshVideoInsights(videoId: number) {
   if (commentAverage > 0 && rate(video, 'comments') > commentAverage * 2) candidates.push({ type: 'abnormal_comment_rate', content: '评论率显著高于账号平均水平。' });
   if (lifecycle && lifecycle.ageDays >= 7 && Number(lifecycle.growth.day7 || 0) > 0.2) candidates.push({ type: 'long_tail_growth', content: '发布一周后仍保持明显增长。' });
   for (const item of candidates) await execute(
-    `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, ?, ?, 'system', datetime('now', '+8 hours'))
-     ON CONFLICT(video_id, type, source) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`, [videoId, item.type, item.content],
+    `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, ?, ?, 'system', ?)
+     ON CONFLICT(video_id, type, source) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`, [videoId, item.type, item.content, beijingNow()],
   );
   return candidates;
 }

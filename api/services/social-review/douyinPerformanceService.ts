@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext } from 'playwright';
 import type { NormalizedVideoSnapshot, SocialAccount } from '@shared/types/social-review';
 import { decryptCredentialStorageState, getActiveCredentialByRef } from './credentials.js';
-import { execute, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryOne } from '../../database/utils.js';
 
 const CONTENT_URL = 'https://creator.douyin.com/creator-micro/data-center/content';
 const OPERATION_URL = 'https://creator.douyin.com/creator-micro/data-center/operation';
@@ -89,7 +89,7 @@ export async function collectDouyinPerformanceMetrics(account: SocialAccount, vi
           if (!id || !targetIds.has(id)) continue;
           matched += 1;
           const socialVideo = await queryOne<Record<string, unknown>>('SELECT id FROM social_videos WHERE platform = ? AND account_id = ? AND external_video_id = ? LIMIT 1', ['douyin', account.id, id]);
-          if (socialVideo?.id) await execute(`INSERT INTO video_identity_mappings (platform, account_id, source_type, source_video_id, social_video_id, confidence, updated_at) VALUES (?, ?, ?, ?, ?, 'high', datetime('now', '+8 hours')) ON CONFLICT(platform, account_id, source_type, source_video_id) DO UPDATE SET social_video_id = excluded.social_video_id, confidence = excluded.confidence, updated_at = excluded.updated_at`, ['douyin', account.id, source.endpoint, id, Number(socialVideo.id)]);
+          if (socialVideo?.id) await execute(`INSERT INTO video_identity_mappings (platform, account_id, source_type, source_video_id, social_video_id, confidence, updated_at) VALUES (?, ?, ?, ?, ?, 'high', ?) ON CONFLICT(platform, account_id, source_type, source_video_id) DO UPDATE SET social_video_id = excluded.social_video_id, confidence = excluded.confidence, updated_at = excluded.updated_at`, ['douyin', account.id, source.endpoint, id, Number(socialVideo.id), beijingNow()]);
           if (source.endpoint === 'item_performance') merge(result.metricsByExternalVideoId, id, { source: source.endpoint, views: metric(item.play_count) ?? undefined, averagePlayDuration: metric(item.average_play_duration) ?? undefined, completionRate: metric(item.completion_rate_5s) ?? undefined, bounceRate: metric(item.bounce_rate_2s) ?? undefined }, result);
           else merge(result.metricsByExternalVideoId, id, { source: source.endpoint, views: metric(item.PlayCount) ?? undefined, likes: metric(item.LikeCount) ?? undefined, comments: metric(item.CommentCount) ?? undefined, shares: metric(item.ShareCount) ?? undefined }, result);
         }

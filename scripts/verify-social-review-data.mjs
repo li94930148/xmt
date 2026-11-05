@@ -2,11 +2,12 @@ import 'dotenv/config';
 import jwt from 'jsonwebtoken';
 import { createClient } from '@libsql/client';
 import path from 'path';
+import { getSmokePasswordForLogin } from './require-smoke-password.mjs';
 
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3001/api';
 const TOKEN = process.env.TOKEN || '';
 const USERNAME = process.env.SMOKE_USERNAME || 'admin';
-const PASSWORD = process.env.SMOKE_PASSWORD || 'admin123';
+const PASSWORD = getSmokePasswordForLogin();
 const JWT_SECRET = process.env.JWT_SECRET || '';
 
 function getDatabasePath() {

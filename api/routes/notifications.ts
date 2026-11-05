@@ -1,8 +1,9 @@
-import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { queryAll, execute, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
+import { noStoreResponse } from '../middleware/no-store';
+import { beijingNow, queryAll, execute, runInTransaction } from '../database/utils';
 
-const router = Router();
+const router = createAsyncRouter();
 
 function boundedString(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
@@ -21,13 +22,14 @@ router.post('/mobile-devices', authenticate, async (req, res) => {
   const appVersion = boundedString(req.body?.appVersion, 64) || null;
   if (platform !== 'android' || !deviceId) return res.status(400).json({ message: 'Android 设备标识不合法' });
   try {
+    const now = beijingNow();
     await execute(`
       INSERT INTO mobile_devices (user_id, platform, device_id, push_token, app_version, last_seen_at, revoked_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL)
+      VALUES (?, ?, ?, ?, ?, ?, NULL)
       ON CONFLICT(user_id, platform, device_id) DO UPDATE SET
         push_token = excluded.push_token, app_version = excluded.app_version,
-        last_seen_at = CURRENT_TIMESTAMP, revoked_at = NULL
-    `, [req.user!.id, platform, deviceId, pushToken, appVersion]);
+        last_seen_at = ?, revoked_at = NULL
+    `, [req.user!.id, platform, deviceId, pushToken, appVersion, now, now]);
     return res.status(204).end();
   } catch { return res.status(500).json({ message: '移动设备登记失败' }); }
 });
@@ -36,13 +38,13 @@ router.delete('/mobile-devices/:deviceId', authenticate, async (req, res) => {
   const deviceId = boundedString(req.params.deviceId, 128);
   if (!deviceId) return res.status(400).json({ message: 'Android 设备标识不合法' });
   try {
-    await execute('UPDATE mobile_devices SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND platform = ? AND device_id = ?', [req.user!.id, 'android', deviceId]);
+    await execute('UPDATE mobile_devices SET revoked_at = ? WHERE user_id = ? AND platform = ? AND device_id = ?', [beijingNow(), req.user!.id, 'android', deviceId]);
     return res.status(204).end();
   } catch { return res.status(500).json({ message: '移动设备注销失败' }); }
 });
 
 // 获取当前用户的通知偏好
-router.get('/preferences', authenticate, async (req, res) => {
+router.get('/preferences', noStoreResponse, authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
 

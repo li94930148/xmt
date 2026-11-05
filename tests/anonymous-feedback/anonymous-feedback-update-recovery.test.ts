@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import type { AnonymousFeedback } from '../../src/api/anonymousFeedback';
 import {
   fingerprintAnonymousFeedbackUpdateRequest,

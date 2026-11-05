@@ -114,6 +114,7 @@ export async function clearMessages(clientRequestId: string): Promise<MessageCle
 export async function getMessageClearRequestStatus(requestId: string): Promise<MessageClearRequestStatus> {
   const response = await fetch(`${BASE_URL}/messages/clear-requests/${encodeURIComponent(requestId)}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (!response.ok) throw new Error('暂时无法核实清空结果');
   return response.json();
@@ -122,6 +123,7 @@ export async function getMessageClearRequestStatus(requestId: string): Promise<M
 export async function getMessageReadAllRequestStatus(requestId: string): Promise<MessageReadAllRequestStatus> {
   const response = await fetch(`${BASE_URL}/messages/read-all-requests/${encodeURIComponent(requestId)}`, {
     headers: getAuthHeader(),
+    cache: 'no-store',
   });
   if (!response.ok) throw new Error('暂时无法核实批量已读结果');
   return response.json();

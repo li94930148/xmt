@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { Editor } from '@tiptap/core';
 import { createEditorExtensions } from '../../src/components/editor/extensions/editorExtensions';

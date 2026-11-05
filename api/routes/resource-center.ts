@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
@@ -33,8 +34,9 @@ import {
   validateTarget,
 } from '../services/resourceCenter';
 import { resourceCategoryMutationCanonicalRequest, type ResourceCategoryMutationOperation } from '../../shared/resource-category-mutation';
+import { formatBjtDatabase } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const RESOURCE_CREATE_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RESOURCE_UPDATE_REQUEST_ID_PATTERN = RESOURCE_CREATE_REQUEST_ID_PATTERN;
 const RESOURCE_CATEGORY_MUTATION_REQUEST_ID_PATTERN = RESOURCE_CREATE_REQUEST_ID_PATTERN;
@@ -101,13 +103,13 @@ async function getCategoryMutationReplay(
 
 async function recordCategoryMutation(
   tx: TransactionContext,
-  input: { actorId: number; requestId: string; operation: ResourceCategoryMutationOperation; libraryType: string; categoryId: number | null; resultCategoryId: number; fingerprint: string },
+  input: { actorId: number; requestId: string; operation: ResourceCategoryMutationOperation; libraryType: string; categoryId: number | null; resultCategoryId: number; fingerprint: string; createdAt: string },
 ) {
   await tx.execute(
     `INSERT INTO resource_category_mutation_request_keys
       (client_request_id,actor_id,operation,library_type,target_category_id,result_category_id,request_fingerprint,created_at)
-     VALUES(?,?,?,?,?,?,?,datetime('now','+8 hours'))`,
-    [input.requestId, input.actorId, input.operation, input.libraryType, input.categoryId, input.resultCategoryId, input.fingerprint],
+     VALUES(?,?,?,?,?,?,?,?)`,
+    [input.requestId, input.actorId, input.operation, input.libraryType, input.categoryId, input.resultCategoryId, input.fingerprint, input.createdAt],
   );
 }
 
@@ -709,9 +711,10 @@ router.put('/resources/:id', requirePermission('resource:update'), async (req, r
     }
     if (assignments.length === 0 && !Array.isArray(body.tag_ids)) return res.status(400).json({ message: '没有需要更新的字段' });
     const before = Object.fromEntries(allowed.map((field) => [field, resource[field]]));
+    const operationTime = formatBjtDatabase();
     await runInTransaction(async (tx) => {
       if (assignments.length) {
-        await tx.execute(`UPDATE resources SET ${assignments.join(', ')}, updated_by = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [...args, req.user!.id, resource.id]);
+        await tx.execute(`UPDATE resources SET ${assignments.join(', ')}, updated_by = ?, updated_at = ? WHERE id = ?`, [...args, req.user!.id, operationTime, resource.id]);
       }
       if (Array.isArray(body.tag_ids)) {
         const tagIds = [...new Set(body.tag_ids.map(positiveInteger).filter(Boolean))] as number[];
@@ -721,9 +724,9 @@ router.put('/resources/:id', requirePermission('resource:update'), async (req, r
           if (Number(found?.count || 0) !== tagIds.length) throw new Error('标签不存在');
         }
         await tx.execute('DELETE FROM resource_tag_relations WHERE resource_id = ?', [resource.id]);
-        for (const tagId of tagIds) await tx.execute(`INSERT INTO resource_tag_relations(resource_id, tag_id, created_by, created_at) VALUES (?, ?, ?, datetime('now', '+8 hours'))`, [resource.id, tagId, req.user!.id]);
+        for (const tagId of tagIds) await tx.execute(`INSERT INTO resource_tag_relations(resource_id, tag_id, created_by, created_at) VALUES (?, ?, ?, ?)`, [resource.id, tagId, req.user!.id, operationTime]);
       }
-      await tx.execute(`INSERT INTO resource_audit_logs(resource_id,user_id,action,detail_json,created_at) VALUES(?,?, 'update', ?, datetime('now', '+8 hours'))`, [resource.id, req.user!.id, JSON.stringify({ before, changes: updates, tag_ids: body.tag_ids })]);
+      await tx.execute(`INSERT INTO resource_audit_logs(resource_id,user_id,action,detail_json,created_at) VALUES(?,?, 'update', ?, ?)`, [resource.id, req.user!.id, JSON.stringify({ before, changes: updates, tag_ids: body.tag_ids }), operationTime]);
     });
     res.json({ message: '资料更新成功' });
   } catch (error) {
@@ -746,11 +749,12 @@ router.delete('/resources/:id', requirePermission('resource:delete'), async (req
     if (!resource) return;
     if (!await canModifyResource(resource, req.user)) return res.status(403).json({ message: '无权删除该资料' });
     const outcome = await runInTransaction(async (tx) => {
+      const operationTime = formatBjtDatabase();
       const changed = await tx.execute(
         `UPDATE resources
-         SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours')
+         SET status='deleted', deleted_at=?, updated_by=?, updated_at=?
          WHERE id=? AND COALESCE(status,'published') <> 'deleted' AND deleted_at IS NULL`,
-        [req.user!.id, resource.id],
+        [operationTime, req.user!.id, operationTime, resource.id],
       );
       if (changed !== 1) {
         const current = await tx.queryOne<{ status: string | null; deleted_at: string | null }>(
@@ -773,11 +777,12 @@ router.post('/resources/:id/restore', requirePermission('resource:delete'), asyn
     if (!resource) return;
     if (!await canModifyResource(resource, req.user)) return res.status(403).json({ message: '无权恢复该资料' });
     const outcome = await runInTransaction(async (tx) => {
+      const operationTime = formatBjtDatabase();
       const changed = await tx.execute(
         `UPDATE resources
-         SET status='published', deleted_at=NULL, updated_by=?, updated_at=datetime('now','+8 hours')
+         SET status='published', deleted_at=NULL, updated_by=?, updated_at=?
          WHERE id=? AND (COALESCE(status,'published')='deleted' OR deleted_at IS NOT NULL)`,
-        [req.user!.id, resource.id],
+        [req.user!.id, operationTime, resource.id],
       );
       if (changed !== 1) {
         const current = await tx.queryOne<{ status: string | null; deleted_at: string | null }>(
@@ -853,6 +858,7 @@ router.post('/categories', requirePermission('resource:category_manage'), async 
     const fingerprint = requestId
       ? resourceCategoryMutationFingerprint('create', String(libraryType), null, mutationPayload)
       : null;
+    const operationTime = formatBjtDatabase();
     const outcome = await runInTransaction(async (tx) => {
       if (requestId && fingerprint) {
         const replayedId = await getCategoryMutationReplay(tx, {
@@ -878,12 +884,12 @@ router.post('/categories', requirePermission('resource:category_manage'), async 
       }
       const path = `/${pathSegments.reverse().join('/')}`;
       const id = await tx.executeInsert(
-        `INSERT INTO resource_categories(library_type,parent_id,name,code,path,sort_order,enabled,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,datetime('now','+8 hours'),datetime('now','+8 hours'))`,
-        [libraryType, parentId, name, cleanOptionalText(req.body.code), path, nonNegativeInteger(req.body.sort_order) || 0, req.user!.id],
+        `INSERT INTO resource_categories(library_type,parent_id,name,code,path,sort_order,enabled,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?,?)`,
+        [libraryType, parentId, name, cleanOptionalText(req.body.code), path, nonNegativeInteger(req.body.sort_order) || 0, req.user!.id, operationTime, operationTime],
       );
       if (requestId && fingerprint) {
         await recordCategoryMutation(tx, {
-          actorId: Number(req.user!.id), requestId, operation: 'create', libraryType: String(libraryType), categoryId: null, resultCategoryId: id, fingerprint,
+          actorId: Number(req.user!.id), requestId, operation: 'create', libraryType: String(libraryType), categoryId: null, resultCategoryId: id, fingerprint, createdAt: operationTime,
         });
       }
       return { status: 201 as const, message: '分类创建成功', id };
@@ -918,6 +924,7 @@ router.put('/categories/:id', requirePermission('resource:category_manage'), asy
     const fingerprint = requestId && libraryType
       ? resourceCategoryMutationFingerprint('update', libraryType, id, mutationPayload)
       : null;
+    const operationTime = formatBjtDatabase();
     const outcome = await runInTransaction(async (tx) => {
       if (requestId && libraryType && fingerprint) {
         const replayedId = await getCategoryMutationReplay(tx, {
@@ -994,17 +1001,17 @@ router.put('/categories/:id', requirePermission('resource:category_manage'), asy
       }
 
       await tx.execute(
-        `UPDATE resource_categories SET parent_id=?,name=?,code=?,path=?,sort_order=?,enabled=?,updated_at=datetime('now','+8 hours') WHERE id=?`,
-        [parentId, name, body.code === undefined ? current.code : cleanOptionalText(body.code), path, body.sort_order === undefined ? current.sort_order : nonNegativeInteger(body.sort_order), body.enabled === undefined ? current.enabled : (body.enabled === true || body.enabled === 1 ? 1 : 0), id],
+        `UPDATE resource_categories SET parent_id=?,name=?,code=?,path=?,sort_order=?,enabled=?,updated_at=? WHERE id=?`,
+        [parentId, name, body.code === undefined ? current.code : cleanOptionalText(body.code), path, body.sort_order === undefined ? current.sort_order : nonNegativeInteger(body.sort_order), body.enabled === undefined ? current.enabled : (body.enabled === true || body.enabled === 1 ? 1 : 0), operationTime, id],
       );
       for (const update of pathUpdates.slice(1)) {
         const descendant = categoriesById.get(update.categoryId);
         if (descendant?.path === update.path) continue;
-        await tx.execute(`UPDATE resource_categories SET path=?,updated_at=datetime('now','+8 hours') WHERE id=?`, [update.path, update.categoryId]);
+        await tx.execute(`UPDATE resource_categories SET path=?,updated_at=? WHERE id=?`, [update.path, operationTime, update.categoryId]);
       }
       if (requestId && libraryType && fingerprint) {
         await recordCategoryMutation(tx, {
-          actorId: Number(req.user!.id), requestId, operation: 'update', libraryType, categoryId: id, resultCategoryId: id, fingerprint,
+          actorId: Number(req.user!.id), requestId, operation: 'update', libraryType, categoryId: id, resultCategoryId: id, fingerprint, createdAt: operationTime,
         });
       }
       return { status: 200 as const, message: '分类更新成功' };
@@ -1034,6 +1041,7 @@ router.delete('/categories/:id', requirePermission('resource:category_manage'), 
   if (requestId) {
     const libraryType = String(body.library_type);
     const fingerprint = resourceCategoryMutationFingerprint('delete', libraryType, id, {});
+    const operationTime = formatBjtDatabase();
     try {
       const outcome = await runInTransaction(async (tx) => {
         const replayedId = await getCategoryMutationReplay(tx, {
@@ -1052,7 +1060,7 @@ router.delete('/categories/:id', requirePermission('resource:category_manage'), 
         const changed = await tx.execute('DELETE FROM resource_categories WHERE id=?', [id]);
         if (!changed) return { status: 404 as const, message: '分类不存在' };
         await recordCategoryMutation(tx, {
-          actorId: Number(req.user!.id), requestId, operation: 'delete', libraryType, categoryId: id, resultCategoryId: id, fingerprint,
+          actorId: Number(req.user!.id), requestId, operation: 'delete', libraryType, categoryId: id, resultCategoryId: id, fingerprint, createdAt: operationTime,
         });
         return { status: 200 as const, message: '分类已删除' };
       });
@@ -1080,7 +1088,8 @@ router.post('/tags', requirePermission('resource:category_manage'), async (req, 
   const normalized = normalizeTagName(name);
   if (!name || !normalized) return res.status(400).json({ message: '标签名称不能为空' });
   try {
-    const id = await executeInsert(`INSERT INTO resource_tags(name,normalized_name,created_by,created_at) VALUES(?,?,?,datetime('now','+8 hours'))`, [name,normalized,req.user!.id]);
+    const createdAt = formatBjtDatabase();
+    const id = await executeInsert(`INSERT INTO resource_tags(name,normalized_name,created_by,created_at) VALUES(?,?,?,?)`, [name,normalized,req.user!.id,createdAt]);
     res.status(201).json({ message: '标签创建成功', id });
   } catch { res.status(409).json({ message: '标签已存在' }); }
 });
@@ -1099,10 +1108,11 @@ router.post('/resources/:id/tags', requirePermission('resource:update'), async (
   if (!tagId || !await queryOne('SELECT id FROM resource_tags WHERE id=?', [tagId])) return res.status(404).json({ message: '标签不存在' });
   try {
     const added = await runInTransaction(async (tx) => {
+      const createdAt = formatBjtDatabase();
       const changed = await tx.execute(`
         INSERT OR IGNORE INTO resource_tag_relations(resource_id,tag_id,created_by,created_at)
-        VALUES(?,?,?,datetime('now','+8 hours'))
-      `, [resource.id, tagId, req.user!.id]);
+        VALUES(?,?,?,?)
+      `, [resource.id, tagId, req.user!.id, createdAt]);
       if (changed) await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'update', { tag_add: tagId });
       return changed;
     });
@@ -1140,7 +1150,8 @@ router.post('/resources/:id/relations', requirePermission('resource:update'), as
     if (!(targetType in RESOURCE_TARGET_TABLES) || !targetId || !relationType) return res.status(400).json({ message: '关联参数无效' });
     if (!await validateTarget(targetType,targetId)) return res.status(404).json({ message: '关联目标不存在' });
     const id = await runInTransaction(async (tx) => {
-      const relationId = await tx.executeInsert(`INSERT INTO resource_relations(resource_id,target_type,target_id,relation_type,created_by,created_at) VALUES(?,?,?,?,?,datetime('now','+8 hours'))`, [resource.id,targetType,targetId,relationType,req.user!.id]);
+      const createdAt = formatBjtDatabase();
+      const relationId = await tx.executeInsert(`INSERT INTO resource_relations(resource_id,target_type,target_id,relation_type,created_by,created_at) VALUES(?,?,?,?,?,?)`, [resource.id,targetType,targetId,relationType,req.user!.id,createdAt]);
       await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'relation_add', {
         relation_id: relationId,
         target_type: targetType,
@@ -1188,7 +1199,8 @@ router.post('/resources/:id/files', requirePermission('resource:update'), async 
   if (!originalName || !storageKey || (req.body.size_bytes != null && size == null)) return res.status(400).json({ message: '文件元数据无效' });
   try {
     const id = await runInTransaction(async (tx) => {
-      const fileId = await tx.executeInsert(`INSERT INTO resource_files(resource_id,original_name,storage_key,mime_type,extension,size_bytes,sha256,is_primary,status,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now','+8 hours'))`, [resource.id,originalName,storageKey,cleanOptionalText(req.body.mime_type),cleanOptionalText(req.body.extension),size,cleanOptionalText(req.body.sha256),req.body.is_primary?1:0,cleanOptionalText(req.body.status)||'pending',req.user!.id]);
+      const createdAt = formatBjtDatabase();
+      const fileId = await tx.executeInsert(`INSERT INTO resource_files(resource_id,original_name,storage_key,mime_type,extension,size_bytes,sha256,is_primary,status,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, [resource.id,originalName,storageKey,cleanOptionalText(req.body.mime_type),cleanOptionalText(req.body.extension),size,cleanOptionalText(req.body.sha256),req.body.is_primary?1:0,cleanOptionalText(req.body.status)||'pending',req.user!.id,createdAt]);
       await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'update', { file_metadata_add: fileId });
       return fileId;
     });

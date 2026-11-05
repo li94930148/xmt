@@ -27,8 +27,38 @@ const server = app.listen(0, '127.0.0.1');
 await new Promise<void>(resolve => server.once('listening', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
+const noStore = (response: Response) => assert.match(response.headers.get('cache-control') || '', /no-store/i);
 
 try {
+  const cacheSensitiveReads = ['/','/me','/progress','/stats','/leaderboard','/recent?limit=10'];
+  for (const path of cacheSensitiveReads) {
+    const unauthenticated = await fetch(`http://127.0.0.1:${address.port}/api/achievements${path}`);
+    assert.equal(unauthenticated.status, 401, `${path} requires authentication`);
+    noStore(unauthenticated);
+
+    const readable = await fetch(`http://127.0.0.1:${address.port}/api/achievements${path}`, {
+      headers: { authorization: `Bearer ${signToken({ userId })}` },
+    });
+    assert.equal(readable.status, 200, `${path} reads successfully for the signed-in user`);
+    noStore(readable);
+    if (path === '/leaderboard') {
+      const body = await readable.json() as { data: Array<{
+        user_id: number;
+        user_name: string;
+        achievement_count: number;
+        total_points: number;
+      }> };
+      assert.deepEqual(body.data.find((entry) => entry.user_id === userId), {
+        user_id: userId,
+        user_name: '成就测试用户',
+        achievement_count: 1,
+        total_points: 10,
+      }, 'leaderboard uses the existing users schema and returns the earned score');
+    } else {
+      await readable.arrayBuffer();
+    }
+  }
+
   const response = await fetch(`http://127.0.0.1:${address.port}/api/achievements/check`, {
     method: 'POST',
     headers: { authorization: `Bearer ${signToken({ userId })}`, 'content-type': 'application/json' },

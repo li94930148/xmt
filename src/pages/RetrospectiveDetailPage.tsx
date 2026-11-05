@@ -11,6 +11,7 @@ import {
   getRetroDailyRisks,
   getRetroActionCreateRequestStatus,
   getRetrospectiveDetail,
+  getRetrospectiveDetailForRecovery,
   publishRetrospective,
   updateRetroAction,
   updateRetrospective,
@@ -594,7 +595,7 @@ export default function RetrospectiveDetailPage() {
     snapshotRecoveryCheckRef.current = token;
     setSnapshotRecovery({ marker, state: 'checking' });
     try {
-      const refreshed = await getRetrospectiveDetail(marker.retroId, { cache: 'no-store' });
+      const refreshed = await getRetrospectiveDetailForRecovery(marker.retroId);
       if (currentRetroIdRef.current !== marker.retroId
         || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId) return;
       if (refreshed.retrospective?.id !== marker.retroId || !Array.isArray(refreshed.snapshots)
@@ -661,7 +662,7 @@ export default function RetrospectiveDetailPage() {
       && transitionRecoveryCheckRef.current === token
       && (recovery.marker ? transitionRecoveryRequestRef.current === recovery.marker.requestId : transitionRecoveryRequestRef.current === null);
     try {
-      const refreshed = await getRetrospectiveDetail(recovery.retroId, { cache: 'no-store' });
+      const refreshed = await getRetrospectiveDetailForRecovery(recovery.retroId);
       if (!isCurrent()) return;
       if (refreshed.retrospective?.id !== recovery.retroId) {
         setTransitionRecovery({ ...recovery, state: 'unknown', error: '回读结果与当前复盘不匹配' });
@@ -819,7 +820,7 @@ export default function RetrospectiveDetailPage() {
     if (!isCurrentSummaryUpdateRecovery(marker)) return false;
     setSummaryUpdateRecoveryStateForMarker(marker, state);
     try {
-      const refreshed = await getRetrospectiveDetail(marker.retroId);
+      const refreshed = await getRetrospectiveDetailForRecovery(marker.retroId);
       if (!isCurrentSummaryUpdateRecovery(marker)) return false;
       const submittedStillCurrent = refreshed.retrospective.title === marker.payload.title
         && (refreshed.retrospective.summaryMd || '') === marker.payload.summaryMd;
@@ -1059,7 +1060,7 @@ export default function RetrospectiveDetailPage() {
     if (!isCurrentActionUpdateRecovery(marker)) return false;
     setActionUpdateRecovery(marker, state);
     try {
-      const refreshed = await getRetrospectiveDetail(marker.retroId);
+      const refreshed = await getRetrospectiveDetailForRecovery(marker.retroId);
       if (!isCurrentActionUpdateRecovery(marker)) return false;
       applyDetail(refreshed);
       if (outcome === 'conflict') setActionDraftRestoreSignal({
@@ -1240,7 +1241,7 @@ export default function RetrospectiveDetailPage() {
       }
       setActionCreateRecoveryState('created');
       try {
-        const refreshed = await getRetrospectiveDetail(marker.retroId);
+        const refreshed = await getRetrospectiveDetailForRecovery(marker.retroId);
         if (!isCurrentActionCreateRecovery(marker)) return false;
         applyDetail(refreshed);
         if (clearActionCreateMarker(marker)) {
@@ -1262,7 +1263,7 @@ export default function RetrospectiveDetailPage() {
   const refreshConfirmedActionCreate = async (marker: PendingRetroActionCreate) => {
     if (!isCurrentActionCreateRecovery(marker)) return;
     try {
-      const refreshed = await getRetrospectiveDetail(marker.retroId);
+      const refreshed = await getRetrospectiveDetailForRecovery(marker.retroId);
       if (!isCurrentActionCreateRecovery(marker)) return;
       applyDetail(refreshed);
       if (clearActionCreateMarker(marker)) {

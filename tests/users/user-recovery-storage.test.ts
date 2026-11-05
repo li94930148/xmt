@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { persistVerifiedUserRecovery } from '../../src/pages/users/userRecoveryStorage.js';
 
 test('user recovery marker is written and read back exactly', () => {

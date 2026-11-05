@@ -31,6 +31,13 @@ const sessionId = await sessionService.createSession({ userId, clientType: 'andr
 const v1Authorization = { authorization: `Bearer ${createAccessTokenV1({ userId, sessionId })}` };
 
 try {
+  const preferencesResponse = await fetch(`${baseUrl}/preferences`, { headers: authorization });
+  assert.equal(preferencesResponse.status, 200);
+  assert.equal(preferencesResponse.headers.get('cache-control'), 'no-store');
+  const unauthenticatedPreferences = await fetch(`${baseUrl}/preferences`);
+  assert.equal(unauthenticatedPreferences.status, 401);
+  assert.equal(unauthenticatedPreferences.headers.get('cache-control'), 'no-store');
+
   const created = await fetch(`${baseUrl}/mobile-devices`, { method: 'POST', headers: { 'content-type': 'application/json', ...authorization }, body: JSON.stringify({ platform: 'android', deviceId: 'device-1', pushToken: 'token-one', appVersion: '2.19.1' }) });
   assert.equal(created.status, 204);
   const stored = await queryOne<Record<string, unknown>>('SELECT push_token, app_version, revoked_at FROM mobile_devices WHERE user_id = ? AND device_id = ?', [userId, 'device-1']);

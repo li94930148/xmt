@@ -1,4 +1,5 @@
 import { execute, queryOne } from '../../database/utils.js';
+import { formatBjtDatabase } from '../../../shared/time/index.js';
 import { decryptCredentialPayload } from './credentialCrypto.js';
 
 export type SocialCredentialRecord = {
@@ -27,12 +28,14 @@ export type CredentialHealth = { status: 'active' | 'expired' | 'need_login' | '
 export async function credentialHealthCheck(accountId: number): Promise<CredentialHealth> {
   const credential = await queryOne<SocialCredentialRecord>(`SELECT status, encrypted_payload FROM social_credentials WHERE account_id = ? ORDER BY updated_at DESC LIMIT 1`, [accountId]);
   if (!credential) return { status: 'need_login', code: 'need_login', reason: '未配置登录状态' };
-  await execute(`UPDATE social_credentials SET last_check_time = datetime('now', '+8 hours'), status = CASE WHEN status = 'active' THEN 'checking' ELSE status END, updated_at = datetime('now', '+8 hours') WHERE account_id = ?`, [accountId]);
+  const checkingAt = formatBjtDatabase();
+  await execute(`UPDATE social_credentials SET last_check_time = ?, status = CASE WHEN status = 'active' THEN 'checking' ELSE status END, updated_at = ? WHERE account_id = ?`, [checkingAt, checkingAt, accountId]);
   // Never inspect or persist browser cookie/storage values. A configured credential is
   // only declared active after the collector itself succeeds.
   if (credential.status === 'expired') return { status: 'expired', code: 'credential_expired', reason: '账号登录已失效，请扫码重新登录' };
   if (!credential.encrypted_payload) return { status: 'need_login', code: 'need_login', reason: '账号尚未完成登录恢复' };
-  await execute(`UPDATE social_credentials SET status = 'active', last_success_time = datetime('now', '+8 hours'), last_verified_at = datetime('now', '+8 hours'), updated_at = datetime('now', '+8 hours') WHERE account_id = ?`, [accountId]);
+  const verifiedAt = formatBjtDatabase();
+  await execute(`UPDATE social_credentials SET status = 'active', last_success_time = ?, last_verified_at = ?, updated_at = ? WHERE account_id = ?`, [verifiedAt, verifiedAt, verifiedAt, accountId]);
   return { status: 'active', reason: null };
 }
 
@@ -68,18 +71,19 @@ export async function decryptCredentialStorageState(credential: SocialCredential
 }
 
 export async function markCredentialExpired(credentialRef: string, reason = '登录凭据已失效，请重新扫码登录。') {
+  const expiredAt = formatBjtDatabase();
   await execute(
     `UPDATE social_credentials
         SET status = 'expired',
-            last_failed_at = datetime('now', '+8 hours'),
+            last_failed_at = ?,
             last_error = ?,
             expired_reason = ?,
-            last_failure_time = datetime('now', '+8 hours'),
+            last_failure_time = ?,
             failure_reason = ?,
-            expire_detected_at = datetime('now', '+8 hours'),
-            updated_at = datetime('now', '+8 hours')
+            expire_detected_at = ?,
+            updated_at = ?
       WHERE credential_ref = ?`,
-    [reason, reason, reason, credentialRef],
+    [expiredAt, reason, reason, expiredAt, reason, expiredAt, expiredAt, credentialRef],
   );
 }
 

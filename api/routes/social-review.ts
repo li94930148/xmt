@@ -1,4 +1,5 @@
-import express, { type NextFunction, type Request, type Response } from 'express';
+import { type NextFunction, type Request, type Response } from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { sendSafeServerError } from '../utils/response.js';
@@ -31,8 +32,9 @@ import { RemoteBrowserSessionError, captureRemoteBrowser, remoteBrowserClick, re
 import { listSimilarVideos } from '../services/social-review/similarVideoService.js';
 import { connectCreatorCdp } from '../services/social-review/cdpBrowserService.js';
 import { syncDouyinAccountMetrics } from '../services/social-review/douyinAccountMetricService.js';
+import { formatBjtDatabase } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 // Keep the dormant legacy router safe if it is mounted again: every endpoint
 // exposes account or collection analytics and therefore requires view access.
@@ -148,22 +150,23 @@ router.post('/accounts/connect/start', requireAdmin, async (req, res) => {
     if (platform !== 'douyin') return res.status(400).json({ success: false, message: 'Only Douyin accounts can be connected here.' });
     if (!nickname) return res.status(400).json({ success: false, message: 'Account name is required.' });
 
+    const operationTime = formatBjtDatabase();
     const accountId = await executeInsert(
       `INSERT INTO social_accounts
         (platform, external_account_id, account_name, display_name, owner_id, active, fetch_strategy, remark, created_at, updated_at)
-       VALUES (?, NULL, ?, ?, ?, 1, 'native_playwright', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-      [platform, nickname, nickname, req.user?.id || null, remark || null],
+       VALUES (?, NULL, ?, ?, ?, 1, 'native_playwright', ?, ?, ?)`,
+      [platform, nickname, nickname, req.user?.id || null, remark || null, operationTime, operationTime],
     );
     const credentialRef = `browser-profile:${accountId}`;
     await execute(
       `INSERT INTO social_credentials
         (platform, account_id, credential_type, credential_ref, status, created_by, updated_by, created_at, updated_at)
-       VALUES (?, ?, 'server_browser_profile', ?, 'pending_login', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-      [platform, accountId, credentialRef, req.user?.id || null, req.user?.id || null],
+       VALUES (?, ?, 'server_browser_profile', ?, 'pending_login', ?, ?, ?, ?)`,
+      [platform, accountId, credentialRef, req.user?.id || null, req.user?.id || null, operationTime, operationTime],
     );
     await execute(
-      `UPDATE social_accounts SET credential_ref = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-      [credentialRef, accountId],
+      `UPDATE social_accounts SET credential_ref = ?, updated_at = ? WHERE id = ?`,
+      [credentialRef, operationTime, accountId],
     );
     const recovery = await startSocialLoginRecovery(accountId, Number(req.user?.id));
     sendData(res, { accountId, loginSessionId: recovery.sessionId, status: recovery.status, streamReady: recovery.streamReady === true });
@@ -218,11 +221,12 @@ router.post('/accounts', async (req, res) => {
       return res.status(409).json({ success: false, message: '账号已存在。' });
     }
 
+    const createdAt = formatBjtDatabase();
     const id = await executeInsert(
       `INSERT INTO social_accounts
         (platform, external_account_id, account_name, display_name, profile_url, active, fetch_strategy,
          remark, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         platform,
         externalAccountId,
@@ -232,6 +236,8 @@ router.post('/accounts', async (req, res) => {
         body.active === false ? 0 : 1,
         String(body.fetchStrategy || 'manual'),
         body.remark ? String(body.remark) : null,
+        createdAt,
+        createdAt,
       ],
     );
     const account = await getSocialAccount(id);
@@ -269,15 +275,17 @@ router.get('/accounts/:id', async (req, res) => {
 router.patch('/accounts/:id', async (req, res) => {
   try {
     const body = req.body as Record<string, unknown>;
+    const updatedAt = formatBjtDatabase();
     await execute(
       `UPDATE social_accounts
           SET active = COALESCE(?, active),
               remark = COALESCE(?, remark),
-              updated_at = datetime('now', '+8 hours')
+              updated_at = ?
         WHERE id = ?`,
       [
         typeof body.active === 'boolean' ? (body.active ? 1 : 0) : null,
         body.remark ? String(body.remark) : null,
+        updatedAt,
         Number(req.params.id),
       ],
     );

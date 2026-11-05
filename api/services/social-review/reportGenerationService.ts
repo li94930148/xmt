@@ -1,4 +1,4 @@
-import { execute, queryAll, queryOne } from '../../database/utils.js';
+import { beijingNow, execute, queryAll, queryOne } from '../../database/utils.js';
 import { analyzeAccountHealth } from './accountHealthService.js';
 import { refreshAccountVideoContentFeatures } from './videoContentFeatureService.js';
 import { inspectSocialDataQuality } from './socialDataQualityService.js';
@@ -80,15 +80,16 @@ export async function generateAccountReport(accountId: number, options: { period
   };
   const representative = qualified.sort((a, b) => b.avgInteractionRate - a.avgInteractionRate)[0];
   if (representative) await execute(
-    `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, 'account_report', ?, 'system', datetime('now', '+8 hours'))
+    `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, 'account_report', ?, 'system', ?)
      ON CONFLICT(video_id, type, source) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`,
-    [representative.videoIds[0], `近${period.slice(0, -1)}天${representative.feature}类内容平均互动率较高。`],
+    [representative.videoIds[0], `近${period.slice(0, -1)}天${representative.feature}类内容平均互动率较高。`, beijingNow()],
   );
+  const reportUpdatedAt = beijingNow();
   await execute(
     `INSERT INTO social_review_reports (account_id, report_type, period_type, period_start, period_end, summary_json, report_json, created_at, updated_at)
-     VALUES (?, 'account_review', ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+     VALUES (?, 'account_review', ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, report_type, period_start, period_end) DO UPDATE SET period_type = excluded.period_type, summary_json = excluded.summary_json, report_json = excluded.report_json, updated_at = excluded.updated_at`,
-    [accountId, period, periodStart, periodEnd, JSON.stringify(report), JSON.stringify(report)],
+    [accountId, period, periodStart, periodEnd, JSON.stringify(report), JSON.stringify(report), reportUpdatedAt, reportUpdatedAt],
   );
   return { accountId, reportType: 'account_review', periodType: period, periodStart, periodEnd, report };
 }

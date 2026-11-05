@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { createBatchMutationNotice } from '../../src/utils/batch-mutation-feedback.js';
 
 test('batch delete success reports only completed work', () => {

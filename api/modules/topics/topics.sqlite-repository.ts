@@ -82,16 +82,18 @@ function buildUpdate(patch: TopicPersistencePatch) {
     updates.push('stage_entered_at = ?'); params.push(beijingNow());
   }
 
-  updates.push("updated_at = datetime('now', '+8 hours')");
+  updates.push('updated_at = ?');
+  params.push(beijingNow());
   return { updates, params };
 }
 
 async function createTopic(tx: DatabaseTransaction, input: CreateTopicRecord) {
+  const now = beijingNow();
   return tx.executeInsert(
     `INSERT INTO topics (title, description, outline, outline_markdown, outline_json, platform, deadline, creator_id, assignee_id, status, submitted_at, stage_entered_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [input.title, input.description, input.outline, input.outlineMarkdown, input.outlineJson, input.platform,
-      input.deadline, input.creatorId, input.assigneeId, 'pending'],
+      input.deadline, input.creatorId, input.assigneeId, 'pending', now, now],
   );
 }
 
@@ -139,8 +141,8 @@ function transactionAdapter(tx: DatabaseTransaction): TopicTransaction {
       await tx.execute(
         `INSERT INTO topic_create_request_keys
           (client_request_id,actor_id,topic_id,request_fingerprint,created_at)
-         VALUES(?,?,?,?,datetime('now', '+8 hours'))`,
-        [input.clientRequestId, input.actorId, input.topicId, input.requestFingerprint],
+         VALUES(?,?,?,?,?)`,
+        [input.clientRequestId, input.actorId, input.topicId, input.requestFingerprint, beijingNow()],
       );
     },
     findDetailById: (id) => tx.queryOne<TopicRecord>(TOPIC_DETAIL_SQL, [id]),
@@ -160,9 +162,9 @@ function transactionAdapter(tx: DatabaseTransaction): TopicTransaction {
            outcome = 'adopted', sample_count = excluded.sample_count,
            baseline_count = excluded.baseline_count, median_plays = excluded.median_plays,
            baseline_median_plays = excluded.baseline_median_plays, play_ratio = excluded.play_ratio,
-           updated_at = datetime('now', '+8 hours')`,
+           updated_at = ?`,
         [input.creatorAccountId, input.userId, input.suggestionId, input.evidenceId,
-          input.sampleCount, input.baselineCount, input.medianPlays, input.baselineMedianPlays, input.playRatio],
+          input.sampleCount, input.baselineCount, input.medianPlays, input.baselineMedianPlays, input.playRatio, beijingNow()],
       );
       await tx.execute(
         `INSERT INTO creator_topic_suggestion_topic_links (

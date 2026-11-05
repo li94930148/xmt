@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { getKanbanTopicDestination } from '../../src/platform/kanban-navigation';
+import { describe, it } from 'vitest';
 
-async function run() {
+describe('kanban topic navigation', () => {
+  it('uses linked stage record IDs and handles missing stage records', async () => {
   const shooting = await getKanbanTopicDestination(
     { id: 17, status: 'shooting' },
     {
@@ -37,6 +39,5 @@ async function run() {
     { getShooting: async () => ({ data: [] }), getPublishing: async () => ({ data: [] }) },
   );
   assert.equal(production, '/production/23');
-}
-
-void run().then(() => console.log('Kanban workflow detail navigation tests passed'));
+  });
+});

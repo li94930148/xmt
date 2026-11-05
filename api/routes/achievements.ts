@@ -1,13 +1,15 @@
-import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
+import { noStoreResponse } from '../middleware/no-store';
 import { createMessage } from '../utils/messageHelper';
+import { dateKeyBjt } from '../../shared/time/index.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 // GET / - 获取所有成就定义（支持分类筛选）
-router.get('/', authenticate, async (req, res) => {
+router.get('/', noStoreResponse, authenticate, async (req, res) => {
   try {
     const { category, rarity } = req.query;
     let sql = `SELECT * FROM achievements WHERE 1=1`;
@@ -31,7 +33,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // GET /me - 获取当前用户的成就（包含已获得的 earned_at 和进度）
-router.get('/me', authenticate, async (req, res) => {
+router.get('/me', noStoreResponse, authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
 
@@ -51,7 +53,7 @@ router.get('/me', authenticate, async (req, res) => {
 });
 
 // GET /progress - 获取当前用户每个成就的进度
-router.get('/progress', authenticate, async (req, res) => {
+router.get('/progress', noStoreResponse, authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
     const achievements = await queryAll(`SELECT * FROM achievements ORDER BY id ASC`);
@@ -97,9 +99,10 @@ router.get('/progress', authenticate, async (req, res) => {
           break;
         }
         case 'login_streak': {
+          const startDate = dateKeyBjt(Date.now() - Math.max(0, Number(conditionValue)) * 24 * 60 * 60 * 1000);
           const r: any = await queryOne(
-            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
-            [userId, conditionValue]
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= ?`,
+            [userId, startDate]
           );
           current = r?.days || 0;
           break;
@@ -149,7 +152,7 @@ router.get('/progress', authenticate, async (req, res) => {
 });
 
 // GET /stats - 获取当前用户的成就统计
-router.get('/stats', authenticate, async (req, res) => {
+router.get('/stats', noStoreResponse, authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
 
@@ -194,13 +197,12 @@ router.get('/stats', authenticate, async (req, res) => {
 });
 
 // GET /leaderboard - 成就积分排行榜
-router.get('/leaderboard', authenticate, async (req, res) => {
+router.get('/leaderboard', noStoreResponse, authenticate, async (req, res) => {
   try {
     const leaderboard = await queryAll(`
       SELECT 
         u.id as user_id,
         u.name as user_name,
-        u.avatar,
         COUNT(ua.id) as achievement_count,
         COALESCE(SUM(a.points), 0) as total_points
       FROM users u
@@ -219,7 +221,7 @@ router.get('/leaderboard', authenticate, async (req, res) => {
 });
 
 // GET /recent - 最近获得的成就（全团队）
-router.get('/recent', authenticate, async (req, res) => {
+router.get('/recent', noStoreResponse, authenticate, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;
     const recent = await queryAll(`
@@ -346,9 +348,10 @@ router.post('/check', authenticate, async (req, res) => {
           break;
         }
         case 'login_streak': {
+          const startDate = dateKeyBjt(Date.now() - Math.max(0, Number(conditionValue)) * 24 * 60 * 60 * 1000);
           const result: any = await queryOne(
-            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
-            [userId, conditionValue]
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= ?`,
+            [userId, startDate]
           );
           earned = (result?.days || 0) >= conditionValue;
           break;

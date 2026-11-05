@@ -16,6 +16,29 @@ startup and deployment fail closed. `.env` remains a development convenience;
 do not use it as a production authority. PM2 environment variables take
 precedence in dotenv and can otherwise leave a worker with stale configuration.
 
+Production must include an independent `XMT_TOKEN_ENCRYPTION_KEY`: canonical
+Base64 for exactly 32 random bytes. Generate it with
+`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+Do not reuse `JWT_SECRET` or `DOUYIN_CLIENT_SECRET`. `api/server.ts` validates
+the key after loading the authoritative runtime file and before importing the
+application; a missing or malformed key prevents startup.
+
+For first configuration or key rotation, create and verify a SQLite backup,
+stop the XMT service so no OAuth token writes occur, then run
+`npm run migrate:douyin-token-encryption` for a read-only dry-run. Review only
+the sanitized counts. Apply with
+`npm run migrate:douyin-token-encryption -- --apply --backup=/absolute/path/to/verified-backup.db`.
+The script validates the backup with SQLite `quick_check`, resolves the prior
+key source from the current process or the `xmt-api` PM2 environment, migrates
+all encrypted token columns in one SQLite write transaction, verifies each
+token after encryption, and never prints token or key values. If the legacy
+source cannot be read, it refuses to guess. Use
+`--legacy-key-source=development-fallback` only after confirming the old
+service actually used that exact fallback. If application fails, the transaction rolls back;
+if later verification fails, keep the service stopped and restore the verified
+pre-migration backup before restarting the previous version. Do not deploy the
+new server until the dry-run and migration both pass with the final runtime key.
+
 Use these commands during a controlled deployment, without printing secrets:
 
 ```bash

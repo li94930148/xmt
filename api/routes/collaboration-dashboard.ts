@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { getTimelineEvents } from '../collaboration/timeline/collaborationTimeline';
@@ -13,7 +14,7 @@ import {
 } from '../collaboration/dashboard/collaborationAnalytics';
 import { collaborationAccessPolicy } from '../collaboration/access/CollaborationAccessPolicy';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 router.get('/timeline/:docId', authenticate, requirePermission('analytics:view'), async (req, res) => {
   const docId = decodeURIComponent(req.params.docId);

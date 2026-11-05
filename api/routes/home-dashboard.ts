@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { beijingNow, beijingToday, queryAll, queryOne } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { userHasPermission } from '../middleware/permissions';
@@ -6,7 +7,7 @@ import { canManageCreatorData } from '../services/creatorDataVisibility';
 import { getHomeMyRetroActionSummary, getHomeRetrospectiveSummary } from '../services/retrospectives';
 import { canEditAllContent, canViewAllContent } from '../utils/access';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const STALE_STAGE_DAYS = 2;
 const ATTENTION_LIMIT = 8;
 const TODAY_PUBLISHING_LIMIT = 8;

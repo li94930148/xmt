@@ -10,6 +10,7 @@ import {
   deleteInspiration,
   promoteInspiration,
   getInspirationDetail,
+  getInspirationDetailForRecovery,
   createInspirationComment,
   getInspirationCreateRequest,
   getInspirationVoteRequest,
@@ -856,7 +857,7 @@ export default function Inspirations() {
           return;
         }
 
-        const latest = await getInspirationDetail(id);
+        const latest = await getInspirationDetailForRecovery(id);
         if (useAuthStore.getState().user?.id !== userId) return;
         syncInspirationPatch(id, { voted: latest.inspiration.voted, votes: latest.inspiration.votes });
         pending.needsVerification = false;
@@ -927,7 +928,7 @@ export default function Inspirations() {
           type: 'info',
         });
       } else {
-        const latest = await getInspirationDetail(id);
+        const latest = await getInspirationDetailForRecovery(id);
         if (useAuthStore.getState().user?.id !== userId) return;
         syncInspirationPatch(id, { voted: latest.inspiration.voted, votes: latest.inspiration.votes });
         pending.needsVerification = false;
@@ -1117,7 +1118,7 @@ export default function Inspirations() {
         return;
       }
       try {
-        const latest = await getInspirationDetail(id);
+        const latest = await getInspirationDetailForRecovery(id);
         const current = latest.inspiration;
         if (current.topic_id) {
           removeInspirationPromotionRecovery(window.sessionStorage, pendingRecovery);
@@ -1168,7 +1169,7 @@ export default function Inspirations() {
     promotionVerificationInFlightRef.current.add(id);
     setPromotingIds((current) => new Set(current).add(id));
     try {
-      const latest = await getInspirationDetail(id);
+      const latest = await getInspirationDetailForRecovery(id);
       const current = latest.inspiration;
       if (current.topic_id) {
         removeInspirationPromotionRecovery(window.sessionStorage, pending);
@@ -1332,7 +1333,7 @@ export default function Inspirations() {
       addNotification({ title: '评论已发布', message: '你的评论已显示在讨论区。', type: 'success' });
     } catch {
       try {
-        const latest = await getInspirationDetail(inspirationId);
+        const latest = await getInspirationDetailForRecovery(inspirationId);
         syncCommentSnapshot(inspirationId, latest.comments, latest.comments.length);
         const confirmed = latest.comments.find((comment) => comment.client_request_id === pending.clientRequestId);
         if (confirmed) {
@@ -1389,7 +1390,7 @@ export default function Inspirations() {
     commentVerificationInFlightRef.current.add(requestKey);
     setCommentVerifyingKeys((current) => new Set(current).add(requestKey));
     try {
-      const latest = await getInspirationDetail(inspirationId);
+      const latest = await getInspirationDetailForRecovery(inspirationId);
       syncCommentSnapshot(inspirationId, latest.comments, latest.comments.length);
       const confirmed = latest.comments.find((comment) => comment.client_request_id === pending.clientRequestId);
       if (confirmed) {

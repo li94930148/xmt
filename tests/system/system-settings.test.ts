@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import {
   defaultSystemSettings,
   normalizeSystemSettings,
@@ -6,6 +7,7 @@ import {
 } from '../../src/lib/systemSettings.js';
 import { getUserFacingErrorMessage } from '../../src/lib/userFacingError';
 
+test('system settings defaults and theme precedence', () => {
 const legacySettings = normalizeSystemSettings({
   system: { name: '旧配置' },
 });
@@ -42,4 +44,4 @@ assert.equal(
   'actionable Chinese validation feedback remains intact',
 );
 
-console.log('System settings defaults and theme precedence tests passed');
+});

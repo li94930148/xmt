@@ -8,52 +8,56 @@ import {
   OpenTelemetryAuthExporter,
   type OpenTelemetryMeterAdapter,
 } from '../../api/modules/auth/metrics/otel/opentelemetry-auth.exporter.js';
+import { describe, it } from 'vitest';
 
-const memory = new MemoryAuthMetricsExporter();
-const prometheus = new PrometheusAuthMetricsExporter('test-instance');
-const otelCalls: Array<{ operation: string; name: string; value: number; labels: Readonly<Record<string, string>> }> = [];
-const meter: OpenTelemetryMeterAdapter = {
-  createCounter: (name) => ({ add: (value, labels = {}) => otelCalls.push({ operation: 'add', name, value, labels }) }),
-  createHistogram: (name) => ({ record: (value, labels = {}) => otelCalls.push({ operation: 'record', name, value, labels }) }),
-  createGauge: (name) => ({ record: (value, labels = {}) => otelCalls.push({ operation: 'gauge', name, value, labels }) }),
-};
-const otel = new OpenTelemetryAuthExporter(meter, 'test-instance');
-const registry = new AuthMetricsRegistry([memory, prometheus, otel]);
-const events = new AuthEventService([registry], () => undefined, () => 'event-id');
-const metrics = new AuthMetricsService(events);
+describe('authentication metrics exporters', () => {
+  it('exports one source of metrics to memory, Prometheus and OpenTelemetry', () => {
+    const memory = new MemoryAuthMetricsExporter();
+    const prometheus = new PrometheusAuthMetricsExporter('test-instance');
+    const otelCalls: Array<{ operation: string; name: string; value: number; labels: Readonly<Record<string, string>> }> = [];
+    const meter: OpenTelemetryMeterAdapter = {
+      createCounter: (name) => ({ add: (value, labels = {}) => otelCalls.push({ operation: 'add', name, value, labels }) }),
+      createHistogram: (name) => ({ record: (value, labels = {}) => otelCalls.push({ operation: 'record', name, value, labels }) }),
+      createGauge: (name) => ({ record: (value, labels = {}) => otelCalls.push({ operation: 'gauge', name, value, labels }) }),
+    };
+    const otel = new OpenTelemetryAuthExporter(meter, 'test-instance');
+    const registry = new AuthMetricsRegistry([memory, prometheus, otel]);
+    const events = new AuthEventService([registry], () => undefined, () => 'event-id');
+    const metrics = new AuthMetricsService(events);
 
-metrics.recordSessionCreated({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
-metrics.countLoginSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
-metrics.countRefreshSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', durationSeconds: 0.12 });
-metrics.countCsrfFailed({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', reason: 'csrf_failed' });
-metrics.countLogoutSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
-metrics.recordSessionRevoked({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', reason: 'logout' });
+    metrics.recordSessionCreated({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
+    metrics.countLoginSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
+    metrics.countRefreshSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', durationSeconds: 0.12 });
+    metrics.countCsrfFailed({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', reason: 'csrf_failed' });
+    metrics.countLogoutSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
+    metrics.recordSessionRevoked({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', reason: 'logout' });
 
-const beforeScrape = prometheus.status();
-assert.equal(beforeScrape.lastExportAt, null, 'in-process metric events must not be reported as an external Prometheus scrape');
-assert.match(String(beforeScrape.reason), /尚未收到 Prometheus 抓取/);
+    const beforeScrape = prometheus.status();
+    assert.equal(beforeScrape.lastExportAt, null, 'in-process metric events must not be reported as an external Prometheus scrape');
+    assert.match(String(beforeScrape.reason), /尚未收到 Prometheus 抓取/);
 
-assert.equal(memory.list().filter((point) => point.name === 'v1_login_count').length, 1, 'memory exporter stays compatible');
-assert.equal(memory.list().filter((point) => point.name === 'security_events').length, 1);
+    assert.equal(memory.list().filter((point) => point.name === 'v1_login_count').length, 1, 'memory exporter stays compatible');
+    assert.equal(memory.list().filter((point) => point.name === 'security_events').length, 1);
 
-const output = prometheus.metrics();
-assert(prometheus.status().lastExportAt, 'an actual metrics endpoint read must record scrape evidence');
-assert.match(output, /xmt_auth_login_total\{instance="test-instance",mode="v1-web"\} 1/);
-assert.match(output, /xmt_auth_refresh_total\{instance="test-instance",mode="v1-web"\} 1/);
-assert.match(output, /xmt_auth_refresh_failed_total\{instance="test-instance",mode="v1-web"\} 1/);
-assert.match(output, /xmt_auth_logout_total\{instance="test-instance",mode="v1-web"\} 1/);
-assert.match(output, /xmt_auth_security_events_total\{eventType="auth\.csrf\.failed",instance="test-instance",mode="v1-web",reason="csrf_failed"\} 1/);
-assert.match(output, /xmt_auth_active_sessions\{instance="test-instance",mode="v1-web"\} 0/);
-assert.match(output, /xmt_auth_refresh_duration_seconds_count\{instance="test-instance",mode="v1-web"\} 1/);
-assert.match(output, /xmt_auth_refresh_duration_seconds_sum\{instance="test-instance",mode="v1-web"\} 0\.12/);
+    const output = prometheus.metrics();
+    assert(prometheus.status().lastExportAt, 'an actual metrics endpoint read must record scrape evidence');
+    assert.match(output, /xmt_auth_login_total\{instance="test-instance",mode="v1-web"\} 1/);
+    assert.match(output, /xmt_auth_refresh_total\{instance="test-instance",mode="v1-web"\} 1/);
+    assert.match(output, /xmt_auth_refresh_failed_total\{instance="test-instance",mode="v1-web"\} 1/);
+    assert.match(output, /xmt_auth_logout_total\{instance="test-instance",mode="v1-web"\} 1/);
+    assert.match(output, /xmt_auth_security_events_total\{eventType="auth\.csrf\.failed",instance="test-instance",mode="v1-web",reason="csrf_failed"\} 1/);
+    assert.match(output, /xmt_auth_active_sessions\{instance="test-instance",mode="v1-web"\} 0/);
+    assert.match(output, /xmt_auth_refresh_duration_seconds_count\{instance="test-instance",mode="v1-web"\} 1/);
+    assert.match(output, /xmt_auth_refresh_duration_seconds_sum\{instance="test-instance",mode="v1-web"\} 0\.12/);
 
-assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_login_total').length, 1);
-assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_refresh_duration_seconds').length, 1);
-assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_active_sessions').at(-1)?.value, 0);
-assert.deepEqual(registry.source(), ['memory', 'prometheus', 'opentelemetry']);
-assert.equal(registry.statuses().every((status) => status.healthy), true);
+    assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_login_total').length, 1);
+    assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_refresh_duration_seconds').length, 1);
+    assert.equal(otelCalls.filter((call) => call.name === 'xmt_auth_active_sessions').at(-1)?.value, 0);
+    assert.deepEqual(registry.source(), ['memory', 'prometheus', 'opentelemetry']);
+    assert.equal(registry.statuses().every((status) => status.healthy), true);
 
-assert.equal(events.list().filter((event) => event.eventType === 'auth.login.success').length, 1);
-assert.equal(memory.list().filter((point) => point.name === 'v1_login_count').length, 1, 'fan-out must not duplicate source metrics');
+    assert.equal(events.list().filter((event) => event.eventType === 'auth.login.success').length, 1);
+    assert.equal(memory.list().filter((point) => point.name === 'v1_login_count').length, 1, 'fan-out must not duplicate source metrics');
 
-console.log('Auth metrics exporter tests passed');
+  });
+});

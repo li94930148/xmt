@@ -1,10 +1,11 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { authenticate, requireRole } from '../middleware/auth';
 import { beijingNow, execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils';
 
-const router = express.Router();
-export const anonymousFeedbackAdminRouter = express.Router();
+const router = createAsyncRouter();
+export const anonymousFeedbackAdminRouter = createAsyncRouter();
 const feedbackTypes = new Set(['feature', 'usage', 'process', 'team', 'other']);
 const feedbackStatuses = new Set(['pending', 'processing', 'completed']);
 const DELETE_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

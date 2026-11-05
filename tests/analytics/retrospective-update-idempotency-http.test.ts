@@ -25,6 +25,9 @@ const secondActorId = await database.executeInsert(
 const readerId = await database.executeInsert(
   "INSERT INTO users(username,password,role,name,enabled) VALUES('retro_update_reader','unused','analyst','复盘更新只读成员',1)",
 );
+const outsiderId = await database.executeInsert(
+  "INSERT INTO users(username,password,role,name,enabled) VALUES('retro_update_outsider','unused','member','复盘更新越权成员',1)",
+);
 const retroId = await database.executeInsert(
   `INSERT INTO retrospectives(title,scope_type,period_start,period_end,status,owner_id,created_by,summary_md,version)
    VALUES('复盘结论幂等测试','team','2026-10-01','2026-10-07','draft',?,?, '初始结论',1)`,
@@ -56,6 +59,7 @@ const headersFor = (userId: number) => ({
 const actorHeaders = headersFor(actorId);
 const secondActorHeaders = headersFor(secondActorId);
 const readerHeaders = headersFor(readerId);
+const outsiderHeaders = headersFor(outsiderId);
 const primaryKey = 'ca1a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';
 const update = (id: number, requestKey: string | undefined, headers: Record<string, string>, body: Record<string, unknown>) => fetch(
   `${baseUrl}/${id}`,
@@ -81,6 +85,19 @@ const receiptCount = (id: number, requestKey: string, userId = actorId) => datab
 );
 
 try {
+  const detailResponse = await fetch(`${baseUrl}/${retroId}`, { headers: actorHeaders });
+  assert.equal(detailResponse.status, 200);
+  assert.equal(detailResponse.headers.get('cache-control'), 'no-store', 'retrospective detail responses must not be cached');
+  const forbiddenDetail = await fetch(`${baseUrl}/${retroId}`, { headers: outsiderHeaders });
+  assert.equal(forbiddenDetail.status, 403, 'retrospective detail retains its existing viewer authorization');
+  assert.equal(forbiddenDetail.headers.get('cache-control'), 'no-store');
+  const missingDetail = await fetch(`${baseUrl}/999999`, { headers: actorHeaders });
+  assert.equal(missingDetail.status, 404);
+  assert.equal(missingDetail.headers.get('cache-control'), 'no-store');
+  const unauthenticatedDetail = await fetch(`${baseUrl}/${retroId}`);
+  assert.equal(unauthenticatedDetail.status, 401);
+  assert.equal(unauthenticatedDetail.headers.get('cache-control'), 'no-store');
+
   const payload = { title: '复盘结论幂等测试', summaryMd: '同一个请求只保存一次', version: 1 };
   const concurrent = await Promise.all([
     update(retroId, primaryKey, actorHeaders, payload),

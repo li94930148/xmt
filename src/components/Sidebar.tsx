@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { navigationSections, canAccessNavigationItem, canAccessNavigationSection, findNavigationSectionByPath, isNavigationItemActive } from '@/config/navigation';
 import { useAppStore, useAuthStore, useMessageStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
-import ActionButton from './studio/ActionButton';
 import NotificationBadge from './studio/NotificationBadge';
 import { useEffect, useRef, useState } from 'react';
 
@@ -259,15 +258,14 @@ export default function Sidebar({
       </div>
 
       {!isMobile && (
-        <ActionButton
-          variant="icon"
+        <button
           type="button"
           onClick={onToggle}
-          className="absolute -right-5 top-1/2 z-10 h-10 w-10 min-h-10 min-w-10 -translate-y-1/2 rounded-full border border-studio-border-soft bg-studio-surface p-0 text-studio-text-muted shadow-card transition-all duration-200 hover:border-studio-border-active hover:text-studio-cyan"
+          className="xmt-btn xmt-btn-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary absolute -right-5 top-1/2 z-10 h-10 w-10 min-h-10 min-w-10 -translate-y-1/2 rounded-full border border-studio-border-soft bg-studio-surface p-0 text-studio-text-muted shadow-card transition-all duration-200 hover:border-studio-border-active hover:text-studio-cyan"
           aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-        </ActionButton>
+        </button>
       )}
     </div>
   );

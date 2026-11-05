@@ -409,7 +409,6 @@ export interface AchievementProgress {
 export interface LeaderboardEntry {
   user_id: number;
   user_name: string;
-  avatar: string | null;
   achievement_count: number;
   total_points: number;
 }

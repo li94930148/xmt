@@ -113,6 +113,25 @@ async function contrast(locator: import('playwright').Locator) {
   };
 }
 
+async function assertKeyboardFocusRing(locator: import('playwright').Locator, label: string) {
+  const styles = await locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      focusVisible: element.matches(':focus-visible'),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
+      outlineColor: style.outlineColor,
+    };
+  });
+  const outlineColor = parseColor(styles.outlineColor);
+  assert.equal(styles.focusVisible, true, `${label} is focused through keyboard navigation`);
+  assert.equal(styles.outlineStyle, 'solid', `${label} uses a solid keyboard focus outline`);
+  assert.equal(styles.outlineWidth, '2px', `${label} uses the shared 2px focus outline`);
+  assert.equal(styles.outlineOffset, '2px', `${label} uses the shared 2px focus offset`);
+  assert.ok(outlineColor && outlineColor.a > 0, `${label} focus outline uses a visible Studio color: ${styles.outlineColor}`);
+}
+
 const serveOnly = process.env.XMT_LOGIN_THEME_QA_SERVE === '1';
 
 async function runBrowserSuite(browser: import('playwright').Browser) {
@@ -135,6 +154,20 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
       await page.getByRole('heading', { name: '欢迎回来', exact: true }).waitFor();
       assert.equal(await page.getByRole('main').count(), 1, `${layout}/${theme} login exposes its content through one main landmark`);
       await page.waitForFunction((mode) => document.documentElement.dataset.theme === mode, theme);
+      const usernameInput = page.locator('input[autocomplete="username"]');
+      const passwordInput = page.locator('input[autocomplete="current-password"]');
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      await page.keyboard.press('Tab');
+      assert.equal(await usernameInput.evaluate((element) => element === document.activeElement), true, `${layout}/${theme} first Tab reaches the username field`);
+      await assertKeyboardFocusRing(usernameInput, `${layout}/${theme} username field`);
+      await page.keyboard.press('Tab');
+      assert.equal(await passwordInput.evaluate((element) => element === document.activeElement), true, `${layout}/${theme} next Tab reaches the password field`);
+      await assertKeyboardFocusRing(passwordInput, `${layout}/${theme} password field`);
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
       const heroFallback = page.locator('.fixed.inset-0.z-0').locator('div.absolute.inset-0').first().locator('div.absolute.inset-0').first();
       const heroFallbackClass = await heroFallback.getAttribute('class');
       assert.ok(heroFallbackClass?.includes('var(--xmt-ambient-a)') && heroFallbackClass.includes('var(--xmt-app-bg)'), `${layout}/${theme} login background must follow the active theme tokens; class=${heroFallbackClass}`);
@@ -259,6 +292,15 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
         assert.equal(await updateButton.evaluate((button) => button === document.activeElement), true, `${theme} Shift+Tab from the first dialog control wraps to the last control`);
         await page.keyboard.press('Tab');
         assert.equal(await currentPassword.evaluate((input) => input === document.activeElement), true, `${theme} Tab from the last dialog control wraps to the first control`);
+        await assertKeyboardFocusRing(currentPassword, `${theme} first-login current password field`);
+        const newPassword = passwordDialog.getByPlaceholder('新密码（至少 6 位）');
+        await page.keyboard.press('Tab');
+        assert.equal(await newPassword.evaluate((input) => input === document.activeElement), true, `${theme} next Tab reaches the new password field`);
+        await assertKeyboardFocusRing(newPassword, `${theme} first-login new password field`);
+        const confirmPassword = passwordDialog.getByPlaceholder('确认新密码');
+        await page.keyboard.press('Tab');
+        assert.equal(await confirmPassword.evaluate((input) => input === document.activeElement), true, `${theme} next Tab reaches the confirmation password field`);
+        await assertKeyboardFocusRing(confirmPassword, `${theme} first-login confirmation password field`);
         const passwordPanel = page.getByTestId('first-login-password-panel');
         const panelTokens = await passwordPanel.evaluate((element) => {
           const style = getComputedStyle(element);

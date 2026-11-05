@@ -1,10 +1,11 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { beijingNow, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { canAccessTopic, canManageCalendarEvent, getTopicScopeById, isPrivilegedUser } from '../utils/access';
 
-const router = express.Router();
+const router = createAsyncRouter();
 type CalendarListItem = { event_date: string };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

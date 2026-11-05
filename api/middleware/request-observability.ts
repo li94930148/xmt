@@ -34,6 +34,7 @@ function safeErrorCode(payload: unknown) {
 export function requestObservability(logger: RequestLogLogger = apiLogger): RequestHandler {
   return (req, res, next) => {
     const startedAt = process.hrtime.bigint();
+    const requestModule = moduleName(req);
     let errorCode: string | undefined;
     const originalJson = res.json.bind(res);
     res.json = ((payload: unknown) => {
@@ -47,7 +48,7 @@ export function requestObservability(logger: RequestLogLogger = apiLogger): Requ
       const fields = {
         requestId: req.requestId,
         userId: safeUserId(req),
-        module: moduleName(req),
+        module: requestModule,
         operation: operationName(req),
         statusCode,
         durationMs: Math.round(elapsedMs * 1000) / 1000,

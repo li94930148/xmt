@@ -1,11 +1,12 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { beijingNow, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { sendSafeServerError } from '../utils/response';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const mutationOperations = new Set(['create', 'update', 'delete']);
@@ -273,8 +274,8 @@ router.put('/:id', authenticate, requirePermission('system:template'), async (re
       const template = await queryOne(`SELECT * FROM topic_templates WHERE id = ?`, [rawId]);
       if (!template) return res.status(404).json({ message: '模板不存在' });
       const { updates, params } = updateSql(payload);
-      updates.push("updated_at = datetime('now', '+8 hours')");
-      params.push(rawId);
+      updates.push('updated_at = ?');
+      params.push(beijingNow(), rawId);
       await execute(`UPDATE topic_templates SET ${updates.join(', ')} WHERE id = ?`, params);
       return res.json({ message: '模板更新成功' });
     }

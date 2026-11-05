@@ -1,4 +1,4 @@
-import { execute, queryAll } from '../../database/utils.js';
+import { beijingNow, execute, queryAll } from '../../database/utils.js';
 
 type FeaturePerformance = {
   featureType: string;
@@ -55,9 +55,9 @@ export async function analyzeContentPerformance(accountId: number, syncInsights 
         : `包含${feature.feature}特征的视频互动率较高。`;
       const representativeVideoId = feature.videoIds[0];
       await execute(
-        `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, 'content_pattern', ?, 'system', datetime('now', '+8 hours'))
+        `INSERT INTO video_insights (video_id, type, content, source, created_at) VALUES (?, 'content_pattern', ?, 'system', ?)
          ON CONFLICT(video_id, type, source) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`,
-        [representativeVideoId, content],
+        [representativeVideoId, content, beijingNow()],
       );
     }
   }

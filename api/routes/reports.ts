@@ -1,8 +1,9 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { queryAll,queryOne } from '../database/utils.js';
-const router=express.Router();router.use((_req,res,next)=>{res.setHeader('Deprecation','true');res.setHeader('Link','</api/daily-reports>; rel="successor-version"');next();});router.use(authenticate);
+const router=createAsyncRouter();router.use((_req,res,next)=>{res.setHeader('Deprecation','true');res.setHeader('Link','</api/daily-reports>; rel="successor-version"');next();});router.use(authenticate);
 const manager=(role?:string)=>role==='admin'||role==='director';
 const shape=(row:Record<string,unknown>)=>({...row,receiver_ids:JSON.parse(String(row.receiver_ids||'[]')),cc_user_ids:JSON.parse(String(row.cc_user_ids||'[]'))});
 const rejectLegacyWrite: express.RequestHandler = (_req,res) => res.status(410).json({success:false,message:'此兼容日报接口已停用，请改用 /api/daily-reports。'});

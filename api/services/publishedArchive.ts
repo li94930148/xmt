@@ -251,9 +251,9 @@ export async function syncPublishedArchive(topicId: number, operatorId?: number)
   if (existingArchive?.id) {
     await execute(
       `UPDATE resources
-       SET name = ?, type = ?, file_path = ?, category = ?, content = ?, uploader_id = ?, updated_at = datetime('now', '+8 hours')
+       SET name = ?, type = ?, file_path = ?, category = ?, content = ?, uploader_id = ?, updated_at = ?
        WHERE id = ?`,
-      [resourceName, 'archive', archivePath, '已完成', built.payload, built.uploaderId, existingArchive.id],
+      [resourceName, 'archive', archivePath, '已完成', built.payload, built.uploaderId, beijingNow(), existingArchive.id],
     );
     return { action: 'updated', resourceId: Number(existingArchive.id), topicId };
   }

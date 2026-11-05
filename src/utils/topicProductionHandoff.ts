@@ -30,7 +30,7 @@ export type TopicProductionHandoffDependencies = {
   listProductions: (topicId: number) => Promise<ProductionReference[]>;
   createDraft: (input: TopicProductionDraftInput, requestId: string) => Promise<{ productionId: number }>;
   getCreateStatus: (requestId: string) => Promise<TopicProductionCreateStatus>;
-  getProductionById: (productionId: number) => Promise<ProductionReference>;
+  getProductionById: (productionId: number, options?: { cache?: RequestCache }) => Promise<ProductionReference>;
   userId: number | null | undefined;
   recoveryStorage?: TopicProductionRecoveryStorage | null;
 };
@@ -180,7 +180,7 @@ async function resolveCreateRequest(
 
     const productionId = Number(result.productionId);
     if (!Number.isSafeInteger(productionId) || productionId <= 0) throw new Error('创作回执编号无效');
-    const production = await dependencies.getProductionById(productionId);
+    const production = await dependencies.getProductionById(productionId, { cache: 'no-store' });
     if (Number(production.id) !== productionId || Number(production.topic_id) !== recovery.topicId) {
       throw new Error('创作回执与当前选题不一致');
     }

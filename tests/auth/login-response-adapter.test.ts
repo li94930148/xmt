@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import {
   adaptLoginResponse,
   LoginResponseAdapterError,
   toAuthV1User,
 } from '../../src/auth/web/login-response-adapter.js';
 
+test('legacy and v1 login response adapter contract', async () => {
 const legacy = adaptLoginResponse({
   user: {
     id: 7,
@@ -127,5 +129,6 @@ await assert.rejects(
   async () => adaptLoginResponse({ success: true, data: { accessToken: 'refresh-access-token' } }),
   LoginResponseAdapterError,
 );
+});
 
 console.log('login response adapter tests passed');

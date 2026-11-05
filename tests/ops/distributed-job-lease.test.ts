@@ -56,9 +56,10 @@ class LeaseWorker {
       }
     });
     this.child.once('exit', (code) => {
+      const details = `signal=${this.child.signalCode}; stderr=${this.stderr.trim() || '(empty)'}; messages=${JSON.stringify(this.messages)}`;
       for (const waiter of this.waiters.splice(0)) {
         clearTimeout(waiter.timer);
-        waiter.resolve({ type: `worker-exited-${code}` });
+        waiter.resolve({ type: `worker-exited-${code}`, status: details });
       }
     });
   }
@@ -70,24 +71,23 @@ class LeaseWorker {
   waitFor(type: string, timeoutMs = 8000): Promise<WorkerMessage> {
     const existingIndex = this.messages.findIndex((message) => message.type === type);
     if (existingIndex >= 0) return Promise.resolve(this.messages.splice(existingIndex, 1)[0]!);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.waiters = this.waiters.filter((waiter) => waiter.resolve !== resolve);
-        reject(new Error(`Timed out waiting for ${type}; messages=${JSON.stringify(this.messages)}; stderr=${this.stderr}`));
-      }, timeoutMs);
-      this.waiters.push({ predicate: (message) => message.type === type, resolve, timer });
+    return this.waitForEither([type], timeoutMs).then((message) => {
+      if (message.type.startsWith('worker-exited-')) {
+        throw new Error(`Worker exited before ${type}; ${message.status || 'no exit details'}`);
+      }
+      return message;
     });
   }
 
   waitForEither(types: string[], timeoutMs = 8000): Promise<WorkerMessage> {
-    const existingIndex = this.messages.findIndex((message) => types.includes(message.type));
+    const existingIndex = this.messages.findIndex((message) => types.includes(message.type) || message.type.startsWith('worker-exited-'));
     if (existingIndex >= 0) return Promise.resolve(this.messages.splice(existingIndex, 1)[0]!);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((waiter) => waiter.resolve !== resolve);
         reject(new Error(`Timed out waiting for ${types.join(' or ')}; child=${this.child.exitCode}/${this.child.signalCode}; messages=${JSON.stringify(this.messages)}; stderr=${this.stderr}`));
       }, timeoutMs);
-      this.waiters.push({ predicate: (message) => types.includes(message.type), resolve, timer });
+      this.waiters.push({ predicate: (message) => types.includes(message.type) || message.type.startsWith('worker-exited-'), resolve, timer });
     });
   }
 
@@ -101,7 +101,13 @@ class LeaseWorker {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const setupClient = createClient({ url: `file:${databasePath}` });
+await setupClient.execute('PRAGMA journal_mode = WAL');
 await distributedJobLeasesMigration.up(setupClient);
+await setupClient.execute(`CREATE TABLE distributed_job_lease_test_writes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  worker_pid INTEGER NOT NULL,
+  write_index INTEGER NOT NULL
+)`);
 setupClient.close();
 assert.equal(migrationPolicies['024'], 'SAFE_EXPAND');
 
@@ -136,6 +142,18 @@ const second = new LeaseWorker();
 const workers = [first, second];
 try {
   await Promise.all(workers.map((worker) => worker.waitFor('ready')));
+
+  const writers = Array.from({ length: 10 }, () => new LeaseWorker());
+  workers.push(...writers);
+  await Promise.all(writers.map((worker) => worker.waitFor('ready')));
+  for (const worker of writers) worker.send('write-batch', { writeCount: 100 });
+  const writeResults = await Promise.all(writers.map((worker) => worker.waitFor('writes-done')));
+  assert.equal(writeResults.reduce((total, result) => total + Number(result.written), 0), 1000, 'ten workers must each complete 100 SQLite writes');
+  await Promise.all(writers.map((worker) => worker.stop()));
+  const verifyWritesClient = createClient({ url: `file:${databasePath}` });
+  const verifyWrites = await verifyWritesClient.execute('SELECT COUNT(*) AS total FROM distributed_job_lease_test_writes');
+  verifyWritesClient.close();
+  assert.equal(Number(verifyWrites.rows[0]?.total), 1000, 'all concurrent worker writes must be present');
 
   first.send('claim', { jobName: 'test:daily-maintenance' });
   second.send('claim', { jobName: 'test:daily-maintenance' });
@@ -205,7 +223,7 @@ try {
   await observer.waitFor('claimed');
   observer.send('release');
   assert.equal((await observer.waitFor('released')).released, true);
-  console.log('Distributed job lease tests passed: in-flight renewal settlement, multi-process exclusion, renewal/release, crash expiry recovery, fencing token progression');
+  console.log('Distributed job lease tests passed: 10 workers x 100 concurrent SQLite writes, in-flight renewal settlement, multi-process exclusion, renewal/release, crash expiry recovery, fencing token progression');
 } finally {
   await Promise.all(workers.map((worker) => worker.stop().catch(() => undefined)));
   fs.rmSync(temporaryDirectory, { recursive: true, force: true });

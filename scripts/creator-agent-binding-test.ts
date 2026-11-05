@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { parseStoredBjt } from '../shared/time';
 
 const root = mkdtempSync(path.join(tmpdir(), 'xmt-agent-binding-'));
 process.env.XMT_DB_PATH = path.join(root, 'binding.db');
@@ -80,6 +81,11 @@ try {
 
   const bound = await bindCreatorAgent(issued.binding_code, device);
   assert.ok(bound.agent_token);
+  const bindTimes = await queryOne<{ used_at: string; last_active_at: string }>(`SELECT c.used_at,a.last_active_at
+    FROM creator_agent_binding_codes c JOIN creator_agents a ON a.device_id=?
+    WHERE c.code_hash=?`, ['safe-device', stored.code_hash]);
+  assert.ok(parseStoredBjt(bindTimes?.used_at), 'binding consumption time must be a valid Beijing database timestamp');
+  assert.equal(bindTimes?.last_active_at, bindTimes?.used_at, 'binding and first agent activity share one operation timestamp');
   const usedReceipt = await getCreatorAgentBindingCodeRecovery(1, 'safe-account', requestId);
   assert.equal(usedReceipt.status, 'used', 'a consumed binding code cannot be recovered');
   const clearedCiphertext = await queryOne<{ ciphertext: string | null; iv: string | null; auth_tag: string | null }>(
@@ -96,14 +102,23 @@ try {
     agent_version: '2.11.0-agent', protocol_version: 1, browser_login_status: 'valid', browser_type: 'chrome',
     browser_version: '150.0', browser_engine: 'chromium', browser_runtime: 'system', session_mode: 'persistent', compatibility_status: 'compatible',
   }, `Bearer ${bound.agent_token}`);
-  const agentRow = await queryOne<Record<string, unknown>>(
-    'SELECT browser_type,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,browser_login_status FROM creator_agents WHERE id=?',
+  const agentRow = await queryOne<{
+    browser_type: string; browser_engine: string; browser_runtime: string; browser_session_mode: string;
+    browser_compatibility: string; browser_login_status: string; last_heartbeat_at: string; last_active_at: string;
+  }>(
+    'SELECT browser_type,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,browser_login_status,last_heartbeat_at,last_active_at FROM creator_agents WHERE id=?',
     [bound.agent_id],
   );
-  assert.deepEqual(agentRow, {
+  assert.deepEqual(agentRow && {
+    browser_type: agentRow.browser_type, browser_engine: agentRow.browser_engine, browser_runtime: agentRow.browser_runtime,
+    browser_session_mode: agentRow.browser_session_mode, browser_compatibility: agentRow.browser_compatibility,
+    browser_login_status: agentRow.browser_login_status,
+  }, {
     browser_type: 'chrome', browser_engine: 'chromium', browser_runtime: 'system',
     browser_session_mode: 'persistent', browser_compatibility: 'compatible', browser_login_status: 'valid',
   });
+  assert.ok(parseStoredBjt(agentRow?.last_heartbeat_at), 'heartbeat time must be a valid Beijing database timestamp');
+  assert.equal(agentRow?.last_heartbeat_at, agentRow?.last_active_at, 'heartbeat and last activity share one operation timestamp');
   await assert.rejects(() => heartbeatCreatorAgent({ agent_id: bound.agent_id, account_id: 'safe-account', protocol_version: 2 }, `Bearer ${bound.agent_token}`), /协议版本不受支持/);
 
   const concurrentCode = await createCreatorAgentBindingCode(1, 'concurrent-account', 5, randomUUID());
@@ -155,6 +170,12 @@ try {
   );
   assert.equal(acknowledgedReceipt?.ciphertext,null,'acknowledgement erases the recoverable credential ciphertext');
   assert.equal(typeof acknowledgedReceipt?.acknowledged_at,'string','acknowledgement is idempotently recorded');
+  const acknowledgedAgent = await queryOne<{last_active_at: string}>(
+    'SELECT last_active_at FROM creator_agents WHERE id=?', [sameRequestResults[0].agent_id],
+  );
+  assert.ok(parseStoredBjt(acknowledgedReceipt?.acknowledged_at), 'acknowledgement time must be a valid Beijing database timestamp');
+  assert.equal(acknowledgedReceipt?.acknowledged_at, acknowledgedAgent?.last_active_at,
+    'binding acknowledgement and credential activation share one operation timestamp');
   const recoveredAgent=await heartbeatCreatorAgent({agent_id:sameRequestResults[0].agent_id,account_id:'bind-result-account',protocol_version:1},`Bearer ${sameRequestResults[0].agent_token}`);
   assert.equal(recoveredAgent.success,true,'the acknowledged credential authenticates normally');
   await assert.rejects(

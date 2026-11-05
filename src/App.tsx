@@ -5,7 +5,6 @@ import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
-import NotFound from '@/pages/NotFound';
 import { isAndroid } from '@/platform/runtime';
 import { shouldUseMobileLayout } from '@/platform/mobile-layout';
 import { useAppStore, useAuthStore } from '@/store';
@@ -81,6 +80,7 @@ function lazyWithRetry<T extends React.ComponentType<object>>(
   });
 }
 
+const NotFound = lazyWithRetry(() => import('@/pages/NotFound'), 'NotFound');
 const Login = lazyWithRetry(() => import('@/pages/Login'), 'Login');
 const Home = lazyWithRetry(() => import('@/pages/Home'), 'Home');
 const MobileHome = lazyWithRetry(() => import('@/pages/mobile/MobileHome'), 'MobileHome');

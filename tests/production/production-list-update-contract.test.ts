@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, it } from 'vitest';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const productionPage = fs.readFileSync(path.join(root, 'src/pages/Production.tsx'), 'utf8');
@@ -39,7 +40,7 @@ async function testPaginatedProductionQueryContract() {
   }
 }
 
-testEditUsesUpdateEndpoint();
-await testPaginatedProductionQueryContract();
-
-console.log('production-list-update-contract tests passed');
+describe('production list update contract', () => {
+  it('uses the update endpoint without creating another record', testEditUsesUpdateEndpoint);
+  it('preserves pagination parameters in production list reads', testPaginatedProductionQueryContract);
+});

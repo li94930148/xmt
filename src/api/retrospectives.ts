@@ -301,11 +301,16 @@ export function getRetrospectiveCreateRequestStatus(clientRequestId: string) {
   return requestJson<RetrospectiveCreateRequestStatus>(
     `/create-requests/${encodeURIComponent(clientRequestId)}`,
     '核实复盘创建结果失败',
+    { cache: 'no-store' },
   );
 }
 
 export function getRetrospectiveDetail(id: number, init?: RequestInit) {
   return requestJson<RetrospectiveDetail>(`/${id}`, '加载复盘详情失败', init);
+}
+
+export function getRetrospectiveDetailForRecovery(id: number) {
+  return getRetrospectiveDetail(id, { cache: 'no-store' });
 }
 
 export function getRetroDailyRisks(id: number) {

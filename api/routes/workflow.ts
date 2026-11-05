@@ -1,7 +1,9 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿import express from 'express';
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { requireAllPermissions, requirePermission, userHasPermission } from '../middleware/permissions';
 import { canEditAllContent, canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { hasPublishedArchiveScriptDrift, syncPublishedArchive } from '../services/publishedArchive';
@@ -45,7 +47,7 @@ import {
   recordWorkflowDocumentVersion,
 } from '../services/workflowDocumentVersions.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 type VersionAction = 'minor' | 'major' | 'none';
 type ArchiveSyncFeedback = 'synced' | 'pending' | 'skipped' | 'not_required';
@@ -250,9 +252,10 @@ async function ensurePublishingForTopic(
     return;
   }
   if (scriptContent && !existing.script_content) {
+    const updatedAt = beijingNow();
     await tx.execute(
-      `UPDATE publishing SET script_content=?,updated_at=datetime('now','+8 hours') WHERE id=? AND (script_content IS NULL OR script_content='')`,
-      [scriptContent, existing.id],
+      `UPDATE publishing SET script_content=?,updated_at=? WHERE id=? AND (script_content IS NULL OR script_content='')`,
+      [scriptContent, updatedAt, existing.id],
     );
   }
 }
@@ -744,7 +747,7 @@ router.get('/production', authenticate, async (req, res) => {
   }
 });
 
-router.get('/production/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/production/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
@@ -895,7 +898,7 @@ router.post('/production', authenticate, requirePermission('production:update'),
   }
 });
 
-router.get('/production/:id', authenticate, async (req, res) => {
+router.get('/production/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const production = await queryOne(`SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, origin.source_type as origin_source_type, origin.source_content_snapshot as origin_source_content_snapshot, origin.source_outline_version as origin_source_outline_version, origin.source_topic_id as origin_source_topic_id, origin.captured_at as origin_captured_at, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN production_origin_snapshots origin ON origin.production_id = p.id WHERE p.id = ?`, [req.params.id]);
     if (!production) return res.status(404).json({ message: '创作记录不存在' });
@@ -976,11 +979,12 @@ router.put('/production/:id', authenticate, requirePermission('production:update
     const contentMarkdown = req.body.contentMarkdown || content;
     const contentJson = req.body.contentJson || content;
     const guarded = typeof expected_content === 'string';
+    const productionUpdatedAt = beijingNow();
     const updateProductionSql =
-      `UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?${guarded ? " AND COALESCE(content, '') = ? AND COALESCE(version, 'v1.0') = ?" : ''}`;
+      `UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = ? WHERE id = ?${guarded ? " AND COALESCE(content, '') = ? AND COALESCE(version, 'v1.0') = ?" : ''}`;
     const updateProductionParams = guarded
-      ? [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id, expected_content, currentVersion]
-      : [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id];
+      ? [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, productionUpdatedAt, id, expected_content, currentVersion]
+      : [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, productionUpdatedAt, id];
     const historySql = `INSERT INTO production_history (production_id, version, content, content_markdown, content_json, status, change_type, operator_id, version_state, superseded_by_version, superseded_at, material_draft_snapshot_html, source_topic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const historyParams = [
       id,
@@ -1411,7 +1415,7 @@ router.get('/production/:id/source-snapshot', (req, res, next) => {
   }
 });
 
-router.get('/production/:id/review-threads', authenticate, async (req, res) => {
+router.get('/production/:id/review-threads', noStoreResponse, authenticate, async (req, res) => {
   try {
     const productionId = parsePositiveId(req.params.id);
     if (!productionId) return res.status(400).json({ message: '创作记录编号无效' });
@@ -1729,7 +1733,7 @@ router.get('/shooting', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shooting/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/shooting/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
@@ -1752,7 +1756,7 @@ router.get('/shooting/create-request/:requestId', authenticate, async (req, res)
   }
 });
 
-router.get('/shooting/:id', authenticate, async (req, res) => {
+router.get('/shooting/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const shooting = await queryOne(`SELECT s.*, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM shooting s LEFT JOIN users u ON s.operator_id = u.id LEFT JOIN topics t ON s.topic_id = t.id WHERE s.id = ?`, [req.params.id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
@@ -1942,8 +1946,8 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
         });
         if (!version.ok) return version;
         const changed = await tx.execute(
-          `UPDATE shooting SET ${updateFields.join(', ')},updated_at=datetime('now','+8 hours') WHERE id=?`,
-          [...params, id],
+          `UPDATE shooting SET ${updateFields.join(', ')},updated_at=? WHERE id=?`,
+          [...params, beijingNow(), id],
         );
         return changed > 0 ? { ok: true as const } : { ok: false as const, reason: 'stale' as const };
       });
@@ -1976,9 +1980,9 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
           (script_content !== undefined ? script_content : latestShooting.script_content) || null,
         );
         if (!transition.ok) return transition;
-        params.push(id);
+        params.push(beijingNow(), id);
         const shootingChanged = await tx.execute(
-          `UPDATE shooting SET ${updateFields.join(', ')}, updated_at=datetime('now','+8 hours') WHERE id=?`,
+          `UPDATE shooting SET ${updateFields.join(', ')}, updated_at=? WHERE id=?`,
           params,
         );
         if (shootingChanged > 0 && latestShooting.status !== 'completed') {
@@ -2024,8 +2028,8 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
           return { ok: false as const, reason: 'stale-record' as const };
         }
         const changed = await tx.execute(
-          `UPDATE shooting SET ${updateFields.join(', ')}, updated_at=datetime('now','+8 hours') WHERE id=? AND status=?`,
-          [...params, id, shooting.status],
+          `UPDATE shooting SET ${updateFields.join(', ')}, updated_at=? WHERE id=? AND status=?`,
+          [...params, beijingNow(), id, shooting.status],
         );
         if (changed === 0) return { ok: false as const, reason: 'stale-record' as const };
         const topic = await tx.queryOne<{ title: string }>('SELECT title FROM topics WHERE id=?', [targetTopicId]);
@@ -2045,9 +2049,9 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
         return res.status(409).json({ message: '成片制作记录已被其他协作者修改，请刷新页面核对后重试', code: 'SHOOTING_RECORD_CONFLICT' });
       }
     } else {
-      params.push(id);
+      params.push(beijingNow(), id);
       const completedGuard = changingCompletedHandoff ? ` AND status <> 'completed'` : '';
-      const changed = await execute(`UPDATE shooting SET ${updateFields.join(', ')}, updated_at = datetime('now', '+8 hours') WHERE id = ?${completedGuard}`, params);
+      const changed = await execute(`UPDATE shooting SET ${updateFields.join(', ')}, updated_at = ? WHERE id = ?${completedGuard}`, params);
       if (changingCompletedHandoff && changed === 0) {
         const latest = await queryOne<{ status: string }>('SELECT status FROM shooting WHERE id=?', [id]);
         if (!latest) return res.status(404).json({ message: '成片制作记录不存在' });
@@ -2295,7 +2299,7 @@ router.put(
   },
 );
 
-router.get('/publishing/:id', authenticate, async (req, res) => {
+router.get('/publishing/:id', noStoreResponse, authenticate, async (req, res) => {
   try {
     const publishing = await queryOne(`SELECT ${publishingWithDouyinSelect},p.script_source_production_id,p.script_source_version,t.description AS topic_description,t.platform AS topic_platform,t.deadline AS topic_deadline,t.status AS topic_status FROM publishing p ${publishingWithDouyinJoins} WHERE p.id=?`, [req.params.id]);
     if (!publishing) return res.status(404).json({ message: '发布记录不存在' });
@@ -2532,7 +2536,7 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
 });
 
 // GET /publishing/create-request/:requestId - read back a create result without writing.
-router.get('/publishing/create-request/:requestId', authenticate, async (req, res) => {
+router.get('/publishing/create-request/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = String(req.params.requestId || '').trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
@@ -2743,8 +2747,8 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
       }
       if (updateFields.length > 0) {
         await tx.execute(
-          `UPDATE publishing SET ${updateFields.join(', ')},updated_at=datetime('now','+8 hours') WHERE id=?`,
-          [...params, id],
+          `UPDATE publishing SET ${updateFields.join(', ')},updated_at=? WHERE id=?`,
+          [...params, beijingNow(), id],
         );
       }
       if (status !== undefined && status !== currentPublishing.status) {

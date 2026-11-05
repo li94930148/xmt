@@ -1,14 +1,16 @@
 ﻿﻿import express from 'express';
 import bcrypt from 'bcrypt';
+import { createAsyncRouter } from '../middleware/async-router';
 import { createHmac } from 'node:crypto';
-import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { noStoreResponse } from '../middleware/no-store';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 import { assertAssignableRole, getAssignableRoles } from '../services/role-assignment.service.js';
 import { disconnectUserSockets } from '../utils/socket.js';
 import { activityLogCutoffTimestamp, activityLogTimestamp, serializeActivityLog } from '../services/activity-log.js';
 
-const router = express.Router();
+const router = createAsyncRouter();
 
 const MAX_LIST_LIMIT = 200;
 const USER_MUTATION_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -171,7 +173,7 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
   }
 });
 
-router.get('/create-requests/:requestId', authenticate, async (req, res) => {
+router.get('/create-requests/:requestId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     if (!USER_MUTATION_REQUEST_ID_PATTERN.test(requestId)) {
@@ -189,7 +191,7 @@ router.get('/create-requests/:requestId', authenticate, async (req, res) => {
   }
 });
 
-router.get('/update-requests/:requestId/:targetUserId', authenticate, async (req, res) => {
+router.get('/update-requests/:requestId/:targetUserId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     const targetUserId = Number(req.params.targetUserId);
@@ -209,7 +211,7 @@ router.get('/update-requests/:requestId/:targetUserId', authenticate, async (req
   }
 });
 
-router.get('/delete-requests/:requestId/:targetUserId', authenticate, async (req, res) => {
+router.get('/delete-requests/:requestId/:targetUserId', noStoreResponse, authenticate, async (req, res) => {
   try {
     const requestId = typeof req.params.requestId === 'string' ? req.params.requestId.trim().toLowerCase() : '';
     const targetUserId = Number(req.params.targetUserId);
@@ -432,7 +434,8 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
       return res.status(400).json({ message: '没有需要更新的字段' });
     }
     
-    updates.push("updated_at = datetime('now', '+8 hours')");
+    updates.push('updated_at = ?');
+    params.push(beijingNow());
     params.push(id);
     
     const outcome = await runInTransaction(async (tx) => {

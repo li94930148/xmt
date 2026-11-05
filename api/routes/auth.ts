@@ -4,13 +4,15 @@ import {
   createLoginRolloutPolicy,
   createLegacyAuthRouter,
 } from '../modules/auth/index.js';
-import { createAuthV1Module, isAuthV1Enabled } from '../modules/auth/v1/index.js';
+import { createAuthV1Module } from '../modules/auth/v1/index.js';
 import { authRolloutRuntimeConfig } from '../config/auth-rollout-runtime.js';
+import { resolveAppRuntimeConfig } from '../config/app-runtime.js';
 
 const authModule = createAuthModule();
 const loginRolloutEnabled = authRolloutRuntimeConfig.loginRolloutEnabled;
-const authV1Module = isAuthV1Enabled() && process.env.XMT_AUTH_REFRESH_PEPPER?.trim()
-  ? createAuthV1Module(process.env.XMT_AUTH_REFRESH_PEPPER.trim())
+const appRuntimeConfig = resolveAppRuntimeConfig();
+const authV1Module = appRuntimeConfig.authV1LoginEnabled
+  ? createAuthV1Module(appRuntimeConfig.authRefreshPepper)
   : null;
 const loginGateway = new LoginGatewayController({
   repository: authModule.repository,

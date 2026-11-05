@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { describe, it } from 'vitest';
 import { getRoleDisplayName } from '../../src/lib/roles';
 
 const expectedRoleLabels = {
@@ -11,11 +12,19 @@ const expectedRoleLabels = {
   member: '普通人员',
 };
 
-for (const [role, label] of Object.entries(expectedRoleLabels)) {
-  assert.equal(getRoleDisplayName(role), label, `${role} should match its canonical database role name`);
-  assert.notEqual(label, role, `${role} should not be exposed as a raw role code`);
-}
-assert.equal(getRoleDisplayName('custom_video_editor'), '自定义角色', 'unknown role codes must not leak internal codes or be mislabeled as built-in roles');
-assert.equal(getRoleDisplayName(null), '未分配角色', 'missing roles should be described explicitly');
+describe('mobile role labels', () => {
+  it('maps built-in role codes to canonical business labels', () => {
+    for (const [role, label] of Object.entries(expectedRoleLabels)) {
+      assert.equal(getRoleDisplayName(role), label, `${role} should match its canonical database role name`);
+      assert.notEqual(label, role, `${role} should not be exposed as a raw role code`);
+    }
+  });
 
-console.log('Mobile built-in role labels passed');
+  it('hides unknown internal role codes', () => {
+    assert.equal(getRoleDisplayName('custom_video_editor'), '自定义角色', 'unknown role codes must not leak internal codes or be mislabeled as built-in roles');
+  });
+
+  it('describes a missing role explicitly', () => {
+    assert.equal(getRoleDisplayName(null), '未分配角色', 'missing roles should be described explicitly');
+  });
+});

@@ -1,4 +1,192 @@
+## 2026-11-05 审计 P2-3：首屏资源预算复核（v10.1.74，本地，尚未完成）
+
+- **现状复核**：从当前源码执行 Vite 构建并读取 Rollup 模块贡献；改造前主入口 `index` 为 650.81 KB（gzip 209.58 KB），其中 `motion/react` 页面过渡、Studio barrel 引入的 `AsyncState`/`tailwind-merge` 进入全局入口。Silk 已按需加载，编辑器和更新历史也处于动态模块。
+- **改造**：全局 `AnimatedPage` 保持组件 API 与 `data-page-transition`，页面进入动画改为 CSS，保留 opacity=1、4px Y 位移和 320ms 缓动，并在系统减少动态效果时关闭动画。`Layout` 改为直接导入 AppShell/Topbar/AnimatedPage；公告与侧栏外壳不再引入 ActionButton/class merger；公告日期格式移至共享时区模块，既有 `utils` 导出兼容保留；404 改为惰性路由。
+- **验证**：正式生产构建入口为 493.56 KB（gzip 158.05 KB），比基线减少 24.2%；入口文件低于 500 KB。Playwright MCP 的 `/login` 网络记录显示登录页面实际请求的脚本共 536,942 bytes（536.94 KB，未压缩），因此按完整首屏资源口径尚未达到 500 KB。Silk 与 ContentEditor 没有进入首屏请求。Chrome DevTools MCP 确认登录表单可见、密码显示切换生效；仅填入合成测试文本，未提交登录。静态预览未启动 API，`/api/system-settings/public` 两次 GET 返回 500，因此不把该页面当成真实登录/API 验收。没有业务写请求。
+- **结论与边界**：全局动效与减少动态效果支持已完成；入口文件降低至 493.56 KB，Silk（843.47 KB）与 ContentEditor（958.29 KB）仍为按需加载资源。但完整登录首屏脚本合计超过审计报告提出的 500 KB 上限，P2-3 仅部分完成，继续开放。无 API、权限、数据库或业务数据变化。Android 元数据为 10.1.74 / 100174，未构建 APK；本地未提交、推送或部署。
+
+## 2026-11-05 审计 P2-1：人员管理页面拆分（v10.1.73，本地，P2-1 部分完成）
+
+- **审计依据与现状复核**：参考 2026-11-03 代码审计报告的 P2-1，并按本地工作树复测。改造前 `Users.tsx` 为 1,793 行、10 个页面 effect；本轮将页面收敛到 377 行、0 个页面 effect。当前仍有 16 个 TSX 页面超过 800 行，因此 P2-1 未完成。
+- **改造**：用户列表与操作日志表格拆为展示组件；列表、权限、请求竞态、用户增删改停用、恢复核验状态仍由 `useUsersPage` 管理；恢复序列化继续单独放在 `userRecovery`。未修改 API、权限判断、请求载荷、恢复标记或写入顺序。
+- **验证**：`npm run check -- --pretty false`、前端结构合同、用户恢复存储（4 项）、人员分页/搜索/权限合同及改动文件 ESLint 通过。Playwright MCP 与 Chrome DevTools MCP 隔离夹具确认人员列表和日志页签、选中状态及用户行操作正常；320px 视口文档宽度 312px、无横向溢出；控制台无错误或警告，未发起业务写请求。完整 `test:ci` 与生产构建本轮未运行。
+- **边界**：`useUsersPage` 当前 1,143 行，仍可继续按读取和变更恢复职责拆分；本轮的目标是完成页面级拆分，不宣称 P2-1 全部关闭。Android 元数据为 10.1.73 / 100173，未构建 APK；本地未提交、推送或部署。
+
+## 2026-11-05 审计 P2-1：消息中心页面拆分（v10.1.72，本地，P2-1 部分完成）
+
+- **审计依据与现状复核**：将 2026-11-03 代码审计报告作为线索，并按当前工作树复核。报告点名 `Users.tsx` 的 10 个 effect；改造前 `Messages.tsx` 为 1,005 行、7 个页面 effect，递归盘点 `src/pages` 有 18 个 TSX 页面超过 800 行，没有直接套用报告的历史行数。
+- **改造**：消息读取、筛选分页、单条/批量已读与清空操作、结果不确定时的只读核实及请求恢复状态移入 `useMessagesPage`（644 行、6 个 effect）；恢复编号的 sessionStorage 读写移至 `messageRecovery`（134 行）。页面保留消息卡片、筛选、指标、分页、清空确认与实时刷新监听。改造后 `Messages.tsx` 为 339 行、1 个 effect；没有改变 API、请求载荷、权限或写入/恢复顺序。
+- **验证**：`npm run check -- --pretty false`、`npm run test:integrity:frontend`、改动文件 ESLint、完整 `npm run test:ci`（127 个文件/478 项）、版本检查、版本/更新说明治理、Android runtime 合同、`npm run build` 与 `git diff --check` 均通过。浏览器使用 Playwright MCP 和 Chrome DevTools MCP 隔离夹具；桌面消息列表、筛选、清空确认/取消均正常，点击未读筛选只发出 GET；320×844 下页面宽度与视口一致，暗色主题也通过。控制台无错误/警告，没有业务 API 写请求。生产构建入口块 650.82 KB、ContentEditor 动态块 958.25 KB、Silk 动态块 843.47 KB；P2-3 体积目标仍未达成。
+- **边界**：页面行数和页面 effect 预算已满足；现仍有 17 个 TSX 页面超过 800 行，P2-1 未关闭。无 API、权限、数据库结构或真实业务数据变化。Android 元数据为 10.1.72 / 100172，未构建 APK；本地未提交、推送或部署。
+
+## 2026-11-05 审计 P2-1：匿名意见管理页面拆分（v10.1.71，本地，P2-1 部分完成）
+
+- **现状与改造**：`AnonymousFeedbackAdmin.tsx` 从 871 行、4 个 `useEffect` 收敛到 128 行、0 个 `useEffect`；数据请求、权限相关操作入口状态、更新/删除恢复协调移至 `useAnonymousFeedbackAdmin` hook（768 行、4 个 effect），表格继续由 `AdminFeedbackTable` 展示。未改变 API、权限判定、请求载荷、恢复标记或写入顺序。
+- **验证**：页面拆分后，`npm run check -- --pretty false`、`npm run test:integrity:frontend`、相关文件 ESLint 与 `npm run test:ci`（127 个文件/478 项）通过。版本号同步到 v10.1.71 后，`npm run version:check`、版本治理、更新说明治理、Android runtime 合同、生产构建及 `git diff --check` 通过；构建入口块 650.82 KB、ContentEditor 动态块 958.25 KB、Silk 动态块 843.47 KB，P2-3 体积预算仍未达成。Playwright MCP 与 Chrome DevTools MCP 在本地隔离夹具加载管理页，打开并取消“回复意见”窗口后返回原列表；Chrome DevTools 控制台无错误，API 网络记录只有读取请求，没有意见修改/删除写入。390×844 视口测得文档滚动宽度与布局宽度一致（382px），无横向溢出。仓库 Playwright e2e 脚本未能启动 Chromium：`bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer` 权限错误 1100，因此该脚本断言未执行。
+- **边界**：页面行数和 effect 预算满足，但数据/恢复 hook 仍有 768 行，后续可按列表、更新恢复、删除恢复拆成更小模块。当前仍有 18 个页面超过 800 行，P2-1 未关闭。隔离浏览器只测试了列表与回复窗口取消，不代表真实 API 写入验收。无 API、权限、数据库结构或真实业务数据变化；Android 元数据为 10.1.71 / 100171，未构建 APK；本地未提交、推送或部署。
+
+## 2026-11-05 审计 P2-9 / P2-5：版本来源统一与 SheetJS 离线安装核验（v10.1.70，本地）
+
+- **改造**：系统设置与 API 健康状态共用相对模块路径解析的 `appVersion`，移除服务版本读取对启动工作目录的依赖。SheetJS 0.20.3 使用仓库本地归档；隔离的干净 `node_modules` 在同一临时 npm 缓存先联网预热后，`npm ci --offline` 成功安装 751 个包。
+- **验证与边界**：空缓存 `npm ci --offline` 首次因缓存未包含 npm registry 包 `why-is-node-running@3.2.1` 而失败；随后使用 registry 填充同一临时缓存，再做离线安装通过。因此这验证的是“缓存完整且 xlsx 已 vendoring 时离线重装”，不是冷缓存离线安装。版本来源测试、版本/更新说明治理、类型检查、定向 ESLint、Android runtime 合同、完整 `npm run test:ci`（127 个文件/478 项）及生产构建通过；构建入口为 650.79 KB、编辑器块 958.25 KB、Silk 块 843.47 KB，仍有超过 500 KB 提示。API 未运行，未做真实 HTTP 工作目录切换验收。无数据库结构或真实业务数据变化；Android 元数据为 10.1.70 / 100170，未构建 APK；本地未提交、推送或部署。
+
 # XMT 升级阶段记录
+
+## 2026-11-04 审计 P2-1：排期日历与匿名意见管理页面拆分样板（v10.1.69，本地，P2-1 部分完成）
+
+- **审计依据与现状复核**：参考 `/Users/youfeifei/Projects/xmt/outputs/xmt-code-review-2026-11-03.md` 的 P2-1，按当前工作树重新测量，不沿用审计时的页面行数。拆分前 `Calendar.tsx` 为 842 行、4 个 `useEffect`；本地调整后为 469 行、页面内 2 个 `useEffect`。全量页面复测仍有 19 个 TSX 页面超过 800 行，因此 P2-1 尚未关闭。
+- **改造**：新增 `useCalendarData` 负责按月加载日程、生成 42 格日历数据和汇总；新增日历网格、近期节点和创建表单组件；会话恢复读写移至 `calendarCreateRecovery`。网格组件接管跨月/跨年后的焦点恢复。匿名意见管理的列表、加载/空态、刷新失败提示和行操作展示移至 `AdminFeedbackTable`，所有数据获取、权限判断、恢复锁与写入回调仍由页面控制。日历创建恢复存储和两页组件委派均有结构合同。
+- **代码验证**：`npm run check -- --pretty false`、相关文件 ESLint、`npm run test:integrity:frontend`、日历创建恢复 3 项 Vitest 合同、`tests/calendar/calendar-event-contrast-contract.test.ts` 均通过。最新完整 `npm run test:ci` 通过（127 个测试文件、477 项，153.25 秒）；生产构建、`npm run version:check`、更新记录治理和 `git diff --check` 通过。构建保留入口、编辑器和 Silk 分块超过 500 KB 的提示，首屏依赖治理仍开放。
+- **浏览器验收**：仓库 Playwright 日历脚本未能启动 Chromium：`bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer` 权限错误 1100，自动断言未执行。随后用 Chrome DevTools MCP 和仅绑定 `127.0.0.1` 的临时 API/Vite 夹具验收日历：桌面 1440×900、移动 390×844 均显示 42 个日期格、7 列且无横向溢出；移动日期按钮最小高度 64px。键盘从 2026-12-31 按右键可切换到 2027-01，并将焦点落到 2027-01-01；创建表单可打开/取消，关联选题下拉保留。控制台 0 error，只有启用减少动态效果时的预期 Motion 提示；业务 API 请求只有 GET，Socket.IO 握手 POST，没有业务写入。匿名意见列表本轮未单独做浏览器界面验收；临时服务器已停止，浏览器已返回空白页。
+- **构建/治理**：生产构建和版本一致性检查通过；完整核心测试聚合 127 个文件、477 项通过。没有 API、权限、数据库结构或真实业务数据变化；Android 元数据为 10.1.69 / 100169，未构建 APK。本地未提交、推送或部署。
+- **剩余**：排期日历已达到 500 行页面预算；`AnonymousFeedbackAdmin.tsx` 仍为 871 行且 5 个 `useEffect`，需要继续拆出数据/恢复逻辑并分离其他展示区域。按当前 `src/pages` 统计，仍有 19 个页面超过 800 行，P2-1 未关闭。日历跨月请求竞态的自动 Playwright 断言未运行，已改由 Chrome DevTools MCP 做键盘焦点与响应视图验收。
+
+## 2026-11-04 审计 P1-5：补入匿名意见合同并修复版本历史缺项（v10.1.68，本地）
+
+- **现状复核**：当前 `package.json` 有 343 个 `test:` 入口；121 个指向 Vitest，142 个旧脚本由核心桥接顺序执行，另有 Android/Agent 专项 CI 和未归入核心聚合的浏览器、外部环境入口。`test:recovery-status-cache` 的 17 个叶子命令与 `test:integrity` 的 7 个叶子命令逐一核对，均已落在 Vitest、核心旧脚本桥接或独立 CI 中；复合入口本身不能重复用来计算断言数量。
+- **改造**：将 `test:anonymous-feedback` 与 `test:collaboration-redis-integration` 纳入核心旧脚本桥接。前者使用临时目录数据库和回环 HTTP，覆盖匿名提交身份保护、历史意见状态迁移及管理员访问边界；后者启动只绑定 `127.0.0.1` 的临时 Redis、两份 API worker 和临时 SQLite，覆盖跨实例广播、锁、并发更新、Redis 中断和 AOF 重启恢复，测试结束清理进程及临时目录。CI 核心合同任务显式安装 `redis-server`。更新治理还发现应用内更新列表漏记 10.1.65、10.1.66；补入对应历史摘要并归档 10.1.67，避免当前与上一主版本记录不一致。版本升至 10.1.68，Android 元数据为 100168。
+- **验证**：两个新增合同独立运行通过。修复前完整 `npm run test:ci` 发现版本治理失败（472/473 项通过），补齐历史摘要后完整重跑通过：126 个测试文件、473 项全部通过；纳入 Redis 合同并修正面向用户的更新文案后，最终完整聚合 126 个文件、474 项全部通过（约 159 秒）。`npm run test:entrypoints` 检查 337 个文件通过，修改文件 ESLint、`npm run test:version-governance`、`npm run test:changelog-governance`、`npm run version:check`、`npm run check -- --pretty false`、`npm run build`、Android runtime 合同及 `git diff --check` 通过。
+- **未完成边界**：当前 343 个 `test:` 入口中仍有 75 个不直接列在 Vitest 别名、核心旧脚本桥接或专门 CI 命令中；其中包括浏览器/服务依赖入口、生产 URL 验收和已由复合脚本叶子覆盖的聚合入口，仍需逐项分类，不能笼统认定全部未测或全部已测。旧脚本子进程覆盖率尚未汇总，P1-5 未完成。本轮只访问临时数据库和回环地址，没有真实数据库、外网账号或业务数据变化；未构建 APK，未提交、推送或部署。
+
+## 2026-11-04 审计 P2-2：选题看板长列窗口化（v10.1.67，本地）
+
+- **现状复核**：审计建议中的“全站长列表 1000 条 DOM”不完全适用于当前入口：选题列表默认每页 15 条；看板由页面请求最多 200 条，`shared/schema/topics.schema.ts` 也将接口 limit 限制为 200。看板每列有独立滚动区，当大量选题集中在一个阶段时该列仍会同时挂载所有卡片。
+- **改造**：`TopicsBoardView` 使用 `@tanstack/react-virtual` 3.14.26 对超过 32 条的单列窗口化渲染，测量动态卡片高度并预渲染滚动附近项目。较短列保留完整渲染。键盘焦点进入卡片区域会自动展开全列，同时提供手动切换，避免键盘用户被虚拟窗口限制。状态操作、权限、过滤和 200 条接口上限未改变。
+- **验证**：`npm run check -- --pretty false`、`npx eslint src/components/topics/TopicsBoardView.tsx`、`npm run build`、`npm run version:check` 与 `git diff --check` 通过。Chrome DevTools MCP 用仅含本地合成数据的隔离页面检查 200 条同阶段选题：窗口化初始渲染 10 张卡片；完整模式列子树 3,012 个 DOM 元素，窗口化为 162 个，减少 94.6%。滚动到末尾仍加载第 191–200 条；点击完整显示可见全部 200 条；重新窗口化后把键盘焦点移入首张卡片，会自动展开全列且焦点仍落在同一按钮。桌面 1400×824、移动 390×844 页面均无横向溢出；浏览器控制台错误为 0、无框架错误层。仅验证合成样例，不连接 API 或写入业务数据；未运行自动化测试。
+- **审计边界**：当前 Topics API 的 limit 最大为 200，因此无法按审计建议提供 1000 条单列样本；以产品最大 200 条实测，DOM 元素降幅达到 94.6%，超过报告提出的 80% 目标。此处验证的是滚动到列表末尾能正确呈现最后一组条目，不等同于正式设备上的帧率/无卡顿基准。Android 元数据为 10.1.67 / 100167，未构建 APK；仅本地修改，未提交、推送或部署。浏览器截图：`/private/tmp/xmt-topics-virtualization-desktop.png`、`/private/tmp/xmt-topics-virtualization-mobile.png`。
+
+## 2026-11-04 审计 P2-3 / P2-4 / P2-5：首屏依赖与安装来源治理（v10.1.66，本地，部分完成）
+
+- **现状复核**：报告中 Silk 已是 React.lazy 动态组件，但当前根页面 HTML 仍由 `manualChunks` 静态预加载 Tiptap 与 ProseMirror；原始审计数字不等于当前工作树产物。临时构建对照显示去掉全局手工分块后，入口 HTML 不再预加载这两块；尝试把 Three.js/OGL 做全局手工分块则会把约 850 KB 图形依赖提升为入口静态依赖，因此未采用。
+- **改造与构建**：移除 `vite.config.ts` 中对 Tiptap、ProseMirror、lowlight 的全局 `manualChunks`。最终 `npm run build` 通过。当前入口 JS 651.10 KB（gzip 209.74 KB）；`ContentEditor` 958.25 KB（gzip 291.38 KB）与 Silk 843.47 KB（gzip 227.01 KB）均作为动态资源输出，构建 HTML 没有 Tiptap/ProseMirror modulepreload。默认外观背景为 none；用户在启用相应背景的页面才会触发对应动态加载。
+- **P2-4 依赖复核**：当前 `playwright` 只在 `devDependencies`，报告所称重复声明已不存在；`tsx` 仍须为生产依赖，因为 `npm start` 直接通过它运行 `api/server.ts`；`xlsx` 由 `api/services/social-review/douyinExportParser.ts` 在 API 运行时导入，不能移出生产依赖。
+- **P2-5 安装来源**：审计建议的 npm `xlsx` 替代源与当前官方指引不符。SheetJS 官方说明 npm 上的 `xlsx` 仍旧为 0.18.5，0.20.3 以其 CDN 为权威来源，并建议 vendoring。现已将 2.41 MB 官方归档放入 `vendor/xlsx-0.20.3.tgz`，package/lockfile 改为本地文件；SHA-256 `8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8` 且 SHA-512 与既有 lock integrity 一致。`npm install --package-lock-only --offline --ignore-scripts --no-audit --cache=/private/tmp/xmt-npm-cache` 成功解析本地归档。
+- **未完成与边界**：Chrome DevTools MCP 隔离页加载未登录 `/login`，没有 Tiptap、ProseMirror、Silk、Three.js 脚本请求或业务写入；公开系统设置 GET 因静态预览未启动 API 返回 500，登录后的首页 Network 未验收。审计建议的未压缩首屏 500 KB 预算未达成，入口文件自身仍 651.10 KB，因此 P2-3 只完成了编辑器依赖不进入根 HTML 静态预加载这一部分。构建仍警告编辑器/Silk 大块。未运行自动化测试；无 API、权限、数据库结构或真实数据变化。Android 元数据为 10.1.66 / 100166，未构建 APK；本地未提交、推送或部署。
+- **剩余**：P2-5 的干净环境 `npm ci --offline` 尚未运行；P2-3 的未压缩首屏 500 KB 预算与登录后首页 Network 验收仍未完成。
+
+## 2026-11-04 审计 P2-8：更新历史按需加载与活跃版本一致性（v10.1.65，本地）
+
+- **现状复核**：根目录 `CHANGELOG.md` 记录工程改造、测试和部署细节；`src/data/changelog.ts` 提供产品内更短的业务文案，二者不是同格式重复副本。当前及上一主版本（v9、v10）版本覆盖一致；差异在更早历史段，现有比对为 20 条工程日志独有记录、9 条 UI 独有旧记录。
+- **改造**：首页更新提示从独立 `latest-changelog-entry.ts` 读取最新摘要，不再导入完整历史数组。设置页原本已按路由延迟加载，历史数据仍在进入该页时读取。版本治理测试现要求当前与上一主版本的版本集合一致、无重复，并验证首页只依赖摘要模块；保留旧历史文案，不自动将技术部署细节转成业务文案。
+- **验证**：核心 `test:ci` 通过 126 个文件、472 项；`test:entrypoints` 检查 337 个文件通过；类型检查、生产构建、版本检查、版本治理、更新说明治理和 `git diff --check` 均通过。生产构建中主入口从前次 834.52 KB（gzip 251.52 KB）降为 506.98 KB（gzip 163.08 KB），完整更新历史独立为 328.11 KB（gzip 87.23 KB）懒加载块；主入口仍略超 500 KB，Silk 843.50 KB 原有大块提示保留。无业务 API、数据库结构或真实数据变化。Android 元数据为 10.1.65 / 100165，未构建 APK；本地未提交、推送或部署。
+- **剩余**：P2-8 的全历史单一生成源尚未实现；活跃版本一致性和首屏摘要拆分已完成，旧历史条目差异保持显式。P1-5 仍待复合脚本断言盘点和旧脚本子进程覆盖率汇总。
+
+## 2026-11-04 审计 P2-7 / P2-11 / P1-5：lint 文档口径、SQLite 锁等待与测试聚合第十一批（v10.1.64，本地）
+
+- **证据与修复**：完整 CI 首次复验时，租约续租子进程出现 `SQLITE_BUSY: database is locked`；为暴露根因，测试等待器现在在意外退出时附带退出信号、标准错误和已收响应。确认 API 数据库连接此前没有设置 SQLite 忙等待，而续租只做有限短退避。`configureDatabaseConnection()` 统一设置 `PRAGMA busy_timeout = 5000` 与 `PRAGMA synchronous = NORMAL`；数据库初始化继续启用 WAL 并调用该配置，多进程租约测试 worker 也复用该入口。
+- **验证**：租约回归读取并断言 5000ms busy timeout 和 NORMAL 同步模式；10 个隔离 worker 各运行 100 次写入，共 1000 次并发写入，无 `SQLITE_BUSY`，整项连续 5 次通过，同时覆盖租约抢占、续租/释放、进程崩溃后的过期接管及 fencing token。随后 `npm run test:ci` 通过 126 个文件、472 个 runner 项（330 个原生测试 + 141 个旧脚本桥接 + 1 个防重复合同）；`npm run test:entrypoints` 检查 337 个文件通过；`npm run check -- --pretty false` 与本次修改文件的 ESLint 通过（0 errors、5 warnings，其中含 db.ts 既有 BOM/历史 any 警告）。
+- **最新 P1-5 盘点**：343 个 `test:`、30 个 `smoke:` 入口；120 个命令指向原生 Vitest，141 个旧脚本进入核心顺序桥接；81 个 `test:` 名称静态未映射到核心聚合，部分可能由独立 CI 作业执行。P1-5 仍未结束：复合脚本内部断言清点与旧脚本子进程覆盖率汇总待完成。此前 Vitest 原生覆盖率基线不包含子进程，本轮未重跑覆盖率；全量 lint 为 0 errors、213 warnings，生产构建通过。
+- **P2-7 文档一致性**：README 现说明 `npm run lint` 已在 CI fast-gate 执行；本机完整 lint 为 0 errors、213 warnings，warning 不阻断 CI；历史警告清理目标为每月至少减少 50 条。此项仅修正文档，不改变系统行为。
+- **边界与后续**：没有 schema、真实数据库或业务数据变化。Android 元数据为 10.1.64 / 100164，未构建 APK。版本检查、版本治理、更新说明治理和 `git diff --check` 均通过；本地未提交、推送或部署。下一阶段继续依据审计剩余项和改造清单处理可安全验证的本地工作。
+
+## 2026-11-04 审计 P1-5：安全旧脚本桥接第十批（v10.1.63，本地）
+
+- **范围**：再将 17 个隔离检查加入核心顺序桥接，覆盖成就检查/初始化、选题时间迁移、资源创建幂等 API 与迁移、资源变更审计、内容资产权限、生产权限与评审线程、拍摄/生产幂等及迁移、工作流脚本来源与文档版本迁移、生产历史快照迁移。17 个脚本分别通过后才接入；均使用临时 SQLite 或 127.0.0.1 回环服务，不连接外部账号/服务。
+- **验证**：`npm run test:ci` 通过 126 个文件、406 个 runner 项（330 个原生 Vitest 测试 + 75 个旧脚本桥接项 + 1 个防重复合同）；本批 17 个脚本独立运行全部通过。`npm run test:entrypoints` 检查 337 个文件通过；更新说明治理、版本检查和 `git diff --check` 也通过。此轮未重跑覆盖率或全量类型/lint/构建门禁。
+- **最新调度盘点**：当前 343 个 `test:`、30 个 `smoke:` 入口中，120 个 `test:` 命令指向 Vitest，75 个由核心桥接覆盖；静态仍有 147 个 `test:` 名称未映射到核心聚合，部分可能由独立 CI 作业运行。覆盖率沿用第八批 125 个原生测试文件/330 项基线，不包含旧脚本子进程。P1-5 仍未完成，复合脚本内部断言盘点与旧脚本子进程覆盖率汇总待处理。未访问真实数据库或生产服务；本地未提交、推送或部署。
+
+## 2026-11-04 审计 P1-5：安全旧脚本桥接第九批（v10.1.63，本地）
+
+- **范围**：参考 2026-11-03 代码审计报告，但以当前工作树实测为准。将 7 个只使用临时 SQLite 与本机回环 HTTP 的既有检查纳入顺序核心桥接：资源分类、资源创建原子性、资源创建幂等、创作选题建议、旧日报只读、备份创建恢复和用户列表分页。候选脚本分别通过后才加入聚合；不涉及真实数据库、抖音账号或外网调用。
+- **验证**：新增 7 项后，`npm run test:ci` 通过 126 个文件、389 个 runner 项（330 个 Vitest 原生测试 + 58 个旧脚本桥接项 + 1 个防重复合同）；7 个脚本独立运行也全部通过。`npm run test:entrypoints` 检查 337 个文件通过。此轮仅增加桥接，未重跑覆盖率；上轮 Vitest 原生覆盖率仍为单独基线，不涵盖旧脚本子进程。
+- **第九批结束时调度盘点**：当时 `package.json` 有 343 个 `test:` 与 30 个 `smoke:` 入口；120 个 `test:` 命令指向 Vitest，58 个由顺序桥接覆盖，另有 `test:ci` 聚合入口，静态映射有 164 个 `test:` 名称不在核心聚合中（部分可能由独立 CI 作业运行）。11 月 3 日审计的 318 个前缀入口与 250 项未入 CI 是其审计工作树的历史基线；不能直接替代当前分支清点，也不代表这些入口此刻都未在其他 CI 作业运行。P1-5 仍未完成，复合脚本内部断言盘点和旧脚本子进程覆盖率汇总待处理。本轮仅修改本地测试聚合与记录，未提交、推送或部署。
+
+## 2026-11-04 审计 P1-5：测试脚本第八批与覆盖率刷新（v10.1.63，本地）
+
+- **迁移范围**：8 批共迁移 59 个独立测试文件、66 个原生 runner 用例，覆盖移动端基础行为、资料导航、选题状态机、错误呈现、创作操作、通知恢复、认证/Socket 策略、备份清单、运行环境读取、匿名意见恢复、封面校验、系统设置、未读数竞态和前端挂载路由等。保留原 `npm run test:*` 名称作为 Vitest 入口；当前配置含 125 个原生测试文件（含 1 个脚本式测试）和 1 个顺序旧脚本桥接文件。
+- **第八批结束时调度盘点**：`package.json` 有 343 个 `test:` 与 30 个 `smoke:` 脚本；120 个测试命令指向 Vitest，51 个仍由顺序旧脚本桥接覆盖，另有 `test:ci` 聚合入口。静态映射有 171 个 `test:` 名称不在核心聚合中（其中一些可能由独立 CI 作业执行）。已加合同避免原生 Vitest 入口被旧桥接重复启动。这些是入口映射，不代表断言覆盖率或所有脚本均未执行。
+- **验证状态**：`npm run test:ci` 通过，126 个文件、382 个 runner 项全部通过（330 个原生测试 + 51 个旧脚本桥接 + 1 个防重复合同）；`npm run test:coverage` 在排除会启动子进程的桥接文件后，125 个原生测试文件、330 项通过。覆盖范围为 `api/`、`src/`、`shared/`、`packages/api-client/`；语句 8.03%、分支 8.09%、函数 9.28%、行 8.34%，未设阈值。旧 `tsx` 子进程、浏览器脚本的覆盖率未汇总，所以该值仅是 Vitest 原生测试基线。`npm run test:entrypoints` 检查 337 个文件通过；`npm run check -- --pretty false`、`npm run lint` 通过（lint 0 errors、213 warnings）；更新说明治理和版本检查通过，`git diff --check` 通过。
+- **第八批记录时的依赖与剩余范围**：新增开发依赖 `@vitest/coverage-v8@5.1.0`；npm 安装审计提示 15 项中危，单独的生产依赖审计为 0 个漏洞，未自动修复依赖。该批之后的最新入口与剩余范围见本文件第十批。本地没有访问真实数据库或生产数据，未提交、推送或部署。
+
+## 2026-11-04 审计 P1-4/P1-5：抖音 schema 兼容与 CI 测试入口第二轮（v10.1.63，本地）
+
+- **P1-4 数据库初始化**：已将成就、抖音、社媒、内容工作流、资源/账号/消息和日报等兼容字段统一改为 `PRAGMA table_info` 后只添加缺列；列名比较不区分大小写，schema/ALTER 错误向上抛出。选题 `submitted_at` 回填也不再吞错。所有这些测试只使用临时 SQLite 文件；包括旧抖音表识别在内的 schema helper 均有错误传播、重复运行和数据保留合同。全 API ESLint 扫描的 `no-empty` 数量为 0；新增 API 专属 ESLint error 规则防止重新引入。
+- **P1-5 测试聚合（该轮记录时）**：后续三批迁移之前，`npm run test:ci` 输出 67 个 Vitest 文件、337 个 runner 项（264 个迁入用例 + 73 个顺序旧脚本桥接项）。`npm run test:entrypoints` 检查 336 个文件通过。当时工作区有 342 个 `test:` 和 30 个 `smoke:` package scripts，214 个入口未被核心聚合覆盖；这组历史数字已由本文件顶部的最新八批结果刷新。
+- **该轮验证结果**：`npm run test:ci` 67 个文件、337 个 runner 项全部通过；`npm run test:entrypoints` 336 个文件通过；`npm run check -- --pretty false`、`npm run build`、`npm run lint`、版本检查及 `git diff --check` 通过。生产构建仍显示既有 500 kB 以上资源块提示；全仓 lint 为 0 errors、213 warnings。没有连接真实数据库或生产数据。
+- **当前范围**：P1-4、P1-5、P1-8 仍未整体完成；P1-8 API 环境变量直读当前为 42 处。未访问真实业务数据库或生产数据；本地不提交、推送或部署。
+
+## 2026-11-04 审计 P1-4/P1-5/P1-8：核心 CI 统一入口与应用运行配置（v10.1.63，本地）
+
+- **CI 收敛**：核心安全合同作业的 73 条独立 `npm run test:*` 步骤改为单条 `npm run test:ci`；该入口以 Vitest 调度已迁入的合同文件，并用顺序桥接保留原有 73 个核心 npm 检查。CI 中其他 Android/入口检查继续独立运行，根级测试命令共 4 条。
+- **实际结果**：`npm run test:ci` 通过，Vitest 输出 61 个文件、313 个 runner 项；其中 240 项是迁入 Vitest 的独立用例，73 项各代表一个成功的旧 npm 脚本调用。桥接计数不等同这些脚本的内部断言总量，也不代表覆盖率。`npm run test:entrypoints` 通过，检查 330 个文件。当前 `package.json` 有 336 个 `test:` 与 30 个 `smoke:` 脚本，另有 208 个 `test:` 入口尚未进入该聚合（其中一部分由其他 CI 作业单独运行）。
+- **P1-4 空 catch 首批**：成就表四个 `ADD COLUMN` 现在先通过 `PRAGMA table_info` 检查缺列，只补缺失列；列名比较不区分大小写，schema/ALTER 失败原样向上抛出。临时 SQLite 覆盖补列与默认值、重复调用、大小写和两种错误传播，4/4 通过。API 空 catch 警告由 46 降至 42，均仍在 `db.ts`，后续逐项分类。
+- **P1-8 配置切片**：新增显式接收环境对象的 app-runtime 解析器，集中处理代理信任、`ALLOWED_ORIGINS`/`CORS_ORIGINS` 兼容优先级、Topics/Auth v1 开关、Auth Pepper 与健康检查环境标记；`app.ts` 和 `routes/auth.ts` 已使用该配置。5 项默认值、别名优先级和生产审批合同通过。生产 runtime env 的加载后再动态导入 app 的顺序未改变；API 仍有 42 处直接环境变量属性读取，P1-8 尚未完成。
+- **范围状态**：P1-5 部分完成。核心 CI 检查已有统一入口，但尚未把全部测试文件迁入 Vitest、展开每个复合脚本的真实断言数量，也未加入覆盖率采集；2026-11-03 审计中的历史基线不可直接当成当前覆盖数据。
+- **交付边界**：本轮仅调整 CI 测试调度与记录文档，没有数据库/生产业务数据变化；未提交、推送或部署。
+
+## 2026-11-03 审计 P0-3：抖音令牌独立加密密钥与可回滚迁移（v10.1.63，本地）
+
+- **风险核实**：当前生产代码原先以 `DOUYIN_CLIENT_SECRET`、`JWT_SECRET`、公开开发常量依次派生令牌密钥。现改为仅读取独立 `XMT_TOKEN_ENCRYPTION_KEY`，必须是 32 字节随机值的标准 Base64；`api/server.ts` 在生产加载应用前 fail-fast，`ops:runtime-env-check` 也会校验但不会输出密钥。开发环境仅在令牌加解密调用时要求配置，避免非抖音功能被无关配置阻断。
+- **迁移方案**：令牌密文加入 `v1` 格式标识。`npm run migrate:douyin-token-encryption` 默认只读，会按原代码准确派生旧密钥并验证存量密文；旧密钥从运行进程环境或 `xmt-api` PM2 环境读取，若无法取得则拒绝猜测，只有已确认旧服务使用公开开发回退时才允许显式指定。`--apply` 必须提供绝对路径的非符号链接 SQLite 备份，且整个 `douyin_accounts` 迁移在单一写事务中完成，每条令牌都做新密钥解密回验。遇到无效密文或更新数不符会回滚；重复执行会验证并跳过已迁移记录。工具只输出账号/令牌计数，不输出密钥或令牌。
+- **验证与边界**：`npm run test:douyin-token-encryption` 覆盖密钥缺失/格式、生产门禁、AES-GCM 往返、dry-run 不写入、无备份拒绝 apply、正确迁移、重复执行以及后续坏记录触发的整批回滚。测试只用临时 SQLite 文件。当前没有读取生产运行配置、生产令牌、真实数据库或生产备份；实际旧密钥来源/密文数量必须在部署准备阶段由授权运行环境 dry-run 确认。仓库还保留未被当前 API 读取的 legacy `douyin_tokens` 表；本次未改写其明文列，需单独核对其保留/清理策略。
+- **交付边界**：P0-3 的代码、迁移工具、回归和运行配置说明已本地完成；上线前要先设置独立密钥、停服、完成 SQLite 备份与 dry-run，再 apply 并核验新版本。任何失败都保持旧服务停止，先从备份恢复，再启动旧版本。未改数据库结构或真实业务数据；未提交、推送或部署。
+
+## 2026-11-03 审计 P0-1/P0-2 与 P1-1：进程错误治理、启动播种门禁、SQLite 时间迁移（v10.1.63，本地）
+
+- **证据与范围**：复核 2026-11-03 审计报告后确认旧转换器在每次数据库调用时执行正则、复制参数并提前生成北京时间。以本地工作区为准，排除建表默认值、迁移和兼容层本身，初始扫描到 212 个源码匹配，分布在 46 个 API TypeScript 文件；当前未找到已发生的问号错位案例，报告指出的是词法算法风险。
+- **改造**：一次性迁移 SQL 中隐式 SQLite 时间表达式到调用侧显式绑定，按业务操作复用同一北京时间值。抖音指标快照、采集计划、Creator Agent 心跳、Creator Sync、社媒复盘登录恢复/凭据/任务快照/账号写入均已迁移；本轮社媒复盘四个模块清除了 39 处表达式。`api/database/utils.ts` 已删除每次查询运行的 SQL 扫描、参数插入及 512 项缓存兼容器，查询参数现直接传给 libsql。`scripts/time-contract-test.ts` 改为验证显式时间参数、含问号字面量与注释的正常传参。当前 API 运行 SQL 扫描未发现旧 `datetime('now', '+8 hours')` / `CURRENT_TIMESTAMP` 表达式；`db.ts` 建表默认值与一次性历史时区迁移保留。
+- **P0-2 修复**：生产环境默认跳过四个初始化账号；只有 `XMT_BOOTSTRAP_SEED_USERS=true` 才播种，所有新建引导账号都使用 32 字节随机密码并强制首次改密。生产显式引导时凭据只在首次创建时记录一次；开发环境仅在交互终端显示新生成凭据，非交互测试不会泄露。移除 API 与 smoke/verify 脚本中的公开默认口令；脚本有现成 `TOKEN` 时仍可直接使用，无令牌而需登录时才要求 `SMOKE_PASSWORD`。CI 已纳入两项安全合同测试。此改动阻止未来重新播种默认账号，未检查或轮换既有生产账号。
+- **P0-1 修复**：为 41 个 API 路由模块的 43 个 Router 构造点增加 Express 4 兼容包装，向统一错误中间件转发同步异常及 rejected Promise；安全错误响应返回 `INTERNAL_ERROR`，结构化日志不记录错误正文、SQL、token 或非 UUID 请求 ID。未处理拒绝先将 `/api/health` 降为 503，再有序关闭 Socket.IO、HTTP listener、定时任务与数据库句柄，并以 `exitCode=1` 结束；关停超时会强制关闭连接。SIGINT/SIGTERM 走相同受控关闭；仅 `uncaughtException` 保留 `process.exit(1)`。
+- **隔离验证**：`npm run test:process-errors` 覆盖同步 throw、async rejection、返回 Promise 的 rejection、嵌套数组/链式路由注册、服务 readiness 降级、真实 app 关停、SIGTERM 和超时强制关闭；`npm run test:error-response-sanitization-http` 增加真实 app 异步错误请求，验证返回 500 / `INTERNAL_ERROR` 且不泄露 SQL 或参数。新进程合同已加入核心 CI。Creator Agent 的 `npm run test:creator-agent:binding` 与 `npm run test:creator-agent-replay-security` 通过；Creator Sync 的 `npm run test:official-export-v2`、`npm run test:creator-sync-v2102`、`npm run test:creator-sync-single-flight` 和 replay security 通过，时间合同核验同一官方批次更新时间一致、完成任务与活动时间一致、过期租约写入北京时间。P1-1 本轮的 `npm run test:time`、`test:resource-categories`、`test:resource-center-mutations`、`test:resource-create-atomic`、`test:workflow-script-source`、`test:creator-sync-v2102`、`test:creator-sync-single-flight`、`test:official-export-v2`、`test:achievements-check` 全部通过。过程中还修复请求观测器在响应结束回调读取已复原 `req.baseUrl` 导致的异常。`npm run check -- --pretty false`、定向 ESLint（0 errors，保留既存 warnings）、版本/更新说明治理、Android runtime 合同、测试入口（331 个）、`npm run build` 和 `git diff --check` 通过。构建保留既存 >500 kB chunk 提示。`npm run test:daily-reports` 因未提供 `TOKEN` / `API_BASE_URL` 只显示环境要求，未执行冒烟请求。测试使用隔离/临时数据库；未访问或写入真实数据库，无 schema migration、权限或真实业务数据变化。
+- **版本与交付边界**：工程与 Android 元数据为 v10.1.63 / 100163，未构建 APK。仅本地修改，未提交、推送或部署。
+- **审计后续**：P0-1/2/3 的代码与合同均已本地完成、尚未部署；P0-2 既有生产引导账号未检查或轮换。P0-3 生产令牌数量与旧密钥来源尚未通过真实运行环境 dry-run 核实；legacy `douyin_tokens` 未使用明文表的保留策略也待确认。部署后仍需确认 PM2 会在进程受控非零退出后自动拉起，并观察真实 Redis/Socket.IO 客户端的断连行为。
+- **P1-1 性能验收**：新增 `npm run bench:sql-time`，在一次性 SQLite 文件中重放旧 SQL 时钟重写与显式绑定两条路径；每轮每条路径执行 1,000 条语句（500 次插入 + 500 次读取），先预热后交替执行 5 轮。两次独立运行的中位数分别为旧路径 40.59–51.04 ms、显式绑定 26.35–36.44 ms，差值 28.61%–35.09%；这是隔离基准的微观结果，不代表生产请求延迟或吞吐提升。基准仅使用自动创建并删除的临时数据库。
+- **P1-5 试点**：新增 Vitest 5.1.0 配置，将时间、编辑器、资料中心、平台展示、协作展示、首页、可访问性和日志共 187 个合同测试归并到 48 个文件；原细分 npm 命令保留为兼容入口。CI fast-gate 用 test:vitest-pilot 聚合运行，移除三条重复的旧单测命令。全量迁移、覆盖率统计和 CI 收敛尚未完成。
+- **审计报告对齐**：审计报告基线为 318 个 test/smoke 入口、68 个 CI 执行脚本；当前工作区为 333 个 test:、30 个 smoke: 入口，CI 直接引用 77 个不同 npm 入口，Vitest 试点实际执行 48 个测试文件、187 个用例。复合脚本、浏览器测试和服务依赖仍需逐项展开核对，不能用入口数直接代替用例覆盖率。
+- **剩余工作**：P1-1 代码与本地性能验收已完成；P1-5 继续按兼容试点、逐批迁移、扩展 CI 的顺序推进，再处理 P1-8/P1-3。P0-2 既有生产引导账号检查/轮换，以及 P0-3 生产密钥设置、真实数据库 dry-run/apply 与旧明文表处置，仍是部署前人工运维事项。
+
+## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，本地）
+
+- **改造范围**：资料分类管理、新建、编辑三个弹窗的分类名称、上级分类、标题、分类、可见范围、摘要、正文输入均补齐 `:focus-visible` 的 2px Studio 主色轮廓与 2px offset。沿用 `studio-primary` 令牌；无 API、权限、数据库结构或业务数据变化。
+- **浏览器回归**：Playwright MCP 在隔离的内存 API 夹具中实际 Tab 导航三个弹窗共 12 个字段焦点路径。每个字段均匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio primary；未提交表单或写入真实数据。仓库浏览器脚本 `npx tsx tests/browser/resource-category-management.spec.ts` 在启动 Chromium 时遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入自动断言；不计为自动套件通过。
+- **工程门禁**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。Android 元数据为 10.1.62 / 100162，未构建 APK；本地未提交、推送或部署。
+- **下一步**：继续核对清单中其他未完成的 B4/B5 键盘、响应式与主题问题；安卓端仍按用户要求后置。
+
+## 2026-10-31 清单 B8：创作评审线程列表刷新防缓存（v10.1.61，已部署）
+
+- **改造范围**：创作评审面板在创建批注、回复或处理状态后刷新线程列表；该列表 GET 原先依赖默认浏览器缓存。现在客户端 `getProductionReviewThreads` 使用 `cache: no-store`，服务端在 `authenticate` 前使用统一 `noStoreResponse`，让 401/403/404/200 响应都不被缓存。既有 `canAccessTopic` 权限范围和版本有效性检查保持原样；无载荷、数据库结构或真实业务数据变化。
+- **回归结果**：完整 `npm run test:recovery-status-cache` 通过；客户端合同确认绕过缓存，隔离 SQLite HTTP 合同确认 401/403/404/200 均带 `Cache-Control: no-store`。合并提交的 CI 六项检查全部通过。
+- **部署核验**：PR [#107](https://github.com/li94930148/xmt/pull/107) 已合并部署，精确 SHA `7c416390557beac2423ec948be1e4470493a4a54`。部署前在线备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261102-084057-3862149.db` 与 Restore Drill 通过，迁移检查 GO；部署后 PM2 v10.1.61 在线、Caddy active、运行配置与内部路由暴露检查通过，SQLite `quick_check` 为 `ok`、外键违规为 0，公网 API 健康且首页/前端资源返回 200。Playwright MCP 打开线上登录页无控制台错误。
+- **版本与交付边界**：Android 元数据为 10.1.61 / 100161；CI Debug APK 构建通过，但未签名或发布 APK。
+
+## 2026-10-31 清单 B4/B8：复盘焦点、关联资料恢复读取与排行榜合同（v10.1.60，已部署）
+
+- **改造范围**：复盘行动项“处理结果”输入框不再压制全局 `:focus-visible`；键盘在状态选择框按 Tab 后，处理结果文本框恢复 2px、2px offset 的 Studio 主色焦点环。选题关联资料增加专用 `getTopicResourcesForRecovery`，只替换关联/解除结果核实和刷新后的恢复读取；普通面板和移动页读取保持原请求方式。服务端在认证前禁止关联资料 GET 缓存，避免 401/403/404/200 任一响应被缓存。排行榜查询移除现有 `users` 表不存在的 `avatar` 列，并验证当前账号积分结果。
+- **回归与数据边界**：`test:recovery-status-cache-client`、`test:content-topic-assets` 与 `test:achievements-check` 通过；临时 SQLite HTTP 合同覆盖资料读取 401/403/404/200 和原资源权限范围。未修改权限、API 载荷、数据库结构、关联/解除事务或真实业务数据。
+- **浏览器与工程门禁**：Playwright MCP 手工键盘核验覆盖 320px 浅色及 1440px 深色视口，焦点环可见。仓库 Playwright 自动套件在 Chromium 启动前被 macOS `bootstrap_check_in ... Permission denied (1100)` 阻断，未进入断言。版本治理、类型检查、全仓 lint、生产构建、生产依赖高危审计与差异检查通过；CI 六项检查通过。Android Debug APK CI 构建通过，未签名、发布或设备验收。
+- **发布核验**：PR [#106](https://github.com/li94930148/xmt/pull/106) 已合并部署，精确 SHA `9ad9a000ee6dc95591e72aa89a6b3d4e8414621b`。部署前 SQLite 备份与 Restore Drill 通过，69 个迁移就绪；部署后 PM2 v10.1.60 在线、Caddy active、数据库健康、内部路由暴露检查通过，公网 API 健康且首页返回 200。授权/灰度开关均关闭。
+
+## 2026-10-31 清单 B8：创作者报告列表恢复读取防缓存（v10.1.59，已部署）
+
+- **发现与改造**：生成报告后，页面依赖 `GET /api/creator-agent/reports` 核对列表；该请求原来没有显式绕过客户端缓存，服务端也未为认证和权限失败等响应统一设置 `Cache-Control: no-store`。现将客户端与服务端读取都设为禁止缓存，服务端中间件位于认证之前，覆盖未登录、无权限、无同步账号和正常列表响应。
+- **回归与数据边界**：`npm run test:recovery-status-cache-client` 与 `npm run test:creator-reports-cache-http` 通过。HTTP 合同使用临时 SQLite 数据库覆盖 401、403、404、200 响应；客户端合同逐条核对该列表请求使用 `cache: no-store`。新 HTTP 合同加入 `test:recovery-status-cache`，而该任务由 `core-security-contract` CI 执行。未访问或修改真实业务数据；报告字段、权限规则、写入逻辑和数据模型不变。
+- **版本与工程门禁**：`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（737 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（327 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint -- --quiet`、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.59 / 100159，未构建 APK。
+- **合并与部署**：PR [#105](https://github.com/li94930148/xmt/pull/105) 已合并部署，精确 SHA `b898d03209a7fa9371b20c00212fb55c9cdcf28f`。主分支 CI 六项检查全部通过；生产在线备份及 Restore Drill PASS，迁移检查 GO，PM2/Caddy/API 健康和 SQLite 完整性核验通过，详情见 PR 与发布记录。
+- **后续方向**：继续盘点 B8 其他写入恢复闭环，并推进 B4/B5 全站主题、响应式、键盘和辅助技术验收；依赖可信业务数据的问题不自行假设，Android 原生专项仍按用户要求后置。
+
+## 2026-10-31 清单 B8：灵感写入恢复读取防缓存（v10.1.58）
+
+- **发现与改造**：点赞结果回退核实、转选题结果核实/刷新恢复、评论结果核实/刷新恢复共六处仍复用普通灵感详情请求。服务端详情已禁止缓存，但客户端没有明确声明恢复读取绕过浏览器缓存。新增专用 `getInspirationDetailForRecovery`，六处结果恢复全部切换到 `cache: no-store`；正常打开详情仍使用原请求方式。
+- **回归与数据边界**：恢复状态客户端合同扩至 38 条读取路径；除了逐条检查 `RequestInit.cache`，还检查六处灵感恢复分支使用专用入口，并断言普通详情请求不改变。`npm run test:recovery-status-cache` 通过；隔离 HTTP/API 测试使用临时数据库，没有访问或修改真实业务数据。API 载荷、权限、事务、幂等键和数据模型保持不变。
+- **版本与工程门禁**：`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（735 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（326 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint -- --quiet` 与 `npm run build` 均通过；生产构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.58 / 100158，未构建 APK。
+- **浏览器验收限制**：`npm run test:inspiration-theme-contrast-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段失败，未进入断言；不计为自动浏览器通过。无浏览器页面截图或交互结果可作为本项验收证据。
+- **发布状态**：v10.1.58 已由 PR [#104](https://github.com/li94930148/xmt/pull/104) 合并并部署，目标 SHA `d67919c1dea2095e9dd1ac8a366fb6ce3cf37c09`；本节记录的浏览器自动化限制仍适用。
+- **后续方向**：继续盘点并补齐 B8 其他写入结果恢复路径，同时推进 B4/B5 全站主题、响应式、键盘及辅助技术验收；依赖可信业务数据的问题不自行假设，Android 原生专项仍按用户要求后置。
+
+## 2026-10-31 清单 B8：删除、完成与更新结果核实防缓存（v10.1.56，本地）
+
+- **发现与改造**：选题/灵感删除、拍摄删除/完成、发布删除/更新的恢复状态读取复用了普通详情 GET，客户端没有明确绕过浏览器缓存，服务端响应也没有统一禁止缓存。现在这些客户端恢复读取设置 `cache: no-store`；服务端旧版与 v1 选题详情、灵感详情、拍摄详情和发布详情在认证前设置 `Cache-Control: no-store`。选题普通详情读取仍可使用原行为，只有恢复状态调用显式绕过客户端缓存。
+- **回归与数据边界**：`npm run test:recovery-status-cache` 已通过。隔离 API 回归检查旧版/v1 选题详情、灵感详情和拍摄/发布详情的成功、未找到及未登录响应；客户端合同覆盖 37 条恢复读取路径，逐一确认请求使用 `cache: no-store`，同时确认普通详情请求保持原有缓存行为。测试使用临时数据库，没有访问或修改真实业务数据；现有角色范围和发布结果对比语义保持不变。
+- **版本与工程门禁**：Android 元数据为 10.1.56 / 100156，未构建 APK。`npm run test:recovery-status-cache`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（734 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（326 个测试入口）、`npm run check -- --pretty false`、全仓 `npm run lint -- --quiet`、`npm run build` 与 `git diff --check` 均通过。构建保留已有超过 500 kB 的分包提示。
+- **发布状态（后续核对）**：GitHub `main` 已由 PR [#103](https://github.com/li94930148/xmt/pull/103) 更新并部署至 v10.1.57，目标 SHA 为 `94bde476d1eb73f80b34584b8afb07b92013a35f`；此后的本地恢复合同扩展按 v10.1.58 继续，未作为整体推送或部署。
+- **后续方向**：继续 B8 其他写入恢复路径与 B4/B5 全站主题、响应式、键盘及辅助技术验收；需要可信业务指标或外部数据的判断不自行设定，Android 原生专项仍按用户要求后置。
+
+## 2026-10-31 清单 B8：跨模块写入结果恢复状态防缓存（v10.1.55，本地）
+
+- **发现与改造**：灵感创建/投票、复盘创建/更新/行动项创建与更新、成员创建/更新/删除、创作创建、拍摄创建及发布创建的恢复状态读取，原先有的响应可能在认证失败时缺少防缓存头，或客户端没有绕过浏览器缓存。现在服务端状态路由在身份验证前设置 `Cache-Control: no-store`，客户端 12 个状态读取入口均使用 `cache: no-store`。
+- **回归与数据边界**：`npm run test:recovery-status-cache` 通过；隔离 HTTP 测试覆盖成功、无记录/越权隐藏、非法请求、未登录、权限撤销后读回和已删除墓碑响应，客户端合同逐个核验 12 个恢复读取函数的 `RequestInit.cache`。新合同加入 `core-security-contract` CI。所有服务端测试使用临时 SQLite 数据库；未访问或写入本机/生产真实业务数据。
+- **版本与工程门禁**：Android 元数据同步为 10.1.55 / 100155。`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（733 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（323 个测试文件）、`npm run check -- --pretty false`、全仓 `npm run lint`（0 errors / 283 warnings）、`npm run build` 与 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。
+- **范围、发布状态与下一步**：没有 API 载荷、权限规则、数据库结构或真实业务数据变化；未构建 APK。v10.1.55 仅为本地未提交改造，未推送或部署。继续 B8 全量恢复/回执路径审查，并推进 B4/B5 全站主题、响应式和辅助技术验收；Android 原生专项仍按用户要求后置。等待可信业务口径或外部数据的问题继续保留为明确边界，不自行猜测。
 
 ## 2026-10-31 清单 B8：日历创建结果核实防缓存（v10.1.54）
 

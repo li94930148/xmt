@@ -1,10 +1,10 @@
-﻿import { Router } from 'express';
-import { authenticate } from '../middleware/auth';
+﻿import { authenticate } from '../middleware/auth';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
-import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { createAsyncRouter } from '../middleware/async-router';
+import { beijingNow, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { assertAssignableRoles, assertPermissionsWithinActorCeiling, getRolesByIds } from '../services/role-assignment.service.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 function uniquePositiveIds(value: unknown): number[] | null {
   if (!Array.isArray(value)) return null;
@@ -98,7 +98,7 @@ router.post('/user/:userId', authenticate, requirePermission('system:role'), asy
         await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, roleId]);
       }
 
-      await tx.execute(`UPDATE users SET role = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [primaryRole.code, userId]);
+      await tx.execute(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`, [primaryRole.code, beijingNow(), userId]);
     });
 
     clearPermissionCache(Number(userId));
@@ -182,7 +182,7 @@ router.put('/:id', authenticate, requirePermission('system:role'), async (req, r
     }
 
     await runInTransaction(async (tx) => {
-      if (name) await tx.execute(`UPDATE roles SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [name, description || '', roleId]);
+      if (name) await tx.execute(`UPDATE roles SET name = ?, description = ?, updated_at = ? WHERE id = ?`, [name, description || '', beijingNow(), roleId]);
       if (permissionIds) {
         await tx.execute(`DELETE FROM role_permissions WHERE role_id = ?`, [roleId]);
         for (const permId of permissionIds) await tx.execute(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, [roleId, permId]);

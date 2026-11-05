@@ -1,8 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Megaphone } from 'lucide-react';
 import { getAnnouncements, type Announcement } from '@/api/announcements';
-import { ActionButton } from '@/components/studio';
-import { formatBeijingDate } from '@/lib/utils';
+import { formatBeijingDate } from '@/lib/dateFormat';
 
 const AnnouncementBoard = lazy(() => import('@/components/AnnouncementBoard'));
 
@@ -50,9 +49,10 @@ export default function AnnouncementStrip({ embedded = false }: { embedded?: boo
               </p>
             ) : <p className="text-sm text-studio-text-secondary">暂无公告</p>}
           </div>
-          {loadError ? <ActionButton variant="ghost" disabled={loading} onClick={() => void reload()}>{loading ? '正在重试…' : '重试'}</ActionButton> : null}
-          <ActionButton
-            variant="ghost"
+          {loadError ? <button type="button" className="xmt-btn xmt-btn-ghost focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary" disabled={loading} onClick={() => void reload()}>{loading ? '正在重试…' : '重试'}</button> : null}
+          <button
+            type="button"
+            className="xmt-btn xmt-btn-ghost focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary"
             aria-expanded={expanded}
             aria-controls="home-announcement-board"
             onClick={() => {
@@ -61,7 +61,7 @@ export default function AnnouncementStrip({ embedded = false }: { embedded?: boo
             }}
           >
             {expanded ? '收起公告板' : '查看公告'}
-          </ActionButton>
+          </button>
         </section>
         {expanded ? (
           <div id="home-announcement-board" className="mt-3">

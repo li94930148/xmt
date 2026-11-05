@@ -86,6 +86,10 @@ async function countActivity(action: string, detailLike: string) {
   ))?.count || 0);
 }
 
+function assertNoStore(response: Response, context: string) {
+  assert.equal(response.headers.get('Cache-Control'), 'no-store', `${context} must not be cached`);
+}
+
 try {
   await execute(`
     CREATE TRIGGER reject_user_create_audit
@@ -138,9 +142,11 @@ try {
 
   const confirmedCreateStatus = await fetch(`${base}/create-requests/${createReplayRequestId}`, { headers });
   assert.equal(confirmedCreateStatus.status, 200);
+  assertNoStore(confirmedCreateStatus, 'confirmed user-create status');
   assert.deepEqual(await confirmedCreateStatus.json(), { state: 'created', userId: Number(createdForReplay?.id) });
   const hiddenCreateStatus = await fetch(`${base}/create-requests/${createReplayRequestId}`, { headers: otherAdminHeaders });
   assert.equal(hiddenCreateStatus.status, 200);
+  assertNoStore(hiddenCreateStatus, 'owner-scoped user-create not-found status');
   assert.deepEqual(await hiddenCreateStatus.json(), { state: 'not_found' }, 'a different creator cannot discover another actor\'s request result');
   const adminRole = await queryOne<{ id: number }>(`SELECT id FROM roles WHERE code='admin'`);
   const userCreatePermission = await queryOne<{ id: number }>(`SELECT id FROM permissions WHERE code='user:create'`);
@@ -149,6 +155,7 @@ try {
   clearPermissionCache();
   const createStatusWithoutWritePermission = await fetch(`${base}/create-requests/${createReplayRequestId}`, { headers });
   assert.equal(createStatusWithoutWritePermission.status, 200, 'the original creator can perform read-only recovery after user:create is revoked');
+  assertNoStore(createStatusWithoutWritePermission, 'user-create status after permission revocation');
   assert.deepEqual(await createStatusWithoutWritePermission.json(), { state: 'created', userId: Number(createdForReplay?.id) });
   const deniedCreateAfterRevocation = await createUser('user-audit-create-after-revocation');
   assert.equal(deniedCreateAfterRevocation.status, 403, 'removing user:create still blocks new user creation');
@@ -159,9 +166,14 @@ try {
   clearPermissionCache();
   const missingCreateStatus = await fetch(`${base}/create-requests/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`, { headers });
   assert.equal(missingCreateStatus.status, 200);
+  assertNoStore(missingCreateStatus, 'missing user-create status');
   assert.deepEqual(await missingCreateStatus.json(), { state: 'not_found' });
   const invalidCreateStatus = await fetch(`${base}/create-requests/not-a-request-id`, { headers });
   assert.equal(invalidCreateStatus.status, 400, 'malformed request ids are rejected');
+  assertNoStore(invalidCreateStatus, 'invalid user-create status');
+  const unauthenticatedCreateStatus = await fetch(`${base}/create-requests/${createReplayRequestId}`);
+  assert.equal(unauthenticatedCreateStatus.status, 401, 'create status still requires authentication');
+  assertNoStore(unauthenticatedCreateStatus, 'unauthenticated user-create status');
 
   const replayedCreate = await fetch(base, {
     method: 'POST', headers, body: JSON.stringify(createReplayBody),
@@ -234,20 +246,26 @@ try {
   assert.equal(committedButUnconfirmedUpdate.status, 503, 'simulate a response loss after the update transaction has committed');
   const confirmedUpdateStatus = await fetch(`${base}/update-requests/${replayRequestId}/${targetId}`, { headers });
   assert.equal(confirmedUpdateStatus.status, 200);
+  assertNoStore(confirmedUpdateStatus, 'confirmed user-update status');
   assert.deepEqual(await confirmedUpdateStatus.json(), { state: 'updated' }, 'the request actor can verify the committed update without reading profile data');
   const hiddenUpdateStatus = await fetch(`${base}/update-requests/${replayRequestId}/${targetId}`, { headers: otherAdminHeaders });
   assert.equal(hiddenUpdateStatus.status, 200);
+  assertNoStore(hiddenUpdateStatus, 'actor-scoped user-update not-found status');
   assert.deepEqual(await hiddenUpdateStatus.json(), { state: 'not_found' }, 'a different actor cannot discover another actor update');
   const wrongTargetUpdateStatus = await fetch(`${base}/update-requests/${replayRequestId}/${otherAdminId}`, { headers });
   assert.equal(wrongTargetUpdateStatus.status, 200);
+  assertNoStore(wrongTargetUpdateStatus, 'wrong-target user-update not-found status');
   assert.deepEqual(await wrongTargetUpdateStatus.json(), { state: 'not_found' }, 'a mismatched target is indistinguishable from a missing request');
   const missingUpdateStatus = await fetch(`${base}/update-requests/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${targetId}`, { headers });
   assert.equal(missingUpdateStatus.status, 200);
+  assertNoStore(missingUpdateStatus, 'missing user-update status');
   assert.deepEqual(await missingUpdateStatus.json(), { state: 'not_found' });
   const malformedUpdateStatus = await fetch(`${base}/update-requests/not-a-request-id/${targetId}`, { headers });
   assert.equal(malformedUpdateStatus.status, 400, 'malformed update request ids are rejected');
+  assertNoStore(malformedUpdateStatus, 'invalid user-update status');
   const unauthenticatedUpdateStatus = await fetch(`${base}/update-requests/${replayRequestId}/${targetId}`);
   assert.equal(unauthenticatedUpdateStatus.status, 401, 'update status still requires authentication');
+  assertNoStore(unauthenticatedUpdateStatus, 'unauthenticated user-update status');
 
   const statusOnlyActorId = await executeInsert(
     'INSERT INTO users(username,password,email,role,name,enabled,force_change_password) VALUES(?,?,?,?,?,1,0)',
@@ -263,6 +281,7 @@ try {
   const statusOnlyHeaders = { Authorization: `Bearer ${signToken({ userId: statusOnlyActorId })}` };
   const statusWithoutUpdatePermission = await fetch(`${base}/update-requests/${statusOnlyRequestId}/${targetId}`, { headers: statusOnlyHeaders });
   assert.equal(statusWithoutUpdatePermission.status, 200, 'an authenticated actor can recover their own request after losing user:update');
+  assertNoStore(statusWithoutUpdatePermission, 'user-update status after permission loss');
   assert.deepEqual(await statusWithoutUpdatePermission.json(), { state: 'updated' });
 
   const selfDisable = await fetch(`${base}/${adminId}`, {
@@ -344,20 +363,26 @@ try {
 
   const confirmedDeleteStatus = await fetch(`${base}/delete-requests/${deleteReplayRequestId}/${deleteReplayTargetId}`, { headers });
   assert.equal(confirmedDeleteStatus.status, 200);
+  assertNoStore(confirmedDeleteStatus, 'confirmed user-delete status');
   assert.deepEqual(await confirmedDeleteStatus.json(), { state: 'deleted' }, 'the original actor can verify deletion after its target is gone');
   const hiddenDeleteStatus = await fetch(`${base}/delete-requests/${deleteReplayRequestId}/${deleteReplayTargetId}`, { headers: otherAdminHeaders });
   assert.equal(hiddenDeleteStatus.status, 200);
+  assertNoStore(hiddenDeleteStatus, 'actor-scoped user-delete not-found status');
   assert.deepEqual(await hiddenDeleteStatus.json(), { state: 'not_found' }, 'another actor cannot discover a delete request');
   const wrongTargetDeleteStatus = await fetch(`${base}/delete-requests/${deleteReplayRequestId}/${targetId}`, { headers });
   assert.equal(wrongTargetDeleteStatus.status, 200);
+  assertNoStore(wrongTargetDeleteStatus, 'wrong-target user-delete not-found status');
   assert.deepEqual(await wrongTargetDeleteStatus.json(), { state: 'not_found' }, 'a mismatched target is indistinguishable from a missing delete request');
   const missingDeleteStatus = await fetch(`${base}/delete-requests/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${deleteReplayTargetId}`, { headers });
   assert.equal(missingDeleteStatus.status, 200);
+  assertNoStore(missingDeleteStatus, 'missing user-delete status');
   assert.deepEqual(await missingDeleteStatus.json(), { state: 'not_found' });
   const malformedDeleteStatus = await fetch(`${base}/delete-requests/not-a-request-id/${deleteReplayTargetId}`, { headers });
   assert.equal(malformedDeleteStatus.status, 400, 'malformed delete request ids are rejected');
+  assertNoStore(malformedDeleteStatus, 'invalid user-delete status');
   const unauthenticatedDeleteStatus = await fetch(`${base}/delete-requests/${deleteReplayRequestId}/${deleteReplayTargetId}`);
   assert.equal(unauthenticatedDeleteStatus.status, 401, 'delete status requires authentication');
+  assertNoStore(unauthenticatedDeleteStatus, 'unauthenticated user-delete status');
 
   const replayedDelete = await fetch(`${base}/${deleteReplayTargetId}`, {
     method: 'DELETE', headers, body: JSON.stringify({ client_request_id: deleteReplayRequestId }),
@@ -374,6 +399,7 @@ try {
   clearPermissionCache();
   const deleteStatusAfterPermissionLoss = await fetch(`${base}/delete-requests/${deleteReplayRequestId}/${deleteReplayTargetId}`, { headers });
   assert.equal(deleteStatusAfterPermissionLoss.status, 200, 'status recovery remains available after delete permission is removed');
+  assertNoStore(deleteStatusAfterPermissionLoss, 'user-delete status after permission loss');
   assert.deepEqual(await deleteStatusAfterPermissionLoss.json(), { state: 'deleted' });
 
   assert.equal((await queryOne<{ quick_check: string }>('PRAGMA quick_check'))?.quick_check, 'ok');

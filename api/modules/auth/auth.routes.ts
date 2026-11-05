@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAsyncRouter } from '../../middleware/async-router';
 import { loginAccountLimiter, loginIpLimiter, logFailedLogin } from '../../middleware/rateLimit.js';
 import { authenticate } from '../../middleware/auth.js';
 import { passwordChangeLimiter } from '../../middleware/rateLimit.js';
@@ -7,7 +8,7 @@ import type { AuthController } from './auth.controller.js';
 type LegacyAuthHandlers = Pick<AuthController, 'login' | 'logout' | 'getMe' | 'changePassword' | 'updateProfile'>;
 
 export function createLegacyAuthRouter(controller: LegacyAuthHandlers) {
-  const router = express.Router();
+  const router = createAsyncRouter();
   router.post('/login', loginIpLimiter, loginAccountLimiter, logFailedLogin, controller.login);
   router.post('/logout', authenticate, controller.logout);
   router.get('/me', authenticate, controller.getMe);

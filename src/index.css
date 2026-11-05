@@ -125,8 +125,24 @@
   animation: slide-in 0.28s var(--xmt-ease-out);
 }
 
+@keyframes xmt-page-enter {
+  from {
+    opacity: 1;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.xmt-page-enter {
+  animation: xmt-page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-slide-in {
+  .animate-slide-in,
+  .xmt-page-enter {
     animation: none;
   }
 }

@@ -124,6 +124,22 @@ const outsiderHeaders = { Authorization: `Bearer ${signToken({ userId: outsiderI
 
 try {
   const topicResourceUrl = `http://127.0.0.1:${address.port}/api/topics/${topicId}/resources`;
+  const assertNoStore = (response: Response) => assert.match(response.headers.get('cache-control') || '', /no-store/i);
+  const unauthenticatedTopicResources = await fetch(topicResourceUrl);
+  assert.equal(unauthenticatedTopicResources.status, 401);
+  assertNoStore(unauthenticatedTopicResources);
+  const forbiddenTopicResources = await fetch(`http://127.0.0.1:${address.port}/api/topics/${hiddenTopicId}/resources`, { headers: ownerHeaders });
+  assert.equal(forbiddenTopicResources.status, 403, 'topic visibility remains enforced for resource links');
+  assertNoStore(forbiddenTopicResources);
+  const missingTopicResources = await fetch(`http://127.0.0.1:${address.port}/api/topics/999999/resources`, { headers: ownerHeaders });
+  assert.equal(missingTopicResources.status, 404, 'missing topics remain hidden behind the existing response');
+  assertNoStore(missingTopicResources);
+  const initialTopicResources = await fetch(topicResourceUrl, { headers: ownerHeaders });
+  assert.equal(initialTopicResources.status, 200);
+  assertNoStore(initialTopicResources);
+  const initialTopicResourceIds = ((await initialTopicResources.json() as { data: Array<{ id: number }> }).data)
+    .map((resource) => resource.id);
+  assert.deepEqual(initialTopicResourceIds, [directlyLinked], 'the cache contract keeps the existing visible resource scope');
   const topicMutationHeaders = { ...ownerHeaders, 'Content-Type': 'application/json' };
   await execute(`
     CREATE TRIGGER reject_topic_relation_add_audit

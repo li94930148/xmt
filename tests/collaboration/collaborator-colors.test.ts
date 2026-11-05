@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { COLLABORATOR_COLORS, getCollaboratorDisplayColors } from '../../src/collaboration/core/collaboratorColors';
 
 function parseHex(color: string) {

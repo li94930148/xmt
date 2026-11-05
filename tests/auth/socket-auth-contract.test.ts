@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { test } from 'vitest';
 import { SocketAuthError } from '../../api/modules/auth/socket/socket-auth.errors.js';
 import { SocketAuthService } from '../../api/modules/auth/socket/socket-auth.service.js';
 
+test('socket authentication contract', async () => {
 const future = Math.floor(Date.now() / 1000) + 600;
 const user = { id: 7, username: 'socket-user', name: 'Socket User', role: 'director', enabled: 1 };
 const session = {
@@ -71,4 +73,4 @@ const revokedService = new SocketAuthService({
 });
 await assert.rejects(() => revokedService.authenticate({ token: 'access-token', mode: 'v1-web' }), (error: unknown) => error instanceof SocketAuthError && error.code === 'SESSION_INACTIVE');
 
-console.log('Socket Auth contract tests passed');
+});

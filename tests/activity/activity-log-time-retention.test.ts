@@ -3,10 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
+import { test } from 'vitest';
 import { activityLogTimeRetentionMigration } from '../../api/database/migrations/012_activity_log_time_retention';
 import { activityLogCutoffTimestamp, serializeActivityLog } from '../../api/services/activity-log';
 import { formatBjtDatabase } from '../../shared/time';
 
+test('activity log time retention and serialization', async () => {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-activity-log-'));
 const dbPath = path.join(tempDir, 'activity-log.db');
@@ -79,3 +81,4 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 50));
   fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 }
+});

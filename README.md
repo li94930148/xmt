@@ -4,7 +4,7 @@
 
 XMT 将选题策划、内容创作、拍摄排期、发布执行、数据复盘、团队协作与权限管理整合到同一套系统中，帮助内容团队减少信息分散、流程断层和多人协作中的重复沟通。
 
-当前版本：**v10.1.54**
+当前版本：**v10.1.74**
 
 项目采用前后端同仓的全栈架构，当前主要面向内部生产环境使用，并持续向可复用、可扩展的内容协作平台演进。
 
@@ -369,6 +369,7 @@ curl http://127.0.0.1:3001/api/health
 | `HOST` | `127.0.0.1` | 后端监听地址 |
 | `PORT` | `3001` | 后端端口 |
 | `JWT_SECRET` | 随机长字符串 | JWT 签名密钥 |
+| `XMT_TOKEN_ENCRYPTION_KEY` | 32 字节随机值的 Base64 | 抖音 OAuth 令牌的独立 AES-256-GCM 密钥；生产启动必填，不得与 JWT 或抖音客户端密钥复用 |
 | `TRUST_PROXY` | `1` | 反向代理信任层级 |
 
 ### 数据库配置
@@ -440,7 +441,10 @@ DOUYIN_CLIENT_SECRET=
 DOUYIN_REDIRECT_URI=
 DOUYIN_WEBHOOK_SECRET=
 DOUYIN_SYNC_SCHEDULER_ENABLED=false
+XMT_TOKEN_ENCRYPTION_KEY=
 ```
+
+`XMT_TOKEN_ENCRYPTION_KEY` 必须独立生成：`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`。生产首次配置或轮换前，按 [生产运行配置](docs/PRODUCTION_RUNTIME_ENV.md) 的备份、dry-run、停服迁移和回滚步骤操作；迁移脚本默认只做 dry-run。
 
 具体变量名称和回调配置请以项目中的 `.env.example`、抖音相关服务代码和开放平台后台为准。
 
@@ -664,7 +668,7 @@ npm run lint
 npm run ops:ci-status -- <commit-sha>
 ```
 
-当前全仓 ESLint 仍有历史债务，`npm run lint` 暂未作为 CI 阻塞项。新增或修改的代码不应继续扩大 lint 问题。
+CI `fast-gate` 会执行 `npm run lint`。截至 2026-11-04，全仓 ESLint 为 0 errors、213 warnings；警告当前不阻断 CI。历史警告清理目标为每月减少至少 50 条，并在后续进度记录中使用同一全仓命令统计。新增或修改的代码应保持无 lint error，并避免增加 warning。
 
 ### UI / 设计系统改动
 
@@ -901,9 +905,9 @@ Authorization: Bearer YOUR_TOKEN
 4. 检查反向代理客户端 IP 配置
 5. 仅在开发环境适当调整限流阈值
 
-### `npm run build` 通过，但 `npm run lint` 失败
+### `npm run build` 通过，但 `npm run lint` 出现问题
 
-仓库可能存在历史 lint 债务。构建通过只代表类型检查和生产构建成功，不代表所有代码风格问题已解决。
+构建通过只代表类型检查和生产构建成功，不代表 lint 检查通过。当前全仓 lint 统计为 0 errors、213 warnings；只有 ESLint error 会使 `npm run lint` 以非零状态退出，warning 仍需按计划持续清理。
 
 新增代码应尽量保持 lint 通过，并逐步清理旧问题。
 

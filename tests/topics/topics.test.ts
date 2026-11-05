@@ -54,6 +54,7 @@ async function repositoryTests() {
   assert.equal(created?.title, 'Repository 创建');
   assert.equal(created?.status, 'pending');
   assert.ok(typeof created?.stage_entered_at === 'string' && created.stage_entered_at.length > 0, 'new topics record their first stage entry time');
+  assert.equal(created?.submitted_at, created?.stage_entered_at, 'topic creation binds one shared Beijing timestamp to submission and initial stage entry');
 
   const page = await repository.list({ page: 1, limit: 10, actorId: testUserId, viewAll: true, search: 'Repository' });
   assert.equal(page.total, 1);
@@ -442,6 +443,19 @@ async function apiTests() {
     assert.deepEqual(v1.data, legacy.data);
     assert.deepEqual(v1.meta, { ...legacy.pagination as object, requestId: (v1.meta as { requestId: string }).requestId });
     assert.equal(typeof (v1.meta as { requestId: string }).requestId, 'string');
+
+    const topicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}`, { headers });
+    assert.equal(topicDetailResponse.status, 200);
+    assert.equal(topicDetailResponse.headers.get('cache-control'), 'no-store', 'topic detail reads used for mutation recovery must not be cached');
+    const missingTopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/999999`, { headers });
+    assert.equal(missingTopicDetailResponse.status, 404);
+    assert.equal(missingTopicDetailResponse.headers.get('cache-control'), 'no-store');
+    const unauthenticatedTopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}`);
+    assert.equal(unauthenticatedTopicDetailResponse.status, 401);
+    assert.equal(unauthenticatedTopicDetailResponse.headers.get('cache-control'), 'no-store');
+    const v1TopicDetailResponse = await fetch(`http://127.0.0.1:${address.port}/api/v1/topics/${topicId}`, { headers });
+    assert.equal(v1TopicDetailResponse.status, 200);
+    assert.equal(v1TopicDetailResponse.headers.get('cache-control'), 'no-store');
 
     const creationStageResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics?status=creation`, { headers });
     assert.equal(creationStageResponse.status, 200, 'the content-flow creation-stage filter is accepted by the existing topic list API');

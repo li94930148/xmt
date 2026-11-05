@@ -283,7 +283,7 @@ export default function RetroActionTable({
                           ...current,
                           [action.id]: { ...draft, resultMd: event.target.value },
                         }))}
-                        className="min-h-20 w-full min-w-[220px] rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+                        className="min-h-20 w-full min-w-[220px] rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"
                         placeholder="处理结果"
                       />
                     ) : (

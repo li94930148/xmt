@@ -274,6 +274,45 @@ async function assertMinTouchHeight(locator: import('playwright').Locator, conte
   assert.ok(bounds.height >= 40, `${context} is ${bounds.height}px high; expected at least 40px`);
 }
 
+async function assertRetroCreateDialogControls(page: import('playwright').Page, context: string) {
+  const fields = [
+    ['标题', page.getByLabel('标题', { exact: true })],
+    ['类型', page.getByLabel('类型', { exact: true })],
+    ['模板', page.getByLabel('模板', { exact: true })],
+    ['复盘范围', page.getByLabel('复盘范围', { exact: true })],
+    ['负责人', page.getByLabel('负责人', { exact: true })],
+    ['开始日期', page.getByLabel('开始日期', { exact: true })],
+    ['结束日期', page.getByLabel('结束日期', { exact: true })],
+  ] as const;
+
+  for (const [name, field] of fields) {
+    await assertMinTouchHeight(field, `${context} dialog field "${name}"`);
+    await field.focus();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    const focusState = await field.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        active: document.activeElement === element,
+        focusVisible: element.matches(':focus-visible'),
+        outlineWidth: style.outlineWidth,
+        outlineStyle: style.outlineStyle,
+        outlineOffset: style.outlineOffset,
+      };
+    });
+    assert.equal(focusState.active, true, `${context} keyboard navigation returns to "${name}"`);
+    assert.equal(focusState.focusVisible, true, `${context} "${name}" reports keyboard focus`);
+    assert.equal(focusState.outlineWidth, '2px', `${context} "${name}" keeps the Studio 2px focus ring`);
+    assert.equal(focusState.outlineStyle, 'solid', `${context} "${name}" focus ring is visible`);
+    assert.equal(focusState.outlineOffset, '2px', `${context} "${name}" focus ring has the Studio offset`);
+  }
+
+  await assertMinTouchHeight(page.getByRole('button', { name: '取消', exact: true }), `${context} cancel action`);
+  await assertMinTouchHeight(page.getByRole('button', { name: '创建复盘', exact: true }), `${context} submit action`);
+  const pageWidth = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+  assert.ok(pageWidth.scroll <= pageWidth.client, `${context} create dialog does not overflow horizontally`);
+}
+
 try {
   const errors: string[] = [];
   for (const theme of ['light', 'dark'] as const) {
@@ -521,6 +560,7 @@ try {
   await createPage.getByRole('heading', { name: '复盘中心' }).waitFor();
   await createPage.getByRole('button', { name: '新建复盘' }).click();
   const titleInput = createPage.getByLabel('标题');
+  await assertRetroCreateDialogControls(createPage, 'light/390px');
   const createTitle = '复盘创建失败保留与重复提交验收';
   await titleInput.fill(createTitle);
   await createPage.evaluate(async () => {
@@ -561,6 +601,20 @@ try {
   assert.equal(expectedCreate503, 0, 'all expected create failure responses are accounted for');
   assert.deepEqual(errors, [], 'retrospective create flow has no unexpected browser errors');
   await createPage.close();
+
+  for (const { width, height, theme } of [
+    { width: 1440, height: 960, theme: 'dark' },
+    { width: 320, height: 844, theme: 'dark' },
+  ]) {
+    const focusPage = await browser.newPage({ viewport: { width, height }, reducedMotion: 'reduce' });
+    focusPage.on('pageerror', (error) => errors.push(error.message));
+    focusPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    await focusPage.goto(`${base}/__qa?theme=${theme}`);
+    await focusPage.getByRole('heading', { name: '复盘中心' }).waitFor();
+    await focusPage.getByRole('button', { name: '新建复盘' }).click();
+    await assertRetroCreateDialogControls(focusPage, `${theme}/${width}px`);
+    await focusPage.close();
+  }
 
   retrospectiveCreateAttempts = 0;
   retrospectiveCreateCommits = 0;

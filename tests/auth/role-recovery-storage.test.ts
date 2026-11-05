@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { persistVerifiedRoleRecovery } from '../../src/pages/permission-management/roleRecoveryStorage.js';
 
 test('role recovery snapshot is saved and read back exactly', () => {

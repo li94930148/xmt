@@ -1,11 +1,12 @@
 import express from 'express';
+import { createAsyncRouter } from '../middleware/async-router';
 import { beijingNow, beijingToday, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { canAccessTopic, getTopicScopeById } from '../utils/access';
 import { getLegacyAnalyticsInventory, getPublishingMetricFacts, sumPublishingMetricFacts } from '../services/publishingMetrics';
 
-const router = express.Router();
+const router = createAsyncRouter();
 const ANALYTICS_METRIC_FIELDS = ['views', 'likes', 'shares', 'comments'] as const;
 
 function parseAnalyticsMetric(value: unknown): number | null {
@@ -115,9 +116,9 @@ router.get('/team', authenticate, requirePermission('analytics:view'), async (re
 
     const overdueTopics = await queryOne(
       `SELECT COUNT(*) as count FROM topics
-       WHERE deadline < datetime('now', '+8 hours') AND status != 'completed'
+       WHERE deadline < ? AND status != 'completed'
          AND strftime('%Y', created_at) = ? AND strftime('%m', created_at) = ?`,
-      [targetYear.toString(), targetMonth.toString().padStart(2, '0')]
+      [beijingNow(), targetYear.toString(), targetMonth.toString().padStart(2, '0')]
     );
 
     const avgDays = await queryOne(

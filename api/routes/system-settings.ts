@@ -1,11 +1,10 @@
-import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { createAsyncRouter } from '../middleware/async-router';
 import { requirePermission } from '../middleware/permissions';
-import { execute, queryOne, runInTransaction, type TransactionContext } from '../database/utils';
-import fs from 'fs';
-import path from 'path';
+import { beijingNow, execute, queryOne, runInTransaction, type TransactionContext } from '../database/utils';
+import { appVersion } from '../config/index.js';
 
-const router = Router();
+const router = createAsyncRouter();
 
 type LoginLayoutMode = 'style1' | 'style2' | 'style3';
 type ThemeMode = 'light' | 'dark';
@@ -31,10 +30,6 @@ type ManagedSystemSettings = {
 };
 
 const SETTINGS_META_KEY = 'system_settings';
-const packageJson = JSON.parse(
-  fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'),
-) as { version: string };
-const APP_VERSION = packageJson.version;
 
 const defaultSettings: ManagedSystemSettings = {
   system: {
@@ -123,13 +118,14 @@ async function loadSettings(transaction?: SettingsTransaction) {
 
 async function saveSettings(settings: ManagedSystemSettings, transaction?: SettingsTransaction) {
   const write = transaction ? transaction.execute.bind(transaction) : execute;
+  const now = beijingNow();
   await write(
     `INSERT INTO app_meta (key, value, created_at)
-     VALUES (?, ?, datetime('now', '+8 hours'))
+     VALUES (?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET
        value = excluded.value,
-       created_at = datetime('now', '+8 hours')`,
-    [SETTINGS_META_KEY, JSON.stringify(settings)],
+       created_at = excluded.created_at`,
+    [SETTINGS_META_KEY, JSON.stringify(settings), now],
   );
 }
 
@@ -143,7 +139,7 @@ router.get('/public', async (_req, res) => {
 
 router.get('/', authenticate, requirePermission('system:settings'), async (_req, res) => {
   try {
-    res.json({ ...(await loadSettings()), version: APP_VERSION });
+    res.json({ ...(await loadSettings()), version: appVersion });
   } catch {
     res.status(500).json({ message: '获取系统设置失败' });
   }
@@ -164,7 +160,7 @@ router.put('/', authenticate, requirePermission('system:settings'), async (req, 
       return merged;
     });
 
-    res.json({ ...next, version: APP_VERSION });
+    res.json({ ...next, version: appVersion });
   } catch {
     res.status(500).json({ message: '保存系统设置失败' });
   }

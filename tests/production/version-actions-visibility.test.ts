@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { describe, it } from 'vitest';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const source = fs.readFileSync(path.join(root, 'src/pages/ProductionDetail.tsx'), 'utf8');
@@ -66,10 +67,10 @@ function testNoViewportWidthGatingForActions() {
   assert.ok(!actionBlock.includes('matchMedia'), '操作按钮禁止依赖媒体查询 JS');
 }
 
-testVersionActionsNotHiddenByBreakpoint();
-testCoreActionsAlwaysMounted();
-testButtonsMayShrinkNotClip();
-testPermissionRulesPreserved();
-testNoViewportWidthGatingForActions();
-
-console.log('version-actions-visibility tests passed');
+describe('production version action visibility', () => {
+  it('does not hide the sidebar at a responsive breakpoint', testVersionActionsNotHiddenByBreakpoint);
+  it('keeps core actions mounted and allows them to wrap', testCoreActionsAlwaysMounted);
+  it('allows action buttons to shrink instead of clipping', testButtonsMayShrinkNotClip);
+  it('preserves server permission and version rules', testPermissionRulesPreserved);
+  it('does not gate actions on viewport width in JavaScript', testNoViewportWidthGatingForActions);
+});

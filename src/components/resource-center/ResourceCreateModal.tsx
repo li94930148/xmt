@@ -14,7 +14,7 @@ interface ResourceCreateModalProps {
   onCreated: (resource: { id: number; title: string; libraryType: LibraryType }) => void;
 }
 
-const inputClassName = 'w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active';
+const inputClassName = 'w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary';
 
 export default function ResourceCreateModal({ open, libraryType, categories, onClose, onCreated }: ResourceCreateModalProps) {
   const actorId = useAuthStore((state) => state.user?.id);

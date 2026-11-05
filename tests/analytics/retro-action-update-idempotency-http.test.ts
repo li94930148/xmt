@@ -139,16 +139,21 @@ try {
   assert.equal(actorIsolated.status, 200, 'the same UUID is isolated for another actor');
   assert.deepEqual((await requestStatus(actionId, key, secondActorHeaders)).body.data, { state: 'processed' });
   assert.deepEqual((await requestStatus(actionId, key, actorHeaders)).body.data, { state: 'processed' });
-  assert.deepEqual((await requestStatus(actionId, key, readerHeaders)).body.data, { state: 'not_found' }, 'another actor cannot discover the receipt');
+  const readerStatus = await requestStatus(actionId, key, readerHeaders);
+  assert.equal(readerStatus.response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(readerStatus.body.data, { state: 'not_found' }, 'another actor cannot discover the receipt');
   const priorActorReplay = await updateAction(actionId, actorHeaders, key, { ...payload, title: payload.title.trim() });
   assert.equal(priorActorReplay.status, 200, 'a later update by another actor does not change the original receipt fingerprint');
   assert.equal(Number((await auditCount(actionId))?.count), 2, 'actor-isolated replay does not add another audit for the original actor');
 
-  assert.deepEqual((await requestStatus(anotherActionId, key, actorHeaders)).body.data, { state: 'not_found' }, 'the same actor cannot discover a receipt for another action');
+  const anotherActionMissing = await requestStatus(anotherActionId, key, actorHeaders);
+  assert.equal(anotherActionMissing.response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(anotherActionMissing.body.data, { state: 'not_found' }, 'the same actor cannot discover a receipt for another action');
   const actionIsolated = await updateAction(anotherActionId, actorHeaders, key, { status: 'doing', resultMd: '另一行动项' });
   assert.equal(actionIsolated.status, 200, 'the same UUID is isolated for another action');
   assert.deepEqual((await requestStatus(anotherActionId, key, actorHeaders)).body.data, { state: 'processed' });
   const wrongActionStatus = await requestStatus(actionId, key, actorHeaders);
+  assert.equal(wrongActionStatus.response.headers.get('cache-control'), 'no-store');
   assert.deepEqual(wrongActionStatus.body.data, { state: 'processed' }, 'the original action receipt remains scoped to its action');
 
   const processedStatus = await requestStatus(actionId, key, actorHeaders);
@@ -158,6 +163,10 @@ try {
   assert.deepEqual((await requestStatus(actionId, 'ed1a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50', actorHeaders)).body.data, { state: 'not_found' });
   const unauthenticatedStatus = await fetch(`${baseUrl}/actions/${actionId}/update-requests/${key}`);
   assert.equal(unauthenticatedStatus.status, 401, 'request status still requires authentication');
+  assert.equal(unauthenticatedStatus.headers.get('cache-control'), 'no-store');
+  const invalidStatus = await requestStatus(actionId, 'not-a-uuid', actorHeaders);
+  assert.equal(invalidStatus.response.status, 400);
+  assert.equal(invalidStatus.response.headers.get('cache-control'), 'no-store');
 
   // A compare-and-set conflict is durably recorded so a refreshed client cannot replay stale input.
   const casKey = 'ce1a2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';

@@ -135,11 +135,15 @@
 - **审计报告对齐**：审计报告基线为 318 个 test/smoke 入口、68 个 CI 执行脚本；当前工作区为 333 个 test:、30 个 smoke: 入口，CI 直接引用 77 个不同 npm 入口，Vitest 试点实际执行 48 个测试文件、187 个用例。复合脚本、浏览器测试和服务依赖仍需逐项展开核对，不能用入口数直接代替用例覆盖率。
 - **剩余工作**：P1-1 代码与本地性能验收已完成；P1-5 继续按兼容试点、逐批迁移、扩展 CI 的顺序推进，再处理 P1-8/P1-3。P0-2 既有生产引导账号检查/轮换，以及 P0-3 生产密钥设置、真实数据库 dry-run/apply 与旧明文表处置，仍是部署前人工运维事项。
 
-## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，本地）
+## 2026-11-03 清单 B4/B5：登录与首次改密键盘焦点可见（v10.1.63）
+
+- 登录页三种布局及首次改密弹窗的账号、密码字段保留 Studio 主色 2px 焦点环和 2px 偏移；Playwright MCP 隔离夹具核对浅/深主题与键盘路径。自动浏览器回归因 macOS Chromium 启动权限错误 1100 未进入断言。该功能已并入后续 v10.1.74 工作树；v10.1.63 生产发布仍受令牌密钥与迁移前置条件限制。
+
+## 2026-11-02 清单 B4/B5：资料新建与编辑弹窗键盘焦点可见（v10.1.62，已部署）
 
 - **改造范围**：资料分类管理、新建、编辑三个弹窗的分类名称、上级分类、标题、分类、可见范围、摘要、正文输入均补齐 `:focus-visible` 的 2px Studio 主色轮廓与 2px offset。沿用 `studio-primary` 令牌；无 API、权限、数据库结构或业务数据变化。
 - **浏览器回归**：Playwright MCP 在隔离的内存 API 夹具中实际 Tab 导航三个弹窗共 12 个字段焦点路径。每个字段均匹配 `:focus-visible`，计算样式为 `solid`、2px、2px offset、Studio primary；未提交表单或写入真实数据。仓库浏览器脚本 `npx tsx tests/browser/resource-category-management.spec.ts` 在启动 Chromium 时遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入自动断言；不计为自动套件通过。
-- **工程门禁**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。Android 元数据为 10.1.62 / 100162，未构建 APK；本地未提交、推送或部署。
+- **工程门禁与部署**：`npm run version:check`、版本治理、更新说明治理（740 个版本）、Android runtime 合同、测试入口（327 个）、`npm run check -- --pretty false`、四个修改文件的 ESLint、`npm run build` 与 `git diff --check` 均通过。PR [#108](https://github.com/li94930148/xmt/pull/108) 已合并部署，精确 SHA `125abd2b823b4a8072dfd7ff8ffa801a4b04a35c`；CI 六项检查通过。Android 元数据为 10.1.62 / 100162，未构建或发布 APK。
 - **下一步**：继续核对清单中其他未完成的 B4/B5 键盘、响应式与主题问题；安卓端仍按用户要求后置。
 
 ## 2026-10-31 清单 B8：创作评审线程列表刷新防缓存（v10.1.61，已部署）

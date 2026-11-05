@@ -122,6 +122,7 @@ export const changelog: ChangelogEntry[] = [
       { type: 'security', description: '启动账号不再使用公开固定口令，首次创建时使用随机口令并要求修改。' },
       { type: 'security', description: '抖音 OAuth 令牌使用独立加密密钥；生产启动前校验密钥，并提供带 dry-run、备份门禁和事务回滚的存量迁移工具。' },
       { type: 'fix', description: 'Creator Agent 绑定、绑定结果确认和心跳共享操作时间，所有关联时间均按北京时间保存。' },
+      { type: 'improvement', description: '登录字段和首次改密字段显示 Studio 主题焦点环，增强键盘操作可见性。' },
     ],
   },
   {

@@ -35,6 +35,76 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install --yes redis-server
       - run: npm run test:ci
+      - run: npm run test:topics
+      - run: npm run test:topics-list-notify
+      - run: npm run test:user-api-error-copy
+      - run: npm run test:api-contract
+      - run: npm run test:production-materials
+      - run: npm run test:auth
+      - run: npm run test:rbac-invariant
+      - run: npm run test:auth-session-service
+      - run: npm run test:auth-v1
+      - run: npm run test:login-gateway
+      - run: npm run test:socket
+      - run: npm run test:socket-client-lifecycle
+      - run: npm run test:socket-coordinator
+      - run: npm run test:origin-policy
+      - run: npm run test:origin-cors
+      - run: npm run test:internal-access
+      - run: npm run test:runtime-env
+      - run: npm run test:production-bind
+      - run: npm run test:internal-exposure-gate
+      - run: npm run test:mobile-safe-draft
+      - run: npm run test:mobile-network
+      - run: npm run test:mobile-message-category
+      - run: npm run test:mobile-back-button
+      - run: npm run test:mobile-deep-link
+      - run: npm run test:mobile-device-registry
+      - run: npm run test:android-endpoint-contract
+      - run: npm run test:mobile-health-response-contract
+      - run: npm run test:daily-report-permissions
+      - run: npm run test:report-summaries
+      - run: npm run test:android-runtime
+      - run: npm run test:mobile-auth-runtime
+      - run: npm run test:native-auth-refresh-scheduler
+      - run: npm run test:native-auth-runtime-integration
+      - run: npm run test:mobile-production-gate
+      - run: npm run test:yjs-auth-recovery
+      - run: npm run test:collaboration-access
+      - run: npm run test:collaboration-socket-authorization
+      - run: npm run test:auth-readiness
+      - run: npm run test:deploy-safety
+      - run: npm run test:ops-ci-status
+      - run: npm run test:backup-lock
+      - run: npm run test:backup-inventory
+      - run: npm run test:backup-restore-drill
+      - run: npm run test:idempotency-receipt-inventory
+      - run: npm run test:calendar-permissions
+      - run: npm run test:recovery-status-cache
+      - run: npm run test:content-document
+      - run: npm run test:migration-readiness
+      - run: npm run test:version-governance
+      - run: npm run test:creator-sync-v2102
+      - run: npm run test:creator-unified-reports
+      - run: npm run test:creator-cover-url-integrity
+      - run: npm run test:canonical-works
+      - run: npm run test:creator-agent-replay-security
+      - run: npm run test:auth-web-cookie
+      - run: npm run test:auth-web-runtime
+      - run: npm run test:auth-socket-contract
+      - run: npm run test:auth-socket-bridge
+      - run: npm run test:socket-production-gate
+      - run: npm run test:creator-agent:binding
+      - run: npm run test:user-role-assignment-security
+      - run: npm run test:html-sanitization
+      - run: npm run test:yjs-invalid-update
+      - run: npm run test:douyin-webhook-security
+      - run: npm run test:user-session-revocation
+      - run: npm run test:auth-401-recovery
+      - run: npm run test:role-management-security
+      - run: npm run test:error-response-sanitization
+      - run: npm run test:error-response-sanitization-http
+      - run: npm run test:integrity
 
   android-debug-apk:
     runs-on: ubuntu-latest
